@@ -103,8 +103,9 @@ export default function Home() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 <label>
                   <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Expires in (minutes)</div>
-                  <input type="number" value={expiry} onChange={e => setExpiry(Math.max(1, Number(e.target.value)))}
-                    min={10} placeholder="e.g. 60" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
+                 <input type="number" value={expiry === 0 ? "" : expiry} onChange={e => setExpiry(e.target.value === "" ? 0 : Number(e.target.value))}
+                  onBlur={e => { if (Number(e.target.value) < 15) setExpiry(15); }}
+                  min={15} placeholder="e.g. 60" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
                 </label>
                 <label>
                   <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Max members</div>
