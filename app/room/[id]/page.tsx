@@ -109,12 +109,26 @@ export default function RoomPage() {
       setOnlineCount(onlineCount);
     });
 
-    socket.on("user_joined", ({ onlineCount }: { onlineCount: number }) => {
+    socket.on("user_joined", ({ alias, onlineCount }: { alias: string; onlineCount: number }) => {
       setOnlineCount(onlineCount);
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        alias: "system",
+        content: `${alias} joined the room`,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      }]);
     });
 
-    socket.on("user_left", ({ onlineCount }: { onlineCount: number }) => {
+    socket.on("user_left", ({ alias, onlineCount }: { alias: string; onlineCount: number }) => {
       setOnlineCount(onlineCount);
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        alias: "system",
+        content: `${alias} left the room`,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      }]);
     });
 
     socket.on("new_message", (msg: Message) => {
