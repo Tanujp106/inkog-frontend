@@ -98,7 +98,7 @@ export default function RoomPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const connectSocket = useCallback((token: string) => {
+  const connectSocket = useCallback((token: string, myAlias: string) => {
     const socket = io(SOCKET_URL, { transports: ["websocket"] });
     socketRef.current = socket;
 
@@ -108,6 +108,13 @@ export default function RoomPage() {
 
     socket.on("join_room_success", ({ onlineCount }: { onlineCount: number }) => {
       setOnlineCount(onlineCount);
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        alias: "system",
+        content: `You joined as ${myAlias}`,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      }]);
     });
 
     socket.on("user_joined", ({ alias, onlineCount }: { alias: string; onlineCount: number }) => {
@@ -223,7 +230,7 @@ export default function RoomPage() {
             setIsCreator(joinData.isCreator);
             await fetchHistory(joinData.anonToken);
             setStage("joined");
-            connectSocket(joinData.anonToken);
+            connectSocket(joinData.anonToken, joinData.alias);
           } catch (err: unknown) {
             const e = err as { status?: number; message?: string };
             if (e.status === 410) { setStage("expired"); return; }
@@ -248,7 +255,7 @@ export default function RoomPage() {
       setIsCreator(joinData.isCreator);
       await fetchHistory(joinData.anonToken);
       setStage("joined");
-      connectSocket(joinData.anonToken);
+      connectSocket(joinData.anonToken, joinData.alias);
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string };
       if (e.status === 403) setPasswordError("Incorrect password.");
