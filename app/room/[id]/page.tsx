@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 
@@ -98,7 +98,13 @@ export default function RoomPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const connectSocket = useCallback((token: string, myAlias: string) => {
+  const connectSocket = (token: string, myAlias: string) => {
+    // Disconnect any existing socket before creating a new one
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
+
     const socket = io(SOCKET_URL, { transports: ["websocket"] });
     socketRef.current = socket;
 
@@ -168,9 +174,9 @@ export default function RoomPage() {
     });
 
     return socket;
-  }, [roomId]);
+  };
 
-  const doJoin = useCallback(async (password?: string) => {
+  const doJoin = async (password?: string) => {
     const storedToken = localStorage.getItem(`token_${roomId}`) || undefined;
     const body: Record<string, unknown> = {};
     if (storedToken) body.anonToken = storedToken;
@@ -184,10 +190,10 @@ export default function RoomPage() {
     const data = await res.json();
     if (!res.ok) throw { status: res.status, message: data.message };
     return data;
-  }, [roomId]);
+  };
 
   // Fetch messages & polls after join
-  const fetchHistory = useCallback(async (token: string) => {
+  const fetchHistory = async (token: string) => {
     const [msgRes, pollRes] = await Promise.all([
       fetch(`${API}/rooms/${roomId}/messages?anonToken=${encodeURIComponent(token)}`),
       fetch(`${API}/rooms/${roomId}/polls?anonToken=${encodeURIComponent(token)}`),
@@ -200,18 +206,22 @@ export default function RoomPage() {
       const d = await pollRes.json();
       setPolls(d.polls || []);
     }
-  }, [roomId]);
+  };
 
-  // Initial load
+  // Initial load — runs once per roomId, cancelled flag prevents acting on stale async results
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    const run = async () => {
       try {
         const roomRes = await fetch(`${API}/rooms/${roomId}`);
+        if (cancelled) return;
         if (!roomRes.ok) {
           if (roomRes.status === 404) { setErrorMsg("Room not found."); setStage("error"); return; }
           setErrorMsg("Failed to load room."); setStage("error"); return;
         }
         const roomData = await roomRes.json();
+        if (cancelled) return;
         setTopic(roomData.topic);
         setSecondsLeft(roomData.secondsLeft);
 
@@ -221,29 +231,40 @@ export default function RoomPage() {
           setNeedsPassword(true);
           setStage("password");
         } else {
-          // Try joining directly
           try {
             const joinData = await doJoin();
+            if (cancelled) return;
             anonTokenRef.current = joinData.anonToken;
             localStorage.setItem(`token_${roomId}`, joinData.anonToken);
             setAlias(joinData.alias);
             setIsCreator(joinData.isCreator);
             await fetchHistory(joinData.anonToken);
+            if (cancelled) return;
             setStage("joined");
             connectSocket(joinData.anonToken, joinData.alias);
           } catch (err: unknown) {
+            if (cancelled) return;
             const e = err as { status?: number; message?: string };
             if (e.status === 410) { setStage("expired"); return; }
             setErrorMsg(e.message || "Failed to join room."); setStage("error");
           }
         }
       } catch {
+        if (cancelled) return;
         setErrorMsg("Could not reach server."); setStage("error");
       }
-    })();
+    };
 
-    return () => { socketRef.current?.disconnect(); };
-  }, [roomId, doJoin, fetchHistory, connectSocket]);
+    run();
+
+    return () => {
+      cancelled = true;
+      socketRef.current?.disconnect();
+      socketRef.current = null;
+    };
+  // roomId is the only real dependency; functions are defined in component scope
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
 
   const handlePasswordSubmit = async () => {
     setPasswordError("");
