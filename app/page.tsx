@@ -111,8 +111,8 @@ export default function Home() {
                   <label>
                     <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Expires in</div>
                     <select value={expiry} onChange={e => setExpiry(Number(e.target.value))}
-                      style={{ width: "100%", padding: "11px 14px", borderRadius: "6px", background: "var(--bg-2)", border: "1px solid var(--border)", color: "var(--text)", fontFamily: "DM Mono, monospace", fontSize: "13px", cursor: "pointer", outline: "none" }}>
-                      {EXPIRY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: "6px", background: "var(--bg-3)", border: "1px solid var(--border)", color: "var(--text)", fontFamily: "DM Mono, monospace", fontSize: "13px", cursor: "pointer", outline: "none", appearance: "auto" }}>
+                    {EXPIRY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </label>
                   <label>
