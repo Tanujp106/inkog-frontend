@@ -185,6 +185,10 @@ export default function RoomPage() {
       fetch(`${API}/rooms/${roomId}/messages?anonToken=${encodeURIComponent(token)}`),
       fetch(`${API}/rooms/${roomId}/polls?anonToken=${encodeURIComponent(token)}`),
     ]);
+    if (msgRes.ok) {
+      const d = await msgRes.json();
+      setMessages(d.messages || []);
+    }
     if (pollRes.ok) {
       const d = await pollRes.json();
       setPolls(d.polls || []);
@@ -217,7 +221,6 @@ export default function RoomPage() {
             localStorage.setItem(`token_${roomId}`, joinData.anonToken);
             setAlias(joinData.alias);
             setIsCreator(joinData.isCreator);
-            setMessages(joinData.messages || []);
             await fetchHistory(joinData.anonToken);
             setStage("joined");
             connectSocket(joinData.anonToken);
