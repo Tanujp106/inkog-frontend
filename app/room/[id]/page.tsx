@@ -256,7 +256,7 @@ export default function RoomPage() {
 
   const sendMessage = () => {
     if (!msgInput.trim() || !socketRef.current) return;
-    socketRef.current.emit("send_message", { roomId, content: msgInput.trim() });
+    socketRef.current.emit("send_message", { message : msgInput.trim() });
     setMsgInput("");
   };
 
