@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-const API = "http://localhost:3000/api";
+const API = "https://inkog-backend.onrender.com/api";
 
 const EXPIRY_OPTIONS = [
   { label: "1 hour", value: 60 },
@@ -150,7 +150,7 @@ export default function Home() {
                 <label>
                   <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Room ID or Link</div>
                   <input value={joinId} onChange={e => setJoinId(e.target.value)} onKeyDown={e => e.key === "Enter" && handleJoin()}
-                    placeholder="abc123  or  localhost:3000/rooms/abc123" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
+                    placeholder="abc123  or  https://inkog-backend.onrender.com/rooms/abc123" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
                 </label>
                 {joinError && <div style={{ color: "var(--red)", fontSize: "13px" }}>{joinError}</div>}
                 <button className="btn-accent" onClick={handleJoin} style={{ padding: "14px", borderRadius: "6px" }}>

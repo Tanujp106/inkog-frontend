@@ -4,8 +4,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 
-const API = "http://localhost:3000/api";
-const SOCKET_URL = "http://localhost:3000";
+const API = "https://inkog-backend.onrender.com/api";
+const SOCKET_URL = "https://inkog-backend.onrender.com";
 
 interface Message {
   id: string;
