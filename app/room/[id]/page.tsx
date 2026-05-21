@@ -12,6 +12,7 @@ interface Message {
   alias: string;
   content: string;
   createdAt: string;
+  isSystem?: boolean;
 }
 
 interface PollVote {
@@ -184,10 +185,6 @@ export default function RoomPage() {
       fetch(`${API}/rooms/${roomId}/messages?anonToken=${encodeURIComponent(token)}`),
       fetch(`${API}/rooms/${roomId}/polls?anonToken=${encodeURIComponent(token)}`),
     ]);
-    if (msgRes.ok) {
-      const d = await msgRes.json();
-      setMessages(d.messages || []);
-    }
     if (pollRes.ok) {
       const d = await pollRes.json();
       setPolls(d.polls || []);
@@ -220,6 +217,7 @@ export default function RoomPage() {
             localStorage.setItem(`token_${roomId}`, joinData.anonToken);
             setAlias(joinData.alias);
             setIsCreator(joinData.isCreator);
+            setMessages(joinData.messages || []);
             await fetchHistory(joinData.anonToken);
             setStage("joined");
             connectSocket(joinData.anonToken);
@@ -396,6 +394,15 @@ export default function RoomPage() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                 {messages.map((msg, i) => {
+                  if (msg.isSystem) {
+                    return (
+                      <div key={msg.id} style={{ textAlign: "center", padding: "6px 0", margin: "4px 0" }}>
+                        <span style={{ fontSize: "11px", color: "var(--text-dim)", fontFamily: "DM Mono, monospace", background: "var(--bg-3)", padding: "3px 12px", borderRadius: "20px" }}>
+                          {msg.content}
+                        </span>
+                      </div>
+                    );
+                  }
                   const mine = isMe(msg.alias);
                   const prevAlias = i > 0 ? messages[i - 1].alias : null;
                   const showAlias = msg.alias !== prevAlias;
