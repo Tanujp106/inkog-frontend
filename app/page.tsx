@@ -5,13 +5,6 @@ import { useRouter } from "next/navigation";
 
 const API = "https://inkog-backend.onrender.com/api";
 
-const EXPIRY_OPTIONS = [
-  { label: "1 hour", value: 60 },
-  { label: "2 hours", value: 120 },
-  { label: "12 hours", value: 720 },
-  { label: "24 hours", value: 1440 },
-  { label: "48 hours", value: 2880 },
-];
 
 export default function Home() {
   const router = useRouter();
@@ -108,18 +101,16 @@ export default function Home() {
                     placeholder="Should we go to Goa this December?" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
                 </label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                  <label>
-                    <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Expires in</div>
-                    <select value={expiry} onChange={e => setExpiry(Number(e.target.value))}
-                    style={{ width: "100%", padding: "11px 14px", borderRadius: "6px", background: "var(--bg-3)", border: "1px solid var(--border)", color: "var(--text)", fontFamily: "DM Mono, monospace", fontSize: "13px", cursor: "pointer", outline: "none", appearance: "auto" }}>
-                    {EXPIRY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Max members</div>
-                    <input type="number" value={roomLimit} onChange={e => setRoomLimit(Math.min(30, Math.max(1, Number(e.target.value))))}
-                      min={1} max={30} style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
-                  </label>
+                <label>
+                  <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Expires in (hours)</div>
+                  <input type="number" value={expiry / 60} onChange={e => setExpiry(Math.max(1, Number(e.target.value)) * 60)}
+                    min={1} placeholder="e.g. 24" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
+                </label>
+                <label>
+                  <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Max members</div>
+                  <input type="number" value={roomLimit} onChange={e => setRoomLimit(Math.min(30, Math.max(1, Number(e.target.value))))}
+                    min={1} max={30} style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
+                </label>
                 </div>
                 <label>
                   <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
