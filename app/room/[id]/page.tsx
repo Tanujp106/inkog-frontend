@@ -414,9 +414,9 @@ export default function RoomPage() {
                         </span>
                       )}
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        {!mine && isCreator && (
+                        {/* {!mine && isCreator && (
                           <button className="btn-danger" onClick={() => deleteMessage(msg.id)} title="Delete">✕</button>
-                        )}
+                        )} */}
                         <div style={{
                           background: mine ? "var(--accent)" : "var(--bg-3)",
                           color: mine ? "#0c0c0e" : "var(--text)",
@@ -429,9 +429,9 @@ export default function RoomPage() {
                         }}>
                           {msg.content}
                         </div>
-                        {mine && isCreator && (
+                        {/* {mine && isCreator && (
                           <button className="btn-danger" onClick={() => deleteMessage(msg.id)} title="Delete">✕</button>
-                        )}
+                        )} */}
                       </div>
                     </div>
                   );
