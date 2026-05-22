@@ -309,6 +309,13 @@ export default function RoomPage() {
     socketRef.current?.emit("vote_poll", { roomId, pollId, optionIndex });
   };
 
+  const handleLeave = () => {
+    socketRef.current?.disconnect();
+    socketRef.current = null;
+    localStorage.removeItem(`token_${roomId}`);
+    router.push("/");
+  };
+
   const copyShareLink = () => {
     navigator.clipboard.writeText(`${window.location.href}`);
     setCopied(true);
@@ -405,6 +412,9 @@ export default function RoomPage() {
           </div>
           <button className="btn-ghost" onClick={copyShareLink} style={{ padding: "5px 12px", borderRadius: "4px", fontSize: "11px", letterSpacing: "0.05em" }}>
             {copied ? "✓ Copied" : "Share"}
+          </button>
+          <button className="btn-ghost" onClick={handleLeave} style={{ padding: "5px 12px", borderRadius: "4px", fontSize: "11px", letterSpacing: "0.05em", color: "var(--red)" }}>
+            Leave
           </button>
         </div>
       </header>
