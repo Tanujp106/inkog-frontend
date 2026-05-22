@@ -78,6 +78,7 @@ export default function RoomPage() {
 
   // Share toast
   const [copied, setCopied] = useState(false);
+  const [socketError, setSocketError] = useState("");
 
   const socketRef = useRef<Socket | null>(null);
 
@@ -172,6 +173,8 @@ export default function RoomPage() {
 
     socket.on("error", ({ message }: { message: string }) => {
       console.error("Socket error:", message);
+      setSocketError(message);
+      setTimeout(() => setSocketError(""), 3000);
     });
 
     return socket;
@@ -417,6 +420,13 @@ export default function RoomPage() {
           </button>
         </div>
       </header>
+
+      {/* Socket error toast */}
+      {socketError && (
+        <div style={{ background: "var(--red)", color: "#fff", fontSize: "12px", padding: "8px 20px", textAlign: "center", letterSpacing: "0.03em" }}>
+          ⚠ {socketError}
+        </div>
+      )}
 
       {/* Body */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
