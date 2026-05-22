@@ -100,6 +100,7 @@ export default function RoomPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  
   const connectSocket = (token: string, myAlias: string, onReady: () => void) => {
     // Disconnect any existing socket before creating a new one
     if (socketRef.current) {
