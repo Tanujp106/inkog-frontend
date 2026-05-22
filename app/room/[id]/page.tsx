@@ -290,22 +290,22 @@ export default function RoomPage() {
   };
 
   const deleteMessage = (messageId: string) => {
-    socketRef.current?.emit("delete_message", { roomId, messageId });
+    socketRef.current?.emit("delete_message", { messageId });
   };
 
   const closeRoom = () => {
-    socketRef.current?.emit("close_room", { roomId });
+    socketRef.current?.emit("close_room", {});
   };
 
   const createPoll = () => {
     const validOptions = pollOptions.filter(o => o.trim());
     if (!pollQuestion.trim() || validOptions.length < 2) return;
-    socketRef.current?.emit("create_poll", { roomId, question: pollQuestion.trim(), options: validOptions });
+    socketRef.current?.emit("create_poll", { question: pollQuestion.trim(), options: validOptions });
     setPollQuestion(""); setPollOptions(["", ""]); setShowPollForm(false);
   };
 
   const votePoll = (pollId: string, optionIndex: number) => {
-    socketRef.current?.emit("vote_poll", { roomId, pollId, optionIndex });
+    socketRef.current?.emit("vote_poll", { pollId, optionIndex });
   };
 
   const handleLeave = () => {
