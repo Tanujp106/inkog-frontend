@@ -278,8 +278,7 @@ export default function RoomPage() {
       connectSocket(joinData.anonToken, joinData.alias, () => setStage("joined"));
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string };
-      if (e.status === 403) setPasswordError("Incorrect password.");
-      else if (e.status === 410) setStage("expired");
+      if (e.status === 410) setStage("expired");
       else setPasswordError(e.message || "Failed to join.");
     }
   };
