@@ -54,6 +54,7 @@ export default function RoomPage() {
   const [topic, setTopic] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [onlineCount, setOnlineCount] = useState(0);
+  const [roomUsers, setRoomUsers] = useState<string[]>([]);
 
   // Session
   const [alias, setAlias] = useState("");
@@ -113,8 +114,9 @@ export default function RoomPage() {
       socket.emit("join_room", { roomId, anonToken: token });
     });
 
-    socket.on("join_room_success", ({ onlineCount }: { onlineCount: number }) => {
+    socket.on("join_room_success", ({ onlineCount, roomUsers }: { onlineCount: number; roomUsers: Record<string, string[]> }) => {
       setOnlineCount(onlineCount);
+      setRoomUsers(Object.values(roomUsers).flat());
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         alias: "system",
@@ -125,8 +127,9 @@ export default function RoomPage() {
       onReady();
     });
 
-    socket.on("user_joined", ({ alias, onlineCount }: { alias: string; onlineCount: number }) => {
+    socket.on("user_joined", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: Record<string, string[]> }) => {
       setOnlineCount(onlineCount);
+      setRoomUsers(Object.values(roomUsers).flat());
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         alias: "system",
@@ -136,8 +139,9 @@ export default function RoomPage() {
       }]);
     });
 
-    socket.on("user_left", ({ alias, onlineCount }: { alias: string; onlineCount: number }) => {
+    socket.on("user_left", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: Record<string, string[]> }) => {
       setOnlineCount(onlineCount);
+      setRoomUsers(Object.values(roomUsers).flat());
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         alias: "system",
@@ -405,9 +409,22 @@ export default function RoomPage() {
 
         {/* Meta */}
         <div style={{ display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: "5px" }} className="online-users-wrapper">
             <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: onlineCount > 0 ? "var(--accent)" : "var(--text-dim)", display: "inline-block" }} />
-            <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>{onlineCount} online</span>
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", cursor: "default" }}>{onlineCount} online</span>
+            {roomUsers.length > 0 && (
+              <div className="online-users-tooltip" style={{
+                position: "absolute", top: "calc(100% + 8px)", right: 0, background: "var(--bg-2)",
+                border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 0",
+                minWidth: "160px", zIndex: 50, boxShadow: "0 4px 16px rgba(0,0,0,0.3)"
+              }}>
+                {roomUsers.map((u) => (
+                  <div key={u} style={{ padding: "5px 14px", fontSize: "12px", color: u === alias ? "var(--accent)" : "var(--text-muted)", fontFamily: "DM Mono, monospace" }}>
+                    {u}{u === alias ? " (you)" : ""}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ fontSize: "12px", color: secondsLeft < 300 ? "var(--red)" : "var(--text-muted)", fontFamily: "DM Mono, monospace" }}>
             ⏱ {formatTime(secondsLeft)}

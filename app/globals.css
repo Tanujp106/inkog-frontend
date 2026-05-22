@@ -134,3 +134,6 @@ input::placeholder, textarea::placeholder {
   border-radius: 3px;
 }
 .btn-danger:hover { background: rgba(255, 87, 87, 0.1); }
+
+.online-users-tooltip { display: none; }
+.online-users-wrapper:hover .online-users-tooltip { display: block; }
