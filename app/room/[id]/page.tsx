@@ -114,9 +114,9 @@ export default function RoomPage() {
       socket.emit("join_room", { roomId, anonToken: token });
     });
 
-    socket.on("join_room_success", ({ onlineCount, roomUsers }: { onlineCount: number; roomUsers: Record<string, string[]> }) => {
+    socket.on("join_room_success", ({ onlineCount, roomUsers }: { onlineCount: number; roomUsers: string[] }) => {
       setOnlineCount(onlineCount);
-      setRoomUsers(Object.values(roomUsers).flat());
+      setRoomUsers(roomUsers ?? []);
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         alias: "system",
@@ -127,9 +127,9 @@ export default function RoomPage() {
       onReady();
     });
 
-    socket.on("user_joined", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: Record<string, string[]> }) => {
+    socket.on("user_joined", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: string[] }) => {
       setOnlineCount(onlineCount);
-      setRoomUsers(Object.values(roomUsers).flat());
+      setRoomUsers(roomUsers ?? []);
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         alias: "system",
@@ -139,9 +139,9 @@ export default function RoomPage() {
       }]);
     });
 
-    socket.on("user_left", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: Record<string, string[]> }) => {
+    socket.on("user_left", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: string[] }) => {
       setOnlineCount(onlineCount);
-      setRoomUsers(Object.values(roomUsers).flat());
+      setRoomUsers(roomUsers ?? []);
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         alias: "system",
