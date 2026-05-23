@@ -541,7 +541,7 @@ export default function RoomPage() {
 
           <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
             {/* Poll creation form */}
-            {showPollForm && isCreator && (
+            {showPollForm && (
               <div className="animate-fadeIn" style={{ background: "var(--bg-3)", border: "1px solid var(--border)", borderRadius: "8px", padding: "14px", marginBottom: "16px" }}>
                 <p style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "10px" }}>New Poll</p>
                 <input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)}
