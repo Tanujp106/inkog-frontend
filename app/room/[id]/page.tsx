@@ -534,11 +534,9 @@ export default function RoomPage() {
         <div style={{ width: "300px", borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0 }}>
           <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>Polls</span>
-              (
               <button className="btn-ghost" onClick={() => setShowPollForm(f => !f)} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "11px" }}>
                 {showPollForm ? "Cancel" : "+ Poll"}
               </button>
-              )
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
