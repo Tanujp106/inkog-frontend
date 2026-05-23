@@ -100,7 +100,7 @@ export default function RoomPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  
+
   const connectSocket = (token: string, myAlias: string, onReady: () => void) => {
     // Disconnect any existing socket before creating a new one
     if (socketRef.current) {
@@ -177,6 +177,13 @@ export default function RoomPage() {
     });
 
     socket.on("error", ({ message }: { message: string }) => {
+        if (message === "You are already in this room in another tab.") {
+        socket.disconnect();
+        socketRef.current = null;
+        setStage("error");
+        setErrorMsg("This room is already open in another tab. Please use that tab.");
+        return;
+      }
       console.error("Socket error:", message);
       setSocketError(message);
       setTimeout(() => setSocketError(""), 3000);
