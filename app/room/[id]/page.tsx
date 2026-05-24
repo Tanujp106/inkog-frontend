@@ -326,7 +326,6 @@ export default function RoomPage() {
   const handleLeave = () => {
     socketRef.current?.disconnect();
     socketRef.current = null;
-    localStorage.removeItem(`token_${roomId}`);
     router.push("/");
   };
 
