@@ -7,6 +7,8 @@ import {
   commands,
   completeDirectionTwoCommand,
   directionTwoThemes,
+  getDirectionTwoCreateHint,
+  parseDirectionTwoCreateCommand,
   resolveDirectionTwoThemeChoice,
 } from "@/lib/direction-two-shell.mjs";
 import {
@@ -44,6 +46,12 @@ type CreateDraft = {
   roomLimit: number;
   password: string;
 };
+
+type ParsedCreateCommand =
+  | { status: "not-create" }
+  | { status: "partial"; nextStep: "topic" | "expiry" | "limit" | "password-choice"; draft: CreateDraft }
+  | { status: "ready"; draft: CreateDraft }
+  | { status: "invalid"; message: string };
 
 type SessionFlow =
   | { type: "create"; step: "topic"; draft: CreateDraft }
@@ -463,6 +471,7 @@ export function DirectionTwoShell() {
     appendLines(
       line("input", command),
       line("output", "inkog creates temporary rooms without public profiles."),
+      line("output", "create <title> <minutes> <members> <password|no>"),
       line("output", "create       start a guided private room setup"),
       line("output", "join <code>  enter a shared room"),
       line("output", "style        switch the live app theme"),
@@ -477,7 +486,7 @@ export function DirectionTwoShell() {
     appendLines(
       line("input", command),
       line("output", "starting private room setup"),
-      line("output", "answer each prompt, or press Esc to cancel"),
+      line("output", "answer each prompt, or use: create <title> <minutes> <members> <password|no>"),
     );
     setFlow({ type: "create", step: "topic", draft: initialDraft });
     sound.play("press");
@@ -544,10 +553,12 @@ export function DirectionTwoShell() {
     router.push(`/room/${id}`);
   };
 
-  const createRoom = async (draft: CreateDraft) => {
+  const createRoom = async (draft: CreateDraft, options: { confirmInput?: string | null } = {}) => {
+    const confirmInput = options.confirmInput === undefined ? "y" : options.confirmInput;
+
     setCreating(true);
     appendLines(
-      line("input", "y"),
+      ...(confirmInput ? [line("input", confirmInput)] : []),
       line("output", "creating room..."),
     );
 
@@ -589,6 +600,31 @@ export function DirectionTwoShell() {
       setCreating(false);
       setFlow(null);
     }
+  };
+
+  const applyInlineCreateCommand = (command: string, parsed: Exclude<ParsedCreateCommand, { status: "not-create" }>) => {
+    if (parsed.status === "invalid") {
+      appendLines(line("input", command), line("error", parsed.message));
+      sound.play("error");
+      setKeyboardStatus(parsed.message);
+      return;
+    }
+
+    if (parsed.status === "partial") {
+      appendLines(line("input", command), line("output", `continue setup: ${placeholderFor({ type: "create", step: parsed.nextStep, draft: parsed.draft })}`));
+      setFlow({ type: "create", step: parsed.nextStep, draft: parsed.draft });
+      sound.play("press");
+      setKeyboardStatus(`Create command captured. Continue with ${promptFor({ type: "create", step: parsed.nextStep, draft: parsed.draft })}.`);
+      return;
+    }
+
+    appendLines(
+      line("input", command),
+      line("output", `creating "${parsed.draft.topic}" for ${parsed.draft.expiry}m, ${parsed.draft.roomLimit} members`),
+      line("output", parsed.draft.password ? "password: on" : "password: off"),
+    );
+    sound.play("press");
+    void createRoom(parsed.draft, { confirmInput: null });
   };
 
   const answerCreatePrompt = (flowState: Extract<SessionFlow, { type: "create" }>, rawAnswer: string) => {
@@ -768,8 +804,14 @@ export function DirectionTwoShell() {
 
     pushHistory(command);
 
-    if (normalized === "create" || normalized === "start" || normalized === "new") {
-      beginCreate(command);
+    const parsedCreateCommand = parseDirectionTwoCreateCommand(command) as ParsedCreateCommand;
+    if (parsedCreateCommand.status !== "not-create") {
+      if (parsedCreateCommand.status === "partial" && parsedCreateCommand.nextStep === "topic") {
+        beginCreate(command);
+        return;
+      }
+
+      applyInlineCreateCommand(command, parsedCreateCommand);
       return;
     }
 
@@ -869,6 +911,8 @@ export function DirectionTwoShell() {
 
   const activePrompt = promptFor(flow);
   const completionSuggestion = commandCompletionFor(inputValue, flow);
+  const createFieldSuggestion = !completionSuggestion && !flow ? getDirectionTwoCreateHint(inputValue) : null;
+  const inlineHint = completionSuggestion ?? createFieldSuggestion;
 
   return (
     <main
@@ -1034,7 +1078,7 @@ export function DirectionTwoShell() {
             <div className="relative ml-2 flex min-w-0 flex-1 items-baseline">
               <input
                 ref={inputRef}
-                aria-describedby={completionSuggestion ? "terminal-completion-hint" : undefined}
+                aria-describedby={inlineHint ? "terminal-inline-hint" : undefined}
                 aria-label={activePrompt}
                 autoCapitalize="off"
                 autoComplete="off"
@@ -1062,9 +1106,17 @@ export function DirectionTwoShell() {
               {completionSuggestion && (
                 <span
                   className="ml-3 shrink-0 text-[12px] leading-[24px] text-[var(--color-dim)]"
-                  id="terminal-completion-hint"
+                  id="terminal-inline-hint"
                 >
                   tab {`->`} {completionSuggestion}
+                </span>
+              )}
+              {createFieldSuggestion && (
+                <span
+                  className="ml-3 shrink-0 text-[12px] leading-[24px] text-[var(--color-dim)]"
+                  id="terminal-inline-hint"
+                >
+                  {`->`} {createFieldSuggestion}
                 </span>
               )}
             </div>
