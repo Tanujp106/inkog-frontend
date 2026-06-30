@@ -2,12 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSystemSound } from "@/lib/system-sound-provider";
 
-const API = "https://inkog-backend.onrender.com/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
 
+function setStoredToken(roomId: string, token: string) {
+  if (typeof window === "undefined" || typeof window.localStorage?.setItem !== "function") return;
+  window.localStorage.setItem(`token_${roomId}`, token);
+}
 
 export default function Home() {
   const router = useRouter();
+  const sound = useSystemSound();
   const [mode, setMode] = useState<"idle" | "create" | "join">("idle");
 
   const [topic, setTopic] = useState("");
@@ -21,7 +27,11 @@ export default function Home() {
   const [joinError, setJoinError] = useState("");
 
   const handleCreate = async () => {
-    if (!topic.trim()) { setCreateError("Topic is required."); return; }
+    if (!topic.trim()) {
+      sound.play("error");
+      setCreateError("Topic is required.");
+      return;
+    }
     setCreating(true);
     setCreateError("");
     try {
@@ -33,10 +43,16 @@ export default function Home() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) { setCreateError(data.message || "Failed to create room."); return; }
-      localStorage.setItem(`token_${data.id}`, data.creatorToken);
+      if (!res.ok) {
+        sound.play("error");
+        setCreateError(data.message || "Failed to create room.");
+        return;
+      }
+      setStoredToken(data.id, data.creatorToken);
+      sound.play("success");
       router.push(`/room/${data.id}`);
     } catch {
+      sound.play("error");
       setCreateError("Could not reach server. Is the backend running?");
     } finally {
       setCreating(false);
@@ -45,9 +61,14 @@ export default function Home() {
 
   const handleJoin = () => {
     const trimmed = joinId.trim();
-    if (!trimmed) { setJoinError("Enter a room ID or link."); return; }
+    if (!trimmed) {
+      sound.play("error");
+      setJoinError("Enter a room ID or link.");
+      return;
+    }
     const match = trimmed.match(/([a-z0-9]{6})$/i);
     const id = match ? match[1] : trimmed;
+    sound.play("success");
     router.push(`/room/${id}`);
   };
 
@@ -79,11 +100,14 @@ export default function Home() {
 
           {mode === "idle" && (
             <div className="animate-fadeUp" style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
-              <button className="btn-accent" onClick={() => setMode("create")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
+              <button className="btn-accent" onClick={() => { sound.play("press"); setMode("create"); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
                 Create a Room
               </button>
-              <button className="btn-ghost" onClick={() => setMode("join")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
+              <button className="btn-ghost" onClick={() => { sound.play("press"); setMode("join"); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
                 Join via Link →
+              </button>
+              <button className="btn-ghost" onClick={() => { sound.play("press"); router.push("/playground"); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
+                Playground
               </button>
             </div>
           )}
@@ -92,40 +116,66 @@ export default function Home() {
             <div className="animate-fadeUp" style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "12px", padding: "32px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "28px" }}>
                 <h2 style={{ fontSize: "17px", margin: 0 }}>New Room</h2>
-                <button className="btn-ghost" onClick={() => { setMode("idle"); setCreateError(""); }} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px" }}>✕</button>
+                <button className="btn-ghost" onClick={() => { sound.play("close"); setMode("idle"); setCreateError(""); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px" }}>✕</button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                 <label>
                   <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Topic *</div>
-                  <input value={topic} onChange={e => setTopic(e.target.value)} onKeyDown={e => e.key === "Enter" && handleCreate()}
-                    placeholder="Should we go to Goa this December?" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
+                  <input
+                    value={topic}
+                    onChange={event => setTopic(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === "Enter") {
+                        void handleCreate();
+                      }
+                    }}
+                    placeholder="Should we go to Goa this December?"
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }}
+                  />
                 </label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                <label>
-                  <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Expires in (minutes)</div>
-                 <input type="number" value={expiry === 0 ? "" : expiry} onChange={e => setExpiry(e.target.value === "" ? 0 : Number(e.target.value))}
-                  onBlur={e => { if (Number(e.target.value) < 15) setExpiry(15); }}
-                  min={15} placeholder="e.g. 60" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
-                </label>
-                <label>
-                  <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Max members</div>
-                  <input type="number" value={roomLimit} onChange={e => setRoomLimit(Math.min(30, Math.max(1, Number(e.target.value))))}
-                    min={1} max={30} style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
-                </label>
+                  <label>
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Expires in (minutes)</div>
+                    <input
+                      type="number"
+                      value={expiry === 0 ? "" : expiry}
+                      onChange={event => setExpiry(event.target.value === "" ? 0 : Number(event.target.value))}
+                      onBlur={event => { if (Number(event.target.value) < 15) setExpiry(15); }}
+                      min={15}
+                      placeholder="e.g. 60"
+                      style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }}
+                    />
+                  </label>
+                  <label>
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Max members</div>
+                    <input
+                      type="number"
+                      value={roomLimit}
+                      onChange={event => setRoomLimit(Math.min(30, Math.max(1, Number(event.target.value))))}
+                      min={1}
+                      max={30}
+                      style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }}
+                    />
+                  </label>
                 </div>
                 <label>
                   <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
                     Password <span style={{ color: "var(--text-dim)" }}>(optional)</span>
                   </div>
-                  <input value={password} onChange={e => setPassword(e.target.value)} type="password"
-                    placeholder="Leave blank for open room" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
+                  <input
+                    value={password}
+                    onChange={event => setPassword(event.target.value)}
+                    type="password"
+                    placeholder="Leave blank for open room"
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }}
+                  />
                 </label>
                 {createError && (
                   <div style={{ background: "rgba(255,87,87,0.08)", border: "1px solid rgba(255,87,87,0.2)", borderRadius: "6px", padding: "10px 14px", color: "var(--red)", fontSize: "13px" }}>
                     {createError}
                   </div>
                 )}
-                <button className="btn-accent" onClick={handleCreate} disabled={creating} style={{ padding: "14px", borderRadius: "6px", marginTop: "4px" }}>
+                <button className="btn-accent" onClick={() => { sound.play("press"); void handleCreate(); }} onMouseEnter={() => sound.play("hover")} disabled={creating} style={{ padding: "14px", borderRadius: "6px", marginTop: "4px" }}>
                   {creating ? "Creating..." : "Create Room →"}
                 </button>
               </div>
@@ -136,16 +186,25 @@ export default function Home() {
             <div className="animate-fadeUp" style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "12px", padding: "32px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "28px" }}>
                 <h2 style={{ fontSize: "17px", margin: 0 }}>Join a Room</h2>
-                <button className="btn-ghost" onClick={() => { setMode("idle"); setJoinError(""); }} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px" }}>✕</button>
+                <button className="btn-ghost" onClick={() => { sound.play("close"); setMode("idle"); setJoinError(""); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px" }}>✕</button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 <label>
                   <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Room ID or Link</div>
-                  <input value={joinId} onChange={e => setJoinId(e.target.value)} onKeyDown={e => e.key === "Enter" && handleJoin()}
-                    placeholder="abc123  or  https://inkog-backend.onrender.com/rooms/abc123" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }} />
+                  <input
+                    value={joinId}
+                    onChange={event => setJoinId(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === "Enter") {
+                        handleJoin();
+                      }
+                    }}
+                    placeholder="abc123  or  https://inkog-backend.onrender.com/rooms/abc123"
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: "6px" }}
+                  />
                 </label>
                 {joinError && <div style={{ color: "var(--red)", fontSize: "13px" }}>{joinError}</div>}
-                <button className="btn-accent" onClick={handleJoin} style={{ padding: "14px", borderRadius: "6px" }}>
+                <button className="btn-accent" onClick={() => { sound.play("press"); handleJoin(); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px", borderRadius: "6px" }}>
                   Go to Room →
                 </button>
               </div>

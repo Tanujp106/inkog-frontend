@@ -1,11 +1,25 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link2, LogOut, Power } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
-import { io, Socket } from "socket.io-client";
+import { io, type Socket } from "socket.io-client";
 
-const API = "https://inkog-backend.onrender.com/api";
-const SOCKET_URL = "https://inkog-backend.onrender.com";
+import {
+  classifyRoomMessage,
+} from "@/lib/room-chat-ui.mjs";
+import { formatRoomCountdown, getRoomRoster } from "@/lib/room-header-ui.mjs";
+import { parseRoomCommand } from "@/lib/room-terminal.mjs";
+import type { RoomCommand } from "@/lib/room-terminal-types";
+import {
+  formatSystemSoundStatus,
+  parseSystemSoundCommand,
+} from "@/lib/system-sound.mjs";
+import { useSystemSound } from "@/lib/system-sound-provider";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://127.0.0.1:3001";
 
 interface Message {
   id: string;
@@ -28,81 +42,127 @@ interface Poll {
   createdAt: string;
 }
 
-type Stage = "loading" | "password" | "joined" | "expired" | "error";
+interface TerminalEvent {
+  id: string;
+  kind: "input" | "output" | "error";
+  content: string;
+  createdAt: string;
+}
 
-function formatTime(seconds: number) {
-  if (seconds <= 0) return "expired";
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
+type Stage = "loading" | "password" | "joined" | "expired" | "error";
+type RoomRoster = { visible: { alias: string; initials: string }[]; overflow: number };
+type TranscriptItem =
+  | { type: "message"; message: Message; timestamp: number }
+  | { type: "poll"; poll: Poll; timestamp: number }
+  | { type: "event"; event: TerminalEvent; timestamp: number };
+
+function getStoredToken(roomId: string) {
+  if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") return undefined;
+  return window.localStorage.getItem(`token_${roomId}`) || undefined;
+}
+
+function setStoredToken(roomId: string, token: string) {
+  if (typeof window === "undefined" || typeof window.localStorage?.setItem !== "function") return;
+  window.localStorage.setItem(`token_${roomId}`, token);
+}
+
+function makeId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random()}`;
+}
+
+function timestampFrom(value: string) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function transcriptFrom(messages: Message[], polls: Poll[], events: TerminalEvent[]) {
+  return [
+    ...messages.map(message => ({ type: "message" as const, message, timestamp: timestampFrom(message.createdAt) })),
+    ...polls.map(poll => ({ type: "poll" as const, poll, timestamp: timestampFrom(poll.createdAt) })),
+    ...events.map(event => ({ type: "event" as const, event, timestamp: timestampFrom(event.createdAt) })),
+  ].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
+  const sound = useSystemSound();
   const roomId = params.id as string;
 
   const [stage, setStage] = useState<Stage>("loading");
   const [errorMsg, setErrorMsg] = useState("");
-
-  // Room info
   const [topic, setTopic] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [onlineCount, setOnlineCount] = useState(0);
   const [roomUsers, setRoomUsers] = useState<string[]>([]);
-
-  // Session
   const [alias, setAlias] = useState("");
   const [isCreator, setIsCreator] = useState(false);
   const anonTokenRef = useRef<string>("");
 
-  // Password gate
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [needsPassword, setNeedsPassword] = useState(false);
-
-  // Messages
   const [messages, setMessages] = useState<Message[]>([]);
-  const [msgInput, setMsgInput] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Polls
   const [polls, setPolls] = useState<Poll[]>([]);
-  const [showPollForm, setShowPollForm] = useState(false);
-  const [pollQuestion, setPollQuestion] = useState("");
-  const [pollOptions, setPollOptions] = useState(["", ""]);
-
-  // Share toast
+  const [terminalEvents, setTerminalEvents] = useState<TerminalEvent[]>([]);
+  const [composerValue, setComposerValue] = useState("");
   const [copied, setCopied] = useState(false);
   const [socketError, setSocketError] = useState("");
+  const [cursorVisible, setCursorVisible] = useState(true);
 
   const socketRef = useRef<Socket | null>(null);
+  const composerRef = useRef<HTMLInputElement | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const soundRef = useRef(sound);
 
-  // Countdown timer
+  useEffect(() => {
+    soundRef.current = sound;
+  }, [sound]);
+
+  const appendEvent = (kind: TerminalEvent["kind"], content: string) => {
+    setTerminalEvents(current => [
+      ...current,
+      { id: makeId(), kind, content, createdAt: new Date().toISOString() },
+    ]);
+  };
+
+  const transcript = useMemo(
+    () => transcriptFrom(messages, polls, terminalEvents),
+    [messages, polls, terminalEvents],
+  );
+
   useEffect(() => {
     if (stage !== "joined" || secondsLeft <= 0) return;
     const interval = setInterval(() => {
       setSecondsLeft(s => {
-        if (s <= 1) { setStage("expired"); clearInterval(interval); return 0; }
+        if (s <= 1) {
+          setStage("expired");
+          clearInterval(interval);
+          return 0;
+        }
         return s - 1;
       });
     }, 1000);
     return () => clearInterval(interval);
   }, [stage, secondsLeft]);
 
-  // Auto scroll
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [transcript]);
 
+  useEffect(() => {
+    if (stage === "joined") requestAnimationFrame(() => composerRef.current?.focus());
+  }, [stage]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCursorVisible(current => !current);
+    }, 530);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const connectSocket = (token: string, myAlias: string, onReady: () => void) => {
-    // Disconnect any existing socket before creating a new one
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
@@ -118,10 +178,11 @@ export default function RoomPage() {
     socket.on("join_room_success", ({ onlineCount, roomUsers }: { onlineCount: number; roomUsers: string[] }) => {
       setOnlineCount(onlineCount);
       setRoomUsers(roomUsers ?? []);
+      soundRef.current.play("success");
       setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
+        id: makeId(),
         alias: "system",
-        content: `You joined as ${myAlias}`,
+        content: `joined as ${myAlias}`,
         createdAt: new Date().toISOString(),
         isSystem: true,
       }]);
@@ -131,10 +192,11 @@ export default function RoomPage() {
     socket.on("user_joined", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: string[] }) => {
       setOnlineCount(onlineCount);
       setRoomUsers(roomUsers ?? []);
+      soundRef.current.play("notify");
       setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
+        id: makeId(),
         alias: "system",
-        content: `${alias} joined the room`,
+        content: `${alias} joined`,
         createdAt: new Date().toISOString(),
         isSystem: true,
       }]);
@@ -143,16 +205,20 @@ export default function RoomPage() {
     socket.on("user_left", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: string[] }) => {
       setOnlineCount(onlineCount);
       setRoomUsers(roomUsers ?? []);
+      soundRef.current.play("close");
       setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
+        id: makeId(),
         alias: "system",
-        content: `${alias} left the room`,
+        content: `${alias} left`,
         createdAt: new Date().toISOString(),
         isSystem: true,
       }]);
     });
 
     socket.on("new_message", (msg: Message) => {
+      if (msg.alias !== myAlias) {
+        soundRef.current.play("messageReceived");
+      }
       setMessages(prev => [...prev, msg]);
     });
 
@@ -161,6 +227,7 @@ export default function RoomPage() {
     });
 
     socket.on("poll_created", (poll: Poll) => {
+      soundRef.current.play("notify");
       setPolls(prev => [...prev, poll]);
     });
 
@@ -173,18 +240,21 @@ export default function RoomPage() {
     });
 
     socket.on("room_closed", () => {
+      soundRef.current.play("close");
       setStage("expired");
     });
 
     socket.on("error", ({ message }: { message: string }) => {
-        if (message === "You are already in this room in another tab.") {
+      if (message === "You are already in this room in another tab.") {
         socket.disconnect();
         socketRef.current = null;
         setStage("error");
         setErrorMsg("This room is already open in another tab. Please use that tab.");
         return;
       }
-      console.error("Socket error:", message);
+
+      appendEvent("error", message);
+      soundRef.current.play("error");
       setSocketError(message);
       setTimeout(() => setSocketError(""), 3000);
     });
@@ -193,7 +263,7 @@ export default function RoomPage() {
   };
 
   const doJoin = async (password?: string) => {
-    const storedToken = localStorage.getItem(`token_${roomId}`) || undefined;
+    const storedToken = getStoredToken(roomId);
     const body: Record<string, unknown> = {};
     if (storedToken) body.anonToken = storedToken;
     if (password) body.password = password;
@@ -208,23 +278,23 @@ export default function RoomPage() {
     return data;
   };
 
-  // Fetch messages & polls after join
   const fetchHistory = async (token: string) => {
     const [msgRes, pollRes] = await Promise.all([
       fetch(`${API}/rooms/${roomId}/messages?anonToken=${encodeURIComponent(token)}`),
       fetch(`${API}/rooms/${roomId}/polls?anonToken=${encodeURIComponent(token)}`),
     ]);
+
     if (msgRes.ok) {
-      const d = await msgRes.json();
-      setMessages(d.messages || []);
+      const data = await msgRes.json();
+      setMessages(data.messages || []);
     }
+
     if (pollRes.ok) {
-      const d = await pollRes.json();
-      setPolls(d.polls || []);
+      const data = await pollRes.json();
+      setPolls(data.polls || []);
     }
   };
 
-  // Initial load — runs once per roomId, cancelled flag prevents acting on stale async results
   useEffect(() => {
     let cancelled = false;
 
@@ -233,51 +303,60 @@ export default function RoomPage() {
         const roomRes = await fetch(`${API}/rooms/${roomId}`);
         if (cancelled) return;
         if (!roomRes.ok) {
-          if (roomRes.status === 404) { setErrorMsg("Room not found."); setStage("error"); return; }
-          setErrorMsg("Failed to load room."); setStage("error"); return;
+          if (roomRes.status === 404) {
+            setErrorMsg("Room not found.");
+            setStage("error");
+            return;
+          }
+          setErrorMsg("Failed to load room.");
+          setStage("error");
+          return;
         }
+
         const roomData = await roomRes.json();
         if (cancelled) return;
         setTopic(roomData.topic);
         setSecondsLeft(roomData.secondsLeft);
 
-        if (roomData.secondsLeft <= 0) { setStage("expired"); return; }
+        if (roomData.secondsLeft <= 0) {
+          setStage("expired");
+          return;
+        }
 
         if (roomData.hasPassword) {
-          setNeedsPassword(true);
           setStage("password");
-        } else {
-          try {
-            const joinData = await doJoin();
-            if (cancelled) return;
-            anonTokenRef.current = joinData.anonToken;
-            localStorage.setItem(`token_${roomId}`, joinData.anonToken);
-            setAlias(joinData.alias);
-            setIsCreator(joinData.isCreator);
-            await fetchHistory(joinData.anonToken);
-            if (cancelled) return;
-            connectSocket(joinData.anonToken, joinData.alias, () => setStage("joined"));
-          } catch (err: unknown) {
-            if (cancelled) return;
-            const e = err as { status?: number; message?: string };
-            if (e.status === 410) { setStage("expired"); return; }
-            setErrorMsg(e.message || "Failed to join room."); setStage("error");
-          }
+          return;
         }
-      } catch {
+
+        const joinData = await doJoin();
         if (cancelled) return;
-        setErrorMsg("Could not reach server."); setStage("error");
+        anonTokenRef.current = joinData.anonToken;
+        setStoredToken(roomId, joinData.anonToken);
+        setAlias(joinData.alias);
+        setIsCreator(joinData.isCreator);
+        await fetchHistory(joinData.anonToken);
+        if (cancelled) return;
+        connectSocket(joinData.anonToken, joinData.alias, () => setStage("joined"));
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const e = err as { status?: number; message?: string };
+        if (e.status === 410) {
+          setStage("expired");
+          return;
+        }
+        setErrorMsg(e.message || "Could not reach server.");
+        setStage("error");
       }
     };
 
-    run();
+    void run();
 
     return () => {
       cancelled = true;
       socketRef.current?.disconnect();
       socketRef.current = null;
     };
-  // roomId is the only real dependency; functions are defined in component scope
+  // roomId is the only stable route dependency; socket helpers close over current room state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
@@ -286,353 +365,814 @@ export default function RoomPage() {
     try {
       const joinData = await doJoin(passwordInput);
       anonTokenRef.current = joinData.anonToken;
-      localStorage.setItem(`token_${roomId}`, joinData.anonToken);
+      setStoredToken(roomId, joinData.anonToken);
       setAlias(joinData.alias);
       setIsCreator(joinData.isCreator);
       await fetchHistory(joinData.anonToken);
+      sound.play("success");
       connectSocket(joinData.anonToken, joinData.alias, () => setStage("joined"));
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string };
       if (e.status === 410) setStage("expired");
-      else setPasswordError(e.message || "Failed to join.");
+      else {
+        sound.play("error");
+        setPasswordError(e.message || "Failed to join.");
+      }
     }
   };
 
-  const sendMessage = () => {
-    if (!msgInput.trim() || !socketRef.current) return;
-    socketRef.current.emit("send_message", { message : msgInput.trim() });
-    setMsgInput("");
+  const emitPoll = (question: string, options: string[]) => {
+    if (!socketRef.current) {
+      appendEvent("error", "socket not connected");
+      sound.play("error");
+      return false;
+    }
+
+    socketRef.current.emit("create_poll", { question, options });
+    sound.play("success");
+    return true;
   };
 
-  const deleteMessage = (messageId: string) => {
-    socketRef.current?.emit("delete_message", { messageId });
+  const sendChatMessage = (message: string) => {
+    if (!socketRef.current) {
+      appendEvent("error", "socket not connected");
+      sound.play("error");
+      return;
+    }
+
+    socketRef.current.emit("send_message", { message });
+    sound.play("messageSent");
   };
 
   const closeRoom = () => {
+    sound.play("close");
     socketRef.current?.emit("close_room", {});
   };
 
-  const createPoll = () => {
-    const validOptions = pollOptions.filter(o => o.trim());
-    if (!pollQuestion.trim() || validOptions.length < 2) return;
-    socketRef.current?.emit("create_poll", { question: pollQuestion.trim(), options: validOptions });
-    setPollQuestion(""); setPollOptions(["", ""]); setShowPollForm(false);
-  };
-
-  const votePoll = (pollId: string, optionIndex: number) => {
-    socketRef.current?.emit("vote_poll", { pollId, optionIndex });
-  };
-
   const handleLeave = () => {
+    sound.play("close");
     socketRef.current?.disconnect();
     socketRef.current = null;
     router.push("/");
   };
 
-  const copyShareLink = () => {
-    navigator.clipboard.writeText(`${window.location.href}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      appendEvent("output", "share link copied");
+      sound.play("success");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      appendEvent("error", "could not copy share link");
+      sound.play("error");
+    }
   };
 
-  // My alias color for chat
-  const isMe = (msgAlias: string) => msgAlias === alias;
+  const printHelp = () => {
+    appendEvent("output", "commands: /poll question | option a | option b, /share, /leave, /sound");
+    if (isCreator) appendEvent("output", "creator: /close");
+  };
 
-  // Expired / error states
+  const handleSoundCommand = (rawCommand: string) => {
+    const parsed = parseSystemSoundCommand(rawCommand);
+
+    if (parsed.type === "invalid") {
+      appendEvent("input", rawCommand);
+      appendEvent("error", parsed.message ?? "usage: /sound on, /sound off, or /sound status");
+      sound.play("error");
+      return true;
+    }
+
+    if (parsed.type === "status") {
+      appendEvent("input", rawCommand);
+      appendEvent("output", formatSystemSoundStatus(sound.muted));
+      sound.play("notify");
+      return true;
+    }
+
+    appendEvent("input", rawCommand);
+    const nextMuted = parsed.muted === true;
+    if (nextMuted) {
+      sound.play("close");
+    }
+    sound.setMuted(nextMuted);
+    appendEvent("output", formatSystemSoundStatus(nextMuted));
+    return true;
+  };
+
+  const runComposer = () => {
+    const rawValue = composerValue;
+    const value = rawValue.trim();
+    setComposerValue("");
+
+    const command = parseRoomCommand(value) as RoomCommand;
+
+    if (value.toLowerCase().replace(/^\/+/, "").startsWith("sound")) {
+      handleSoundCommand(value.startsWith("/") ? value : `/${value}`);
+      return;
+    }
+
+    switch (command.type) {
+      case "empty":
+        return;
+      case "poll-inline":
+        if (!emitPoll(command.question, command.options)) return;
+        return;
+      case "message":
+        sendChatMessage(command.text);
+        return;
+      case "invalid":
+        appendEvent("error", command.message);
+        sound.play("error");
+        return;
+      case "share":
+        appendEvent("input", value);
+        void copyShareLink();
+        return;
+      case "leave":
+        appendEvent("input", value);
+        handleLeave();
+        return;
+      case "close":
+        appendEvent("input", value);
+        if (!isCreator) {
+          appendEvent("error", "only the creator can close this room");
+          sound.play("error");
+          return;
+        }
+        if (window.confirm("Close room for everyone? This cannot be undone.")) closeRoom();
+        return;
+      case "help":
+        appendEvent("input", value);
+        printHelp();
+        return;
+      case "unknown":
+        appendEvent("input", command.command);
+        appendEvent("error", `command not found: ${command.command}`);
+        appendEvent("output", "try /help");
+        sound.play("error");
+        return;
+    }
+  };
+
+  const votePoll = (pollId: string, optionIndex: number) => {
+    sound.play("press");
+    socketRef.current?.emit("vote_poll", { pollId, optionIndex });
+  };
+
+  const totalVotes = (poll: Poll) => poll.votesByMember.length;
+  const votesFor = (poll: Poll, idx: number) => poll.votesByMember.filter(v => v.optionIndex === idx).length;
+  const myVote = (poll: Poll) => poll.votesByMember.find(v => v.alias === alias)?.optionIndex ?? -1;
+  const usersTitle = roomUsers.length ? roomUsers.join("\n") : "No users online";
+  const roster = getRoomRoster(roomUsers);
+  const showIdleCursor = composerValue.length === 0;
+
   if (stage === "expired") {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px", textAlign: "center" }}>
-        <div style={{ fontSize: "48px", marginBottom: "20px" }}>💨</div>
-        <h1 style={{ fontSize: "32px", marginBottom: "12px" }}>Room Expired</h1>
-        <p style={{ color: "var(--text-muted)", marginBottom: "32px", fontSize: "14px" }}>This room has self-destructed. All messages are gone forever.</p>
-        <button className="btn-accent" onClick={() => router.push("/")} style={{ padding: "12px 28px", borderRadius: "6px" }}>← Back to Home</button>
-      </div>
+      <TerminalState
+        action="back"
+        copy="room expired. messages are no longer available."
+        onAction={() => router.push("/")}
+        title="room expired"
+      />
     );
   }
 
   if (stage === "error") {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px", textAlign: "center" }}>
-        <div style={{ fontSize: "48px", marginBottom: "20px" }}>⚠</div>
-        <h1 style={{ fontSize: "28px", marginBottom: "12px" }}>Something went wrong</h1>
-        <p style={{ color: "var(--text-muted)", marginBottom: "32px", fontSize: "14px" }}>{errorMsg}</p>
-        <button className="btn-accent" onClick={() => router.push("/")} style={{ padding: "12px 28px", borderRadius: "6px" }}>← Back to Home</button>
-      </div>
+      <TerminalState
+        action="back"
+        copy={errorMsg}
+        onAction={() => router.push("/")}
+        title="room error"
+      />
     );
   }
 
   if (stage === "loading") {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: "20px", letterSpacing: "-0.04em", marginBottom: "16px" }}>inkog</div>
-          <p style={{ color: "var(--text-dim)", fontSize: "12px", letterSpacing: "0.1em" }}>loading room<span className="blink">_</span></p>
-        </div>
-      </div>
-    );
+    return <TerminalState copy="loading room..." title="inkog" />;
   }
 
   if (stage === "password") {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px" }}>
-        <div style={{ maxWidth: "400px", width: "100%" }}>
-          <div style={{ marginBottom: "32px", textAlign: "center" }}>
-            <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: "20px", marginBottom: "20px" }}>inkog</div>
-            <p style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Private Room</p>
-            <h2 style={{ fontSize: "20px", color: "var(--text)", margin: "0 0 6px" }}>{topic}</h2>
-          </div>
-          <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "12px", padding: "28px" }}>
-            <label>
-              <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Password</div>
-              <input value={passwordInput} onChange={e => setPasswordInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handlePasswordSubmit()}
-                type="password" placeholder="Enter room password" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px", marginBottom: "12px" }} autoFocus />
-            </label>
-            {passwordError && <div style={{ color: "var(--red)", fontSize: "13px", marginBottom: "12px" }}>{passwordError}</div>}
-            <button className="btn-accent" onClick={handlePasswordSubmit} style={{ width: "100%", padding: "13px", borderRadius: "6px" }}>
-              Enter Room →
-            </button>
-          </div>
-        </div>
-      </div>
+      <main style={styles.stateShell}>
+        <section style={styles.passwordPanel}>
+          <p style={styles.stateKicker}>private room</p>
+          <h1 style={styles.stateTitle}>{topic}</h1>
+          <label style={styles.passwordLabel}>
+            <span style={styles.mutedLine}>password</span>
+            <input
+              autoFocus
+              onChange={event => setPasswordInput(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === "Enter") {
+                  void handlePasswordSubmit();
+                }
+              }}
+              placeholder="enter room password"
+              style={styles.passwordInput}
+              type="password"
+              value={passwordInput}
+            />
+          </label>
+          {passwordError && <p style={styles.errorLine}>error: {passwordError}</p>}
+          <button
+            className="btn-ghost"
+            onClick={() => {
+              sound.play("press");
+              void handlePasswordSubmit();
+            }}
+            onMouseEnter={() => sound.play("hover")}
+            style={styles.commandButton}
+            type="button"
+          >
+            enter
+          </button>
+        </section>
+      </main>
     );
   }
 
-  // Joined — main room UI
-  const totalVotes = (poll: Poll) => poll.votesByMember.length;
-  const votesFor = (poll: Poll, idx: number) => poll.votesByMember.filter(v => v.optionIndex === idx).length;
-  const myVote = (poll: Poll) => poll.votesByMember.find(v => v.alias === alias)?.optionIndex ?? -1;
-
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* Top bar */}
-      <header style={{ borderBottom: "1px solid var(--border)", padding: "12px 20px", display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
-        <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: "16px", letterSpacing: "-0.04em", marginRight: "4px" }}>inkog</span>
-        <span style={{ color: "var(--border-light)", fontSize: "14px" }}>·</span>
-
-        {/* Topic */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ margin: 0, fontSize: "13px", color: "var(--text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{topic}</p>
+    <main style={styles.roomShell} onClick={() => composerRef.current?.focus()}>
+      <header style={styles.roomHeader}>
+        <div style={styles.headerIdentity}>
+          <span style={styles.brand}>inkog</span>
+          <span style={styles.headerDivider}>/</span>
+          <span style={styles.topic} title={topic}>{topic}</span>
         </div>
-
-        {/* Meta */}
-        <div style={{ display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
-          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: "5px" }} className="online-users-wrapper">
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: onlineCount > 0 ? "var(--accent)" : "var(--text-dim)", display: "inline-block" }} />
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", cursor: "default" }}>{onlineCount} online</span>
-            {roomUsers.length > 0 && (
-              <div className="online-users-tooltip" style={{
-                position: "absolute", top: "calc(100% + 8px)", right: 0, background: "var(--bg-2)",
-                border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 0",
-                minWidth: "160px", zIndex: 50, boxShadow: "0 4px 16px rgba(0,0,0,0.3)"
-              }}>
-                {roomUsers.map((u) => (
-                  <div key={u} style={{ padding: "5px 14px", fontSize: "12px", color: u === alias ? "var(--accent)" : "var(--text-muted)", fontFamily: "DM Mono, monospace" }}>
-                    {u}{u === alias ? " (you)" : ""}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div style={{ fontSize: "12px", color: secondsLeft < 300 ? "var(--red)" : "var(--text-muted)", fontFamily: "DM Mono, monospace" }}>
-            ⏱ {formatTime(secondsLeft)}
-          </div>
-          <button className="btn-ghost" onClick={copyShareLink} style={{ padding: "5px 12px", borderRadius: "4px", fontSize: "11px", letterSpacing: "0.05em" }}>
-            {copied ? "✓ Copied" : "Share"}
+        <div style={styles.headerMeta}>
+          <AvatarRoster roster={roster} usersTitle={usersTitle} />
+          <span style={{ ...styles.metaItem, color: secondsLeft < 300 ? "var(--red)" : "var(--text-muted)" }}>
+            {formatRoomCountdown(secondsLeft)}
+          </span>
+          <button
+            aria-label={copied ? "Share link copied" : "Copy share link"}
+            className="btn-ghost"
+            onClick={() => {
+              sound.play("press");
+              void copyShareLink();
+            }}
+            onMouseEnter={() => sound.play("hover")}
+            style={{
+              ...styles.iconButton,
+              color: copied ? "var(--accent)" : "var(--text-muted)",
+            }}
+            title={copied ? "copied" : "copy share link"}
+            type="button"
+          >
+            <Link2 size={14} strokeWidth={2} />
           </button>
-          <button className="btn-ghost" onClick={handleLeave} style={{ padding: "5px 12px", borderRadius: "4px", fontSize: "11px", letterSpacing: "0.05em", color: "var(--red)" }}>
-            Leave
+          {isCreator && (
+            <button
+              className="btn-danger"
+              aria-label="Close room"
+              onClick={() => {
+                sound.play("press");
+                if (window.confirm("Close room for everyone? This cannot be undone.")) closeRoom();
+              }}
+              onMouseEnter={() => sound.play("hover")}
+              style={styles.iconButtonDanger}
+              type="button"
+            >
+              <Power size={14} strokeWidth={2} />
+            </button>
+          )}
+          <button
+            aria-label="Leave room"
+            className="btn-ghost"
+            onClick={handleLeave}
+            onMouseEnter={() => sound.play("hover")}
+            style={{ ...styles.iconButton, color: "var(--red)" }}
+            type="button"
+          >
+            <LogOut size={14} strokeWidth={2} />
           </button>
         </div>
       </header>
 
-      {/* Socket error toast */}
-      {socketError && (
-        <div style={{ background: "var(--red)", color: "#fff", fontSize: "12px", padding: "8px 20px", textAlign: "center", letterSpacing: "0.03em" }}>
-          ⚠ {socketError}
-        </div>
-      )}
+      {socketError && <div style={styles.errorToast}>error: {socketError}</div>}
 
-      {/* Body */}
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Chat column */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
-            {messages.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--text-dim)", fontSize: "13px" }}>
-                <p style={{ fontSize: "28px", marginBottom: "12px" }}>👻</p>
-                <p>No messages yet. Break the ice.</p>
-                <p style={{ marginTop: "8px", fontSize: "12px" }}>You are <span style={{ color: "var(--accent)", fontWeight: 600 }}>{alias}</span>{isCreator ? " (creator)" : ""}</p>
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                {messages.map((msg, i) => {
-                  if (msg.isSystem) {
-                    return (
-                      <div key={msg.id} style={{ textAlign: "center", padding: "6px 0", margin: "4px 0" }}>
-                        <span style={{ fontSize: "11px", color: "var(--text-dim)", fontFamily: "DM Mono, monospace", background: "var(--bg-3)", padding: "3px 12px", borderRadius: "20px" }}>
-                          {msg.content}
-                        </span>
-                      </div>
-                    );
-                  }
-                  const mine = isMe(msg.alias);
-                  const prevAlias = i > 0 ? messages[i - 1].alias : null;
-                  const showAlias = msg.alias !== prevAlias;
-                  return (
-                    <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start", marginTop: showAlias ? "14px" : "2px" }}>
-                      {showAlias && (
-                        <span style={{ fontSize: "11px", color: mine ? "var(--accent)" : "var(--text-muted)", marginBottom: "4px", letterSpacing: "0.05em" }}>
-                          {mine ? `${msg.alias} (you)` : msg.alias}
-                        </span>
-                      )}
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        {/* {!mine && isCreator && (
-                          <button className="btn-danger" onClick={() => deleteMessage(msg.id)} title="Delete">✕</button>
-                        )} */}
-                        <div style={{
-                          background: mine ? "var(--accent)" : "var(--bg-3)",
-                          color: mine ? "#0c0c0e" : "var(--text)",
-                          padding: "8px 14px",
-                          borderRadius: mine ? "14px 14px 2px 14px" : "14px 14px 14px 2px",
-                          fontSize: "14px",
-                          maxWidth: "420px",
-                          wordBreak: "break-word",
-                          lineHeight: 1.5,
-                        }}>
-                          {msg.content}
-                        </div>
-                        {/* {mine && isCreator && (
-                          <button className="btn-danger" onClick={() => deleteMessage(msg.id)} title="Delete">✕</button>
-                        )} */}
-                      </div>
-                    </div>
-                  );
-                })}
-                <div ref={messagesEndRef} />
-              </div>
-            )}
+      <section aria-label="Room terminal transcript" style={styles.transcript}>
+        {transcript.length === 0 ? (
+          <div style={styles.emptyTranscript}>
+            <p style={styles.emptyLine}>system: joined as {alias}</p>
+            <p style={styles.emptyLine}>system: type a message</p>
+            <p style={styles.emptyLine}>system: use /poll question | option a | option b</p>
           </div>
+        ) : (
+          transcript.map(item => {
+            if (item.type === "event") {
+              return <TerminalEventRow event={item.event} key={item.event.id} />;
+            }
 
-          {/* Input */}
-          <div style={{ borderTop: "1px solid var(--border)", padding: "14px 20px", display: "flex", gap: "10px", flexShrink: 0 }}>
-            <input
-              value={msgInput}
-              onChange={e => setMsgInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-              placeholder={`Message as ${alias}...`}
-              style={{ flex: 1, padding: "10px 14px", borderRadius: "8px", fontSize: "14px" }}
-            />
-            <button className="btn-accent" onClick={sendMessage} disabled={!msgInput.trim()} style={{ padding: "10px 20px", borderRadius: "8px", whiteSpace: "nowrap" }}>
-              Send
-            </button>
-          </div>
-        </div>
-
-        {/* Right sidebar — Polls + Creator controls */}
-        <div style={{ width: "300px", borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0 }}>
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>Polls</span>
-              <button className="btn-ghost" onClick={() => setShowPollForm(f => !f)} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "11px" }}>
-                {showPollForm ? "Cancel" : "+ Poll"}
-              </button>
-          </div>
-
-          <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
-            {/* Poll creation form */}
-            {showPollForm && (
-              <div className="animate-fadeIn" style={{ background: "var(--bg-3)", border: "1px solid var(--border)", borderRadius: "8px", padding: "14px", marginBottom: "16px" }}>
-                <p style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "10px" }}>New Poll</p>
-                <input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)}
-                  placeholder="Question..." style={{ width: "100%", padding: "8px 10px", borderRadius: "5px", marginBottom: "8px", fontSize: "13px" }} />
-                {pollOptions.map((opt, i) => (
-                  <input key={i} value={opt} onChange={e => { const o = [...pollOptions]; o[i] = e.target.value; setPollOptions(o); }}
-                    placeholder={`Option ${i + 1}`} style={{ width: "100%", padding: "8px 10px", borderRadius: "5px", marginBottom: "6px", fontSize: "13px" }} />
-                ))}
-                {pollOptions.length < 4 && (
-                  <button className="btn-ghost" onClick={() => setPollOptions([...pollOptions, ""])} style={{ padding: "5px 10px", borderRadius: "4px", fontSize: "11px", marginBottom: "8px" }}>
-                    + Add option
-                  </button>
-                )}
-                <button className="btn-accent" onClick={createPoll} style={{ width: "100%", padding: "9px", borderRadius: "5px", marginTop: "4px" }}>
-                  Create Poll
-                </button>
-              </div>
-            )}
-
-            {/* Poll list */}
-            {polls.length === 0 && !showPollForm && (
-              <div style={{ textAlign: "center", padding: "32px 12px", color: "var(--text-dim)", fontSize: "12px" }}>
-                No polls yet
-              </div>
-            )}
-
-            {polls.map(poll => {
-              const total = totalVotes(poll);
-              const myVoteIdx = myVote(poll);
+            if (item.type === "poll") {
               return (
-                <div key={poll.pollId} style={{ background: "var(--bg-3)", border: "1px solid var(--border)", borderRadius: "8px", padding: "14px", marginBottom: "12px" }}>
-                  <p style={{ fontSize: "13px", fontWeight: 600, marginBottom: "12px", lineHeight: 1.4, color: "var(--text)" }}>{poll.question}</p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    {poll.options.map((opt, idx) => {
-                      const count = votesFor(poll, idx);
-                      const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-                      const isMyVote = myVoteIdx === idx;
-                      return (
-                        <button key={idx} onClick={() => votePoll(poll.pollId, idx)}
-                          style={{
-                            background: "transparent",
-                            border: `1px solid ${isMyVote ? "var(--accent)" : "var(--border)"}`,
-                            borderRadius: "5px",
-                            padding: "8px 10px",
-                            cursor: "pointer",
-                            textAlign: "left",
-                            position: "relative",
-                            overflow: "hidden",
-                            transition: "border-color 0.15s",
-                          }}>
-                          {/* Progress bar */}
-                          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, background: isMyVote ? "rgba(200,255,87,0.12)" : "rgba(255,255,255,0.04)", transition: "width 0.3s ease" }} />
-                          <div style={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={{ fontSize: "12px", color: isMyVote ? "var(--accent)" : "var(--text)", fontFamily: "DM Mono, monospace" }}>{opt}</span>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)", flexShrink: 0, marginLeft: "8px" }}>{count} · {pct}%</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p style={{ fontSize: "11px", color: "var(--text-dim)", marginTop: "8px", marginBottom: 0 }}>{total} vote{total !== 1 ? "s" : ""}</p>
-                </div>
+                <TerminalPoll
+                  key={item.poll.pollId}
+                  myVote={myVote(item.poll)}
+                  onVote={votePoll}
+                  poll={item.poll}
+                  total={totalVotes(item.poll)}
+                  votesFor={votesFor}
+                />
               );
-            })}
-          </div>
+            }
 
-          {/* Creator controls */}
-          {isCreator && (
-            <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-              <p style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Creator</p>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "12px", color: "var(--accent)", fontFamily: "DM Mono, monospace" }}>{alias}</span>
-                <button
-                  className="btn-danger"
-                  onClick={() => { if (confirm("Close room for everyone? This cannot be undone.")) closeRoom(); }}
-                  style={{ marginLeft: "auto", padding: "5px 12px", fontSize: "11px" }}
-                >
-                  Close Room
-                </button>
-              </div>
-            </div>
-          )}
+            return <TerminalMessage alias={alias} key={item.message.id} message={item.message} />;
+          })
+        )}
+        <div ref={transcriptEndRef} />
+      </section>
 
-          {/* Alias display for non-creator */}
-          {!isCreator && (
-            <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-              <p style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>Your alias</p>
-              <span style={{ fontSize: "13px", color: "var(--text-muted)", fontFamily: "DM Mono, monospace" }}>{alias}</span>
-            </div>
-          )}
-        </div>
-      </div>
+      <form
+        onSubmit={event => {
+          event.preventDefault();
+          runComposer();
+        }}
+        style={styles.composer}
+      >
+        <label htmlFor="room-terminal-input" style={styles.srOnly}>room command</label>
+        <span aria-hidden="true" style={styles.composerPrompt}>$</span>
+        {showIdleCursor ? (
+          <span
+            aria-hidden="true"
+            style={{
+              ...styles.composerCursor,
+              opacity: cursorVisible ? 1 : 0.18,
+            }}
+          >
+            |
+          </span>
+        ) : null}
+        <input
+          autoCapitalize="off"
+          autoComplete="off"
+          autoCorrect="off"
+          id="room-terminal-input"
+          onChange={event => setComposerValue(event.target.value)}
+          ref={composerRef}
+          spellCheck={false}
+          style={styles.composerInput}
+          value={composerValue}
+        />
+      </form>
+    </main>
+  );
+}
+
+function TerminalState({
+  action,
+  copy,
+  onAction,
+  title,
+}: {
+  action?: string;
+  copy: string;
+  onAction?: () => void;
+  title: string;
+}) {
+  const sound = useSystemSound();
+
+  return (
+    <main style={styles.stateShell}>
+      <section style={styles.statePanel}>
+        <h1 style={styles.stateTitle}>{title}</h1>
+        <p style={styles.mutedLine}>{copy}</p>
+        {action && (
+          <button
+            className="btn-ghost"
+            onClick={() => {
+              sound.play("press");
+              onAction?.();
+            }}
+            onMouseEnter={() => sound.play("hover")}
+            style={styles.commandButton}
+            type="button"
+          >
+            {action}
+          </button>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function TerminalEventRow({ event }: { event: TerminalEvent }) {
+  const prefix = event.kind === "input" ? "$" : event.kind === "error" ? "error:" : ">";
+  const color =
+    event.kind === "input"
+      ? "var(--accent)"
+      : event.kind === "error"
+        ? "var(--red)"
+        : "var(--text-muted)";
+
+  return (
+    <p style={{ ...styles.transcriptLine, color }}>
+      <span aria-hidden="true">{prefix} </span>
+      {event.content}
+    </p>
+  );
+}
+
+function TerminalMessage({ alias, message }: { alias: string; message: Message }) {
+  const presentation = classifyRoomMessage(message, alias);
+  const lineColor =
+    presentation.kind === "incoming"
+      ? "var(--accent)"
+      : presentation.kind === "outgoing"
+        ? "var(--text-muted)"
+        : "var(--text-dim)";
+
+  return (
+    <p
+      style={{
+        ...styles.transcriptLine,
+        color: lineColor,
+      }}
+    >
+      <span aria-hidden="true">{presentation.prefix} </span>
+      {message.content}
+    </p>
+  );
+}
+
+function AvatarRoster({
+  roster,
+  usersTitle,
+}: {
+  roster: RoomRoster;
+  usersTitle: string;
+}) {
+  return (
+    <div aria-label={`${roster.visible.length + roster.overflow} online`} style={styles.roster} title={usersTitle}>
+      {roster.visible.map((member, index) => (
+        <span
+          key={member.alias}
+          style={{
+            ...styles.rosterAvatar,
+            marginLeft: index === 0 ? 0 : "-8px",
+            zIndex: roster.visible.length - index,
+          }}
+          title={member.alias}
+        >
+          {member.initials}
+        </span>
+      ))}
+      {roster.overflow > 0 && (
+        <span style={{ ...styles.rosterAvatar, ...styles.rosterOverflow, marginLeft: roster.visible.length > 0 ? "-8px" : 0 }}>
+          +{roster.overflow}
+        </span>
+      )}
     </div>
   );
 }
+
+function TerminalPoll({
+  myVote,
+  onVote,
+  poll,
+  total,
+  votesFor,
+}: {
+  myVote: number;
+  onVote: (pollId: string, optionIndex: number) => void;
+  poll: Poll;
+  total: number;
+  votesFor: (poll: Poll, idx: number) => number;
+}) {
+  const sound = useSystemSound();
+
+  return (
+    <div style={styles.pollBlock}>
+      <p style={styles.pollQuestion}>
+        <span style={{ color: "var(--accent)" }}>poll --active </span>
+        {poll.question}
+      </p>
+      <div style={styles.pollOptions}>
+        {poll.options.map((option, index) => {
+          const count = votesFor(poll, index);
+          const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+          const selected = myVote === index;
+
+          return (
+            <button
+              key={option}
+              onClick={() => onVote(poll.pollId, index)}
+              onMouseEnter={() => sound.play("hover")}
+              style={{
+                ...styles.pollOption,
+                borderColor: selected ? "var(--accent)" : "var(--border)",
+                color: selected ? "var(--accent)" : "var(--text)",
+                backgroundImage: `linear-gradient(90deg, ${selected ? "rgba(200,255,87,0.12)" : "rgba(255,255,255,0.045)"} ${percent}%, transparent ${percent}%)`,
+              }}
+              type="button"
+            >
+              <span>{index + 1}. {option}</span>
+              <span style={styles.pollStat}>{count} / {percent}%</span>
+            </button>
+          );
+        })}
+      </div>
+      <p style={styles.pollFooter}>{total} vote{total === 1 ? "" : "s"}</p>
+    </div>
+  );
+}
+
+const styles: Record<string, CSSProperties> = {
+  roomShell: {
+    background: "var(--bg)",
+    color: "var(--text)",
+    display: "flex",
+    flexDirection: "column",
+    fontFamily: "var(--font-mono)",
+    height: "100dvh",
+    overflow: "hidden",
+  },
+  roomHeader: {
+    alignItems: "center",
+    borderBottom: "1px solid var(--border)",
+    display: "flex",
+    flexShrink: 0,
+    gap: "16px",
+    justifyContent: "space-between",
+    minHeight: "64px",
+    padding: "12px clamp(16px, 3vw, 32px)",
+  },
+  headerIdentity: {
+    alignItems: "center",
+    display: "flex",
+    gap: "10px",
+    minWidth: 0,
+  },
+  brand: {
+    color: "var(--text)",
+    fontFamily: "var(--font-mono)",
+    fontSize: "15px",
+    fontWeight: 700,
+  },
+  headerDivider: {
+    color: "var(--text-dim)",
+  },
+  roomId: {
+    color: "var(--accent)",
+    fontSize: "12px",
+    whiteSpace: "nowrap",
+  },
+  topic: {
+    color: "var(--text-muted)",
+    fontSize: "13px",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  headerMeta: {
+    alignItems: "center",
+    display: "flex",
+    flexShrink: 0,
+    flexWrap: "wrap",
+    gap: "10px",
+    justifyContent: "flex-end",
+  },
+  metaItem: {
+    alignItems: "center",
+    color: "var(--text-muted)",
+    display: "inline-flex",
+    fontSize: "13px",
+    gap: "6px",
+    whiteSpace: "nowrap",
+  },
+  iconButton: {
+    alignItems: "center",
+    borderRadius: 0,
+    display: "inline-flex",
+    height: "32px",
+    justifyContent: "center",
+    padding: 0,
+    width: "32px",
+  },
+  iconButtonDanger: {
+    alignItems: "center",
+    borderRadius: 0,
+    display: "inline-flex",
+    height: "32px",
+    justifyContent: "center",
+    padding: 0,
+    width: "32px",
+  },
+  roster: {
+    alignItems: "center",
+    display: "inline-flex",
+    marginRight: "4px",
+    minHeight: "24px",
+  },
+  rosterAvatar: {
+    alignItems: "center",
+    background: "var(--bg-3)",
+    border: "1px solid var(--border-light)",
+    borderRadius: "999px",
+    color: "var(--text)",
+    display: "inline-flex",
+    fontSize: "10px",
+    height: "24px",
+    justifyContent: "center",
+    lineHeight: 1,
+    minWidth: "24px",
+    padding: "0 6px",
+    position: "relative",
+  },
+  rosterOverflow: {
+    background: "var(--bg)",
+    color: "var(--text-muted)",
+  },
+  errorToast: {
+    background: "rgba(255, 87, 87, 0.12)",
+    borderBottom: "1px solid rgba(255, 87, 87, 0.28)",
+    color: "var(--red)",
+    flexShrink: 0,
+    fontSize: "12px",
+    padding: "8px clamp(16px, 3vw, 32px)",
+  },
+  transcript: {
+    display: "flex",
+    flexDirection: "column",
+    flex: 1,
+    gap: "6px",
+    overflowY: "auto",
+    padding: "24px clamp(16px, 4vw, 56px)",
+  },
+  emptyTranscript: {
+    color: "var(--text-dim)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    paddingTop: "8vh",
+  },
+  emptyLine: {
+    margin: "0 0 4px",
+  },
+  transcriptLine: {
+    color: "var(--text)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    margin: 0,
+    overflowWrap: "anywhere",
+    whiteSpace: "pre-wrap" as const,
+  },
+  pollBlock: {
+    background: "rgba(255, 255, 255, 0.02)",
+    border: "1px solid var(--border)",
+    borderLeft: "1px solid var(--border-light)",
+    borderRadius: "8px",
+    margin: 0,
+    maxWidth: "720px",
+    padding: "12px 14px 12px 16px",
+  },
+  pollQuestion: {
+    color: "var(--text)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    margin: "0 0 10px",
+    overflowWrap: "anywhere",
+  },
+  pollOptions: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+  pollOption: {
+    alignItems: "center",
+    backgroundColor: "transparent",
+    backgroundPosition: "left center",
+    backgroundRepeat: "no-repeat",
+    border: "1px solid var(--border)",
+    borderRadius: 0,
+    cursor: "pointer",
+    display: "flex",
+    fontFamily: "var(--font-mono)",
+    fontSize: "13px",
+    gap: "14px",
+    justifyContent: "space-between",
+    lineHeight: "20px",
+    minHeight: "36px",
+    padding: "7px 10px",
+    textAlign: "left",
+    transition: "border-color 0.15s ease, color 0.15s ease, background-image 0.2s ease",
+  },
+  pollStat: {
+    color: "var(--text-muted)",
+    flexShrink: 0,
+    fontSize: "12px",
+  },
+  pollFooter: {
+    color: "var(--text-dim)",
+    fontSize: "12px",
+    margin: "8px 0 0",
+  },
+  composer: {
+    alignItems: "center",
+    borderTop: "1px solid var(--border)",
+    display: "flex",
+    flexShrink: 0,
+    gap: "8px",
+    minHeight: "56px",
+    padding: "10px clamp(16px, 3vw, 32px)",
+  },
+  composerPrompt: {
+    color: "var(--accent)",
+    flexShrink: 0,
+    fontSize: "14px",
+    lineHeight: "24px",
+  },
+  composerCursor: {
+    color: "var(--text-muted)",
+    flexShrink: 0,
+    fontSize: "14px",
+    lineHeight: "24px",
+    transition: "opacity 0.14s linear",
+  },
+  composerInput: {
+    background: "transparent",
+    border: 0,
+    boxShadow: "none",
+    color: "var(--text)",
+    flex: 1,
+    fontFamily: "var(--font-mono)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    minWidth: 0,
+    outline: "none",
+    padding: 0,
+  },
+  stateShell: {
+    alignItems: "center",
+    background: "var(--bg)",
+    color: "var(--text)",
+    display: "flex",
+    fontFamily: "var(--font-mono)",
+    justifyContent: "center",
+    minHeight: "100dvh",
+    padding: "24px",
+  },
+  statePanel: {
+    maxWidth: "520px",
+    width: "100%",
+  },
+  passwordPanel: {
+    maxWidth: "420px",
+    width: "100%",
+  },
+  stateKicker: {
+    color: "var(--text-dim)",
+    fontSize: "12px",
+    margin: "0 0 8px",
+  },
+  stateTitle: {
+    color: "var(--text)",
+    fontFamily: "var(--font-mono)",
+    fontSize: "20px",
+    lineHeight: "28px",
+    margin: "0 0 14px",
+  },
+  mutedLine: {
+    color: "var(--text-muted)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    margin: "0 0 16px",
+  },
+  errorLine: {
+    color: "var(--red)",
+    fontSize: "13px",
+    margin: "0 0 12px",
+  },
+  passwordLabel: {
+    display: "block",
+    marginBottom: "12px",
+  },
+  passwordInput: {
+    background: "transparent",
+    border: 0,
+    borderBottom: "1px solid var(--border)",
+    borderRadius: 0,
+    color: "var(--text)",
+    fontFamily: "var(--font-mono)",
+    padding: "10px 0",
+    width: "100%",
+  },
+  commandButton: {
+    borderRadius: 0,
+    padding: "7px 12px",
+  },
+  srOnly: {
+    border: 0,
+    clip: "rect(0, 0, 0, 0)",
+    height: "1px",
+    margin: "-1px",
+    overflow: "hidden",
+    padding: 0,
+    position: "absolute",
+    whiteSpace: "nowrap",
+    width: "1px",
+  },
+};
