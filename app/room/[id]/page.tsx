@@ -7,8 +7,14 @@ import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
 import {
+  buildRoomPeerColorMap,
   classifyRoomMessage,
 } from "@/lib/room-chat-ui.mjs";
+import {
+  applyInkogTheme,
+  resolveInkogThemeChoice,
+} from "@/lib/inkog-theme.mjs";
+import { roomThemeBackground } from "@/lib/room-background.mjs";
 import { formatRoomCountdown, getRoomRoster } from "@/lib/room-header-ui.mjs";
 import { parseRoomCommand } from "@/lib/room-terminal.mjs";
 import type { RoomCommand } from "@/lib/room-terminal-types";
@@ -51,6 +57,7 @@ interface TerminalEvent {
 
 type Stage = "loading" | "password" | "joined" | "expired" | "error";
 type RoomRoster = { visible: { alias: string; initials: string }[]; overflow: number };
+type ComposerStatus = { tone: "muted" | "accent" | "error"; message: string };
 type TranscriptItem =
   | { type: "message"; message: Message; timestamp: number }
   | { type: "poll"; poll: Poll; timestamp: number }
@@ -109,15 +116,25 @@ export default function RoomPage() {
   const [copied, setCopied] = useState(false);
   const [socketError, setSocketError] = useState("");
   const [cursorVisible, setCursorVisible] = useState(true);
+  const [composerStatus, setComposerStatus] = useState<ComposerStatus | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const soundRef = useRef(sound);
+  const composerStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     soundRef.current = sound;
   }, [sound]);
+
+  useEffect(() => {
+    return () => {
+      if (composerStatusTimeoutRef.current) {
+        clearTimeout(composerStatusTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const appendEvent = (kind: TerminalEvent["kind"], content: string) => {
     setTerminalEvents(current => [
@@ -126,9 +143,23 @@ export default function RoomPage() {
     ]);
   };
 
+  const setComposerStatusMessage = (message: string, tone: ComposerStatus["tone"] = "muted") => {
+    setComposerStatus({ message, tone });
+    if (composerStatusTimeoutRef.current) {
+      clearTimeout(composerStatusTimeoutRef.current);
+    }
+    composerStatusTimeoutRef.current = setTimeout(() => {
+      setComposerStatus(current => (current?.message === message ? null : current));
+    }, 3200);
+  };
+
   const transcript = useMemo(
     () => transcriptFrom(messages, polls, terminalEvents),
     [messages, polls, terminalEvents],
+  );
+  const peerColorMap = useMemo(
+    () => buildRoomPeerColorMap([...roomUsers, ...messages.map(message => message.alias)], alias),
+    [alias, messages, roomUsers],
   );
 
   useEffect(() => {
@@ -419,46 +450,74 @@ export default function RoomPage() {
   const copyShareLink = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      appendEvent("output", "share link copied");
       sound.play("success");
       setCopied(true);
+      setComposerStatusMessage("share link copied", "accent");
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      appendEvent("error", "could not copy share link");
       sound.play("error");
+      setComposerStatusMessage("could not copy share link", "error");
     }
   };
 
-  const printHelp = () => {
-    appendEvent("output", "commands: /poll question | option a | option b, /share, /leave, /sound");
-    if (isCreator) appendEvent("output", "creator: /close");
+  const printHelp = (commandType = "help") => {
+    const base = "commands: /help /commands /style /sound /poll /share /leave /exit";
+    const creator = isCreator ? " /close" : "";
+    setComposerStatusMessage(
+      commandType === "commands" ? `${base}${creator}` : `try ${base}${creator}`,
+      "muted",
+    );
   };
 
   const handleSoundCommand = (rawCommand: string) => {
     const parsed = parseSystemSoundCommand(rawCommand);
 
     if (parsed.type === "invalid") {
-      appendEvent("input", rawCommand);
-      appendEvent("error", parsed.message ?? "usage: /sound on, /sound off, or /sound status");
       sound.play("error");
+      setComposerStatusMessage(parsed.message ?? "usage: /sound on, /sound off, or /sound status", "error");
       return true;
     }
 
     if (parsed.type === "status") {
-      appendEvent("input", rawCommand);
-      appendEvent("output", formatSystemSoundStatus(sound.muted));
       sound.play("notify");
+      setComposerStatusMessage(formatSystemSoundStatus(sound.muted), "muted");
       return true;
     }
 
-    appendEvent("input", rawCommand);
     const nextMuted = parsed.muted === true;
     if (nextMuted) {
       sound.play("close");
+    } else {
+      sound.play("notify");
     }
     sound.setMuted(nextMuted);
-    appendEvent("output", formatSystemSoundStatus(nextMuted));
+    setComposerStatusMessage(formatSystemSoundStatus(nextMuted), "accent");
     return true;
+  };
+
+  const handleStyleCommand = (argument: string) => {
+    if (!argument) {
+      setComposerStatusMessage("style: 1 orange, 2 blue, 3 green, 4 purple, 5 surprise", "muted");
+      sound.play("notify");
+      return;
+    }
+
+    const choice = resolveInkogThemeChoice(argument);
+    if (!choice) {
+      sound.play("error");
+      setComposerStatusMessage("choose 1, 2, 3, 4, 5, or a theme name", "error");
+      return;
+    }
+
+    applyInkogTheme(
+      {
+        documentElement: typeof document !== "undefined" ? document.documentElement : undefined,
+        storage: typeof window !== "undefined" ? window.localStorage : undefined,
+      },
+      choice.id,
+    );
+    sound.play("notify");
+    setComposerStatusMessage(`style set: ${choice.label}`, "accent");
   };
 
   const runComposer = () => {
@@ -478,40 +537,47 @@ export default function RoomPage() {
         return;
       case "poll-inline":
         if (!emitPoll(command.question, command.options)) return;
+        setComposerStatusMessage(`poll created: ${command.question}`, "accent");
         return;
       case "message":
         sendChatMessage(command.text);
+        setComposerStatus(null);
+        return;
+      case "style":
+        handleStyleCommand(command.argument);
         return;
       case "invalid":
-        appendEvent("error", command.message);
         sound.play("error");
+        setComposerStatusMessage(command.message, "error");
+        return;
+      case "commands":
+        printHelp("commands");
+        sound.play("notify");
         return;
       case "share":
-        appendEvent("input", value);
         void copyShareLink();
         return;
       case "leave":
-        appendEvent("input", value);
+        handleLeave();
+        return;
+      case "exit":
         handleLeave();
         return;
       case "close":
-        appendEvent("input", value);
         if (!isCreator) {
-          appendEvent("error", "only the creator can close this room");
           sound.play("error");
+          setComposerStatusMessage("only the creator can close this room", "error");
           return;
         }
         if (window.confirm("Close room for everyone? This cannot be undone.")) closeRoom();
         return;
       case "help":
-        appendEvent("input", value);
         printHelp();
+        sound.play("notify");
         return;
       case "unknown":
-        appendEvent("input", command.command);
-        appendEvent("error", `command not found: ${command.command}`);
-        appendEvent("output", "try /help");
         sound.play("error");
+        setComposerStatusMessage(`command not found: ${command.command}`, "error");
         return;
     }
   };
@@ -680,7 +746,14 @@ export default function RoomPage() {
               );
             }
 
-            return <TerminalMessage alias={alias} key={item.message.id} message={item.message} />;
+            return (
+              <TerminalMessage
+                alias={alias}
+                key={item.message.id}
+                message={item.message}
+                peerColorMap={peerColorMap}
+              />
+            );
           })
         )}
         <div ref={transcriptEndRef} />
@@ -693,6 +766,22 @@ export default function RoomPage() {
         }}
         style={styles.composer}
       >
+        {composerStatus ? (
+          <p
+            style={{
+              ...styles.composerStatus,
+              color:
+                composerStatus.tone === "error"
+                  ? "var(--red)"
+                  : composerStatus.tone === "accent"
+                    ? "var(--accent)"
+                    : "var(--text-muted)",
+            }}
+          >
+            {composerStatus.message}
+          </p>
+        ) : null}
+        <div style={styles.composerRow}>
         <label htmlFor="room-terminal-input" style={styles.srOnly}>room command</label>
         <span aria-hidden="true" style={styles.composerPrompt}>$</span>
         {showIdleCursor ? (
@@ -714,9 +803,13 @@ export default function RoomPage() {
           onChange={event => setComposerValue(event.target.value)}
           ref={composerRef}
           spellCheck={false}
-          style={styles.composerInput}
+          style={{
+            ...styles.composerInput,
+            caretColor: showIdleCursor ? "transparent" : "var(--text)",
+          }}
           value={composerValue}
         />
+        </div>
       </form>
     </main>
   );
@@ -776,11 +869,19 @@ function TerminalEventRow({ event }: { event: TerminalEvent }) {
   );
 }
 
-function TerminalMessage({ alias, message }: { alias: string; message: Message }) {
+function TerminalMessage({
+  alias,
+  message,
+  peerColorMap,
+}: {
+  alias: string;
+  message: Message;
+  peerColorMap: Record<string, string>;
+}) {
   const presentation = classifyRoomMessage(message, alias);
   const lineColor =
     presentation.kind === "incoming"
-      ? "var(--accent)"
+      ? peerColorMap[message.alias] ?? "var(--accent)"
       : presentation.kind === "outgoing"
         ? "var(--text-muted)"
         : "var(--text-dim)";
@@ -865,7 +966,7 @@ function TerminalPoll({
                 ...styles.pollOption,
                 borderColor: selected ? "var(--accent)" : "var(--border)",
                 color: selected ? "var(--accent)" : "var(--text)",
-                backgroundImage: `linear-gradient(90deg, ${selected ? "rgba(200,255,87,0.12)" : "rgba(255,255,255,0.045)"} ${percent}%, transparent ${percent}%)`,
+                backgroundImage: `linear-gradient(90deg, ${selected ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "rgba(255,255,255,0.045)"} ${percent}%, transparent ${percent}%)`,
               }}
               type="button"
             >
@@ -882,7 +983,9 @@ function TerminalPoll({
 
 const styles: Record<string, CSSProperties> = {
   roomShell: {
-    background: "var(--bg)",
+    backgroundColor: roomThemeBackground.baseColor,
+    backgroundImage: roomThemeBackground.background,
+    backgroundBlendMode: roomThemeBackground.blendMode as CSSProperties["backgroundBlendMode"],
     color: "var(--text)",
     display: "flex",
     flexDirection: "column",
@@ -1071,13 +1174,25 @@ const styles: Record<string, CSSProperties> = {
     margin: "8px 0 0",
   },
   composer: {
-    alignItems: "center",
     borderTop: "1px solid var(--border)",
     display: "flex",
+    flexDirection: "column",
     flexShrink: 0,
-    gap: "8px",
+    gap: "6px",
     minHeight: "56px",
     padding: "10px clamp(16px, 3vw, 32px)",
+  },
+  composerRow: {
+    alignItems: "center",
+    display: "flex",
+    gap: "8px",
+    width: "100%",
+  },
+  composerStatus: {
+    fontSize: "12px",
+    lineHeight: "18px",
+    margin: 0,
+    width: "100%",
   },
   composerPrompt: {
     color: "var(--accent)",

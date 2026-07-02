@@ -19,6 +19,7 @@
   --color-danger: #ff5757;
   --color-info: #57a8ff;
   --color-private: #a857ff;
+  --direction-two-cursor-square: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAAFklEQVR4nGM48T/8PymYYVTDqAbsGAD9IsBg75RAggAAAABJRU5ErkJggg==");
 
   --bg: var(--color-black);
   --bg-2: var(--color-panel);
@@ -65,24 +66,28 @@
   --color-signal: #ffb15c;
   --color-signal-dim: #dd8e37;
   --color-signal-glow: rgba(255, 177, 92, 0.16);
+  --direction-two-cursor-square: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAAFklEQVR4nGP4vzHmPymYYVTDqAbsGAByzbZAnRKlfwAAAABJRU5ErkJggg==");
 }
 
 :root[data-inkog-theme="blue"] {
   --color-signal: #7cc7ff;
   --color-signal-dim: #58aee8;
   --color-signal-glow: rgba(124, 199, 255, 0.18);
+  --direction-two-cursor-square: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAAFklEQVR4nGOoOf7/PymYYVTDqAbsGADA29SgIUo3XgAAAABJRU5ErkJggg==");
 }
 
 :root[data-inkog-theme="green"] {
   --color-signal: #c8ff57;
   --color-signal-dim: #a8d940;
   --color-signal-glow: rgba(200, 255, 87, 0.16);
+  --direction-two-cursor-square: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAAFklEQVR4nGM48T/8PymYYVTDqAbsGAD9IsBg75RAggAAAABJRU5ErkJggg==");
 }
 
 :root[data-inkog-theme="purple"] {
   --color-signal: #c792ff;
   --color-signal-dim: #a76fe4;
   --color-signal-glow: rgba(199, 146, 255, 0.18);
+  --direction-two-cursor-square: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAAFklEQVR4nGM4Pun/f1Iww6iGUQ3YMQAoXOEAry7fYAAAAABJRU5ErkJggg==");
 }
 
 @theme inline {
@@ -194,49 +199,48 @@ body::before {
     transform: translateY(0);
   }
 }
-@keyframes direction-two-ambient-pixel-sweep {
-  0% {
-    opacity: 0;
-    transform: perspective(180px) translate3d(-5px, -3px, 0) rotateX(64deg) rotateZ(-6deg) scale(0.72);
-  }
-  42% {
-    opacity: var(--pixel-opacity-peak, 0.54);
-    transform: perspective(180px) translate3d(var(--pixel-drift-x-mid, 0px), var(--pixel-drift-y-mid, 0px), 0) rotateX(-8deg) rotateZ(1deg) scale(1.12);
-  }
-  72% {
-    opacity: var(--pixel-opacity, 0.48);
-    transform: perspective(180px) translate3d(var(--pixel-drift-x-late, 0px), var(--pixel-drift-y-late, 0px), 0) rotateX(3deg) rotateZ(0deg) scale(0.98);
-  }
+@keyframes direction-two-ambient-pixel-drift {
+  0%,
   100% {
-    opacity: var(--pixel-opacity, 0.48);
-    transform: perspective(180px) translate3d(var(--pixel-drift-x, 0px), var(--pixel-drift-y, 0px), 0) rotateX(0deg) rotateZ(0deg) scale(1);
+    transform: translate3d(calc(var(--pixel-drift-x, 0px) * -0.35), calc(var(--pixel-drift-y, 0px) * -0.35), 0);
+  }
+  50% {
+    transform: translate3d(var(--pixel-drift-x, 0px), var(--pixel-drift-y, 0px), 0);
   }
 }
-@keyframes direction-two-ambient-pixel-shimmer {
+@keyframes direction-two-ambient-pixel-presence {
   0%,
-  58%,
   100% {
-    filter: brightness(0.86) saturate(1);
-    opacity: 0.72;
-    transform: translateZ(0) scale(1);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14), 0 0 var(--pixel-glow-soft, 4px) var(--color-signal-glow);
+    opacity: calc(var(--pixel-opacity, 0.24) * 0.34);
+    transform: translateZ(0) scale(0.58);
   }
-  9% {
-    filter: brightness(2.15) saturate(1.18);
-    opacity: 1;
-    transform: translateZ(0) scale(1.32);
+  39% {
+    opacity: var(--pixel-opacity-peak, 0.42);
+    transform: translateZ(0) scale(1.08);
+  }
+  68% {
+    opacity: calc(var(--pixel-opacity, 0.24) * 0.64);
+    transform: translateZ(0) scale(0.82);
+  }
+}
+@keyframes direction-two-ambient-pixel-glow {
+  0%,
+  100% {
+    filter: brightness(0.68) saturate(0.94);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14), 0 0 calc(var(--pixel-glow-soft, 4px) * 0.45) var(--direction-two-ambient-glow, var(--color-signal-glow));
+  }
+  46% {
+    filter: brightness(1.95) saturate(1.16);
     box-shadow:
       0 0 0 1px rgba(0, 0, 0, 0.16),
-      0 0 var(--pixel-glow-soft, 4px) var(--color-signal),
-      0 0 var(--pixel-glow-strength, 10px) var(--color-signal-glow);
+      0 0 calc(var(--pixel-glow-soft, 4px) * 1.08) var(--direction-two-ambient-signal, var(--color-signal)),
+      0 0 var(--pixel-glow-strength, 10px) var(--direction-two-ambient-glow, var(--color-signal-glow));
   }
-  17% {
-    filter: brightness(1.18) saturate(1.08);
-    opacity: 0.92;
-    transform: translateZ(0) scale(0.96);
+  72% {
+    filter: brightness(1.04) saturate(1.02);
     box-shadow:
       0 0 0 1px rgba(0, 0, 0, 0.14),
-      0 0 calc(var(--pixel-glow-soft, 4px) + 3px) var(--color-signal-glow);
+      0 0 calc(var(--pixel-glow-soft, 4px) + 3px) var(--direction-two-ambient-glow, var(--color-signal-glow));
   }
 }
 @keyframes direction-two-mark-layer-enter {
@@ -304,6 +308,24 @@ body::before {
       0 0 7px var(--color-signal-glow);
   }
 }
+@keyframes direction-two-input-stagger {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  18% {
+    transform: translateX(-5px);
+  }
+  38% {
+    transform: translateX(4px);
+  }
+  58% {
+    transform: translateX(-2px);
+  }
+  76% {
+    transform: translateX(1px);
+  }
+}
 
 .animate-fadeUp { animation: fadeUp 0.4s ease forwards; }
 .animate-fadeIn { animation: fadeIn 0.3s ease forwards; }
@@ -344,12 +366,14 @@ body::before {
   opacity: 1;
   transform: scale(1);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
-  animation: direction-two-mark-shimmer 1.85s linear var(--mark-shimmer-delay, 0ms) infinite;
 }
-.direction-two-mark-layer-entering .direction-two-mark-pixel-active {
+.direction-two-mark-word.direction-two-mark-layer-entering .direction-two-mark-pixel-active {
   animation:
     direction-two-mark-pixel-resolve 420ms var(--ease-out-strong) var(--mark-pixel-delay, 0ms) both,
-    direction-two-mark-shimmer 1.85s linear calc(var(--mark-pixel-delay, 0ms) + 260ms + var(--mark-shimmer-delay, 0ms)) infinite;
+    direction-two-mark-shimmer var(--mark-intro-shimmer-duration, 720ms) linear calc(var(--mark-pixel-delay, 0ms) + 220ms + var(--mark-shimmer-delay, 0ms)) var(--mark-intro-shimmer-count, 1);
+}
+.direction-two-mark:hover .direction-two-mark-word .direction-two-mark-pixel-active {
+  animation: direction-two-mark-shimmer var(--mark-hover-shimmer-duration, 420ms) linear var(--mark-shimmer-delay, 0ms) var(--mark-hover-shimmer-count, 1);
 }
 .direction-two-mark-pixel-idle {
   background: var(--color-border);
@@ -368,13 +392,14 @@ body::before {
 }
 .direction-two-highlight-icon {
   transform-origin: center;
+  transition: filter 90ms ease;
   will-change: filter;
 }
 .direction-two-highlight-pixel-active,
 .direction-two-highlight-pixel-idle {
   transition:
-    opacity 180ms ease,
-    box-shadow 180ms ease;
+    opacity 90ms ease,
+    box-shadow 90ms ease;
 }
 .direction-two-highlight-pixel-active {
   box-shadow: 0 0 0 rgba(200, 255, 87, 0);
@@ -383,7 +408,7 @@ body::before {
   filter: drop-shadow(0 0 7px var(--color-signal-glow));
 }
 .direction-two-intro-row:hover .direction-two-highlight-pixel-active {
-  animation: direction-two-mark-shimmer 820ms linear var(--highlight-shimmer-delay, 0ms) 1;
+  animation: direction-two-mark-shimmer var(--highlight-shimmer-duration, 420ms) linear var(--highlight-shimmer-delay, 0ms) 1;
   opacity: 1;
 }
 .direction-two-intro-row:hover .direction-two-highlight-pixel-idle {
@@ -392,7 +417,8 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   .direction-two-highlight-icon,
   .direction-two-highlight-pixel-active,
-  .direction-two-highlight-pixel-idle {
+  .direction-two-highlight-pixel-idle,
+  .direction-two-input-nudge {
     animation: none;
     transition: none;
   }
@@ -403,28 +429,40 @@ body::before {
 }
 .direction-two-ambient-glow {
   background:
-    radial-gradient(ellipse at 52% 0%, rgba(200, 255, 87, 0.08) 0%, rgba(200, 255, 87, 0.034) 30%, rgba(0, 0, 0, 0) 62%),
-    linear-gradient(180deg, rgba(200, 255, 87, 0.045) 0%, rgba(0, 0, 0, 0) 42%),
+    radial-gradient(ellipse at 52% 0%, color-mix(in srgb, var(--color-signal) 8%, transparent) 0%, color-mix(in srgb, var(--color-signal) 3.4%, transparent) 30%, rgba(0, 0, 0, 0) 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-signal) 4.5%, transparent) 0%, rgba(0, 0, 0, 0) 42%),
     radial-gradient(circle at 18% 6%, var(--color-signal-glow) 0%, rgba(0, 0, 0, 0) 38%);
   mix-blend-mode: screen;
 }
 .direction-two-ambient-pixel {
-  opacity: 0;
-  animation: direction-two-ambient-pixel-sweep var(--pixel-sweep-duration, 0.92s) cubic-bezier(0.22, 1, 0.36, 1) var(--pixel-wave-delay, 0s) both;
+  opacity: 1;
+  animation: direction-two-ambient-pixel-drift var(--pixel-drift-duration, 14s) ease-in-out var(--pixel-drift-delay, 0s) infinite;
   mix-blend-mode: screen;
   transform-origin: 50% 60%;
-  will-change: transform, opacity;
+  will-change: transform;
 }
 .direction-two-ambient-pixel-core {
-  background-color: var(--color-signal);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14), 0 0 var(--pixel-glow-soft, 4px) var(--color-signal-glow);
+  background-color: var(--direction-two-ambient-signal, var(--color-signal));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14), 0 0 var(--pixel-glow-soft, 4px) var(--direction-two-ambient-glow, var(--color-signal-glow));
+  opacity: calc(var(--pixel-opacity, 0.24) * 0.5);
   transform-origin: center;
-  animation: direction-two-ambient-pixel-shimmer var(--pixel-shimmer-duration, 4.2s) linear calc(var(--pixel-shimmer-delay, 0s) + var(--pixel-shimmer-phase, 0s)) infinite;
+  animation:
+    direction-two-ambient-pixel-presence var(--pixel-field-duration, 10s) ease-in-out var(--pixel-field-delay, 0s) infinite,
+    direction-two-ambient-pixel-glow var(--pixel-glow-duration, 9s) ease-in-out var(--pixel-glow-delay, 0s) infinite;
   will-change: transform, filter, opacity, box-shadow;
 }
-.direction-two-cursor-scope,
-.direction-two-cursor-scope * {
-  cursor: none !important;
+.direction-two-input-nudge {
+  animation: direction-two-input-stagger 240ms var(--ease-out-strong) both;
+}
+.direction-two-pixel-cursor,
+.direction-two-pixel-cursor * {
+  cursor: var(--direction-two-cursor-square) 0 0, auto;
+}
+
+.direction-two-pixel-cursor input:disabled,
+.direction-two-pixel-cursor textarea:disabled,
+.direction-two-pixel-cursor button:disabled {
+  cursor: wait;
 }
 
 /* Input styles */

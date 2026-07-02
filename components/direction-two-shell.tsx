@@ -4,18 +4,33 @@ import { CSSProperties, KeyboardEvent, useEffect, useMemo, useRef, useState } fr
 import { useRouter } from "next/navigation";
 
 import {
-  commands,
   completeDirectionTwoCommand,
+  completeDirectionTwoCreateField,
+  directionTwoCommandReferenceLines,
   directionTwoThemes,
+  getDirectionTwoCreateEditingStep,
+  getDirectionTwoCreateAnswerError,
   getDirectionTwoCreateHint,
+  getDirectionTwoInlineFeedbackMessage,
+  getDirectionTwoInlineGhostText,
+  getDirectionTwoCreatePromptPresentation,
+  getDirectionTwoCreateTimeArrowValue,
+  getDirectionTwoCreateVisualSegments,
+  getDirectionTwoCreateInlineInputError,
+  getDirectionTwoInlinePromptPresentation,
+  getDirectionTwoStyleGhostChoices,
+  parseDirectionTwoInlineCommand,
   parseDirectionTwoCreateCommand,
+  resolveDirectionTwoEnterAction,
   resolveDirectionTwoThemeChoice,
 } from "@/lib/direction-two-shell.mjs";
 import {
   buildDirectionTwoMarkPattern,
+  directionTwoAmbientAtmosphere,
   directionTwoAmbientConfig,
   createDirectionTwoAmbientPixels,
   directionTwoMarkIcons,
+  directionTwoMarkMotion,
   directionTwoMarkWords,
   getDirectionTwoScrambleFrame,
 } from "@/lib/direction-two-intro.mjs";
@@ -49,7 +64,7 @@ type CreateDraft = {
 
 type ParsedCreateCommand =
   | { status: "not-create" }
-  | { status: "partial"; nextStep: "topic" | "expiry" | "limit" | "password-choice"; draft: CreateDraft }
+  | { status: "partial"; nextStep: "topic" | "expiry" | "limit" | "password-choice" | "password"; draft: CreateDraft }
   | { status: "ready"; draft: CreateDraft }
   | { status: "invalid"; message: string };
 
@@ -75,15 +90,9 @@ const introHeadline = "Create a temporary room where friends can speak honestly,
 const introScrambleDelayMs = 140;
 const introScrambleDurationMs = 1080;
 const terminalRevealDelayMs = 1640;
-const markFlipDelayMs = 2800;
-const markSwapDurationMs = 560;
+const markFlipDelayMs = directionTwoMarkMotion.iconFlipDelayMs;
+const markSwapDurationMs = directionTwoMarkMotion.iconSwapDurationMs;
 type DirectionTwoMarkIcon = (typeof directionTwoMarkIcons)[number];
-
-const directionTwoAmbientAtmosphere = {
-  glowStrength: 12,
-  glowOpacity: 0.08,
-  blendMode: "screen",
-} as const;
 
 const introHighlights = [
   {
@@ -173,38 +182,57 @@ function promptFor(flow: SessionFlow | null) {
 
   switch (flow.step) {
     case "topic":
-      return "topic";
+      return "room name";
     case "expiry":
-      return "expires";
+      return "total time";
     case "limit":
-      return "limit";
+      return "maximum participants";
     case "password-choice":
-      return "password?";
+      return "add password?(y/n)";
     case "password":
-      return "password";
+      return "write password";
     case "confirm":
-      return "confirm";
+      return "tap enter to create";
   }
 }
 
 function placeholderFor(flow: SessionFlow | null) {
-  if (!flow) return "create a room";
+  if (!flow) return "write 'create' to start a room";
   if (flow.type === "join") return "abc123 or room link";
   if (flow.type === "style") return "1, 2, 3, 4, or 5";
 
   switch (flow.step) {
     case "topic":
-      return "Should we go to Goa this December?";
+      return "what should we call the room?";
     case "expiry":
-      return "60";
+      return "what should be total time?";
     case "limit":
-      return "10";
+      return "maximum participants?";
     case "password-choice":
-      return "n";
+      return "add password?(y/n)";
     case "password":
-      return "optional room password";
+      return "write password";
     case "confirm":
-      return "y";
+      return "tap enter to create";
+  }
+}
+
+function createPromptPresentationForFlow(flow: SessionFlow | null) {
+  if (!flow || flow.type !== "create") return null;
+
+  switch (flow.step) {
+    case "topic":
+      return getDirectionTwoCreatePromptPresentation("create");
+    case "expiry":
+      return getDirectionTwoCreatePromptPresentation("create room");
+    case "limit":
+      return getDirectionTwoCreatePromptPresentation("create room 60");
+    case "password-choice":
+      return getDirectionTwoCreatePromptPresentation("create room 60 8");
+    case "password":
+      return getDirectionTwoCreatePromptPresentation("create room 60 8 y");
+    case "confirm":
+      return getDirectionTwoCreatePromptPresentation("create room 60 8 n");
   }
 }
 
@@ -219,7 +247,7 @@ export function DirectionTwoShell() {
   const mainRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const promptRowRef = useRef<HTMLDivElement | null>(null);
-  const cursorRef = useRef<HTMLDivElement | null>(null);
+  const inputNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [lines, setLines] = useState<TerminalLine[]>(initialLines);
   const [flow, setFlow] = useState<SessionFlow | null>(null);
@@ -227,13 +255,12 @@ export function DirectionTwoShell() {
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
+  const [inputFeedbackMessage, setInputFeedbackMessage] = useState<string | null>(null);
   const [scrollReserveHeight, setScrollReserveHeight] = useState(0);
   const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-  const [supportsCustomCursor, setSupportsCustomCursor] = useState(false);
-  const [isCursorVisible, setIsCursorVisible] = useState(false);
-  const [isCursorPressed, setIsCursorPressed] = useState(false);
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
+  const [isInputNudging, setIsInputNudging] = useState(false);
   const [markIconState, setMarkIconState] = useState({
     current: directionTwoMarkIcons[0],
     previous: null as DirectionTwoMarkIcon | null,
@@ -243,12 +270,10 @@ export function DirectionTwoShell() {
     return createDirectionTwoAmbientPixels(Math.random, directionTwoAmbientConfig);
   }, []);
   const ambientAtmosphereStyle = {
-    background: [
-      `radial-gradient(ellipse at 52% 0%, rgba(200, 255, 87, ${directionTwoAmbientAtmosphere.glowOpacity}) 0%, rgba(200, 255, 87, ${directionTwoAmbientAtmosphere.glowOpacity * 0.42}) 30%, rgba(0, 0, 0, 0) 62%)`,
-      "linear-gradient(180deg, rgba(200, 255, 87, 0.045) 0%, rgba(0, 0, 0, 0) 42%)",
-      "radial-gradient(circle at 18% 6%, var(--color-signal-glow) 0%, rgba(0, 0, 0, 0) 38%)",
-    ].join(", "),
-    mixBlendMode: directionTwoAmbientAtmosphere.blendMode,
+    background: directionTwoAmbientAtmosphere.background,
+    mixBlendMode: directionTwoAmbientAtmosphere.mixBlendMode,
+    "--direction-two-ambient-signal": directionTwoAmbientAtmosphere.signalColor,
+    "--direction-two-ambient-glow": directionTwoAmbientAtmosphere.signalGlow,
   } as CSSProperties;
   const headlineText = useDirectionTwoScrambleText(introHeadline, {
     durationMs: introScrambleDurationMs,
@@ -264,11 +289,36 @@ export function DirectionTwoShell() {
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
+  const nudgeInput = (message: string) => {
+    if (inputNudgeTimeoutRef.current) {
+      clearTimeout(inputNudgeTimeoutRef.current);
+    }
+
+    setIsInputNudging(false);
+    requestAnimationFrame(() => {
+      setIsInputNudging(true);
+      inputNudgeTimeoutRef.current = setTimeout(() => {
+        setIsInputNudging(false);
+        inputNudgeTimeoutRef.current = null;
+      }, 260);
+    });
+
+    sound.play("error");
+    setInputFeedbackMessage(getDirectionTwoInlineFeedbackMessage(message));
+    setKeyboardStatus(message);
+  };
+
+  const rejectInputInline = (value: string, message: string) => {
+    setInputValue(value);
+    nudgeInput(message);
+  };
+
   const cancelFlow = () => {
     sound.play("close");
     if (flow) appendLines(line("system", "cancelled current prompt"));
     setFlow(null);
     setInputValue("");
+    setInputFeedbackMessage(null);
     setKeyboardStatus("Prompt cancelled.");
     focusInput();
   };
@@ -277,6 +327,7 @@ export function DirectionTwoShell() {
     sound.play("press");
     setFlow(null);
     setInputValue("");
+    setInputFeedbackMessage(null);
     setLines(initialLines);
     setKeyboardStatus("Terminal cleared.");
     focusInput();
@@ -287,23 +338,27 @@ export function DirectionTwoShell() {
   }, []);
 
   useEffect(() => {
+    return () => {
+      if (inputNudgeTimeoutRef.current) {
+        clearTimeout(inputNudgeTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const finePointerQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
 
     const syncPreferences = () => {
       setPrefersReducedMotion(reduceMotionQuery.matches);
-      setSupportsCustomCursor(finePointerQuery.matches);
     };
 
     syncPreferences();
     reduceMotionQuery.addEventListener("change", syncPreferences);
-    finePointerQuery.addEventListener("change", syncPreferences);
 
     return () => {
       reduceMotionQuery.removeEventListener("change", syncPreferences);
-      finePointerQuery.removeEventListener("change", syncPreferences);
     };
   }, []);
 
@@ -396,49 +451,6 @@ export function DirectionTwoShell() {
   }, [flow, lines.length]);
 
   useEffect(() => {
-    if (!supportsCustomCursor || !mainRef.current || !cursorRef.current) return;
-
-    const shell = mainRef.current;
-    const cursor = cursorRef.current;
-    let frameId = 0;
-    let position = { x: 0, y: 0 };
-
-    const renderCursor = () => {
-      cursor.style.transform = `translate3d(${position.x}px, ${position.y}px, 0)`;
-      frameId = 0;
-    };
-
-    const handlePointerMove = (event: PointerEvent) => {
-      position = {
-        x: event.clientX - 5,
-        y: event.clientY - 5,
-      };
-      setIsCursorVisible(true);
-      if (!frameId) frameId = window.requestAnimationFrame(renderCursor);
-    };
-
-    const handlePointerDown = () => setIsCursorPressed(true);
-    const handlePointerUp = () => setIsCursorPressed(false);
-    const handlePointerLeave = () => {
-      setIsCursorVisible(false);
-      setIsCursorPressed(false);
-    };
-
-    shell.addEventListener("pointermove", handlePointerMove);
-    shell.addEventListener("pointerdown", handlePointerDown);
-    shell.addEventListener("pointerup", handlePointerUp);
-    shell.addEventListener("pointerleave", handlePointerLeave);
-
-    return () => {
-      if (frameId) window.cancelAnimationFrame(frameId);
-      shell.removeEventListener("pointermove", handlePointerMove);
-      shell.removeEventListener("pointerdown", handlePointerDown);
-      shell.removeEventListener("pointerup", handlePointerUp);
-      shell.removeEventListener("pointerleave", handlePointerLeave);
-    };
-  }, [supportsCustomCursor]);
-
-  useEffect(() => {
     const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
       const target = event.target;
       const isEditableTarget =
@@ -470,27 +482,20 @@ export function DirectionTwoShell() {
   const printHelp = (command = "help") => {
     appendLines(
       line("input", command),
-      line("output", "inkog creates temporary rooms without public profiles."),
-      line("output", "create <title> <minutes> <members> <password|no>"),
-      line("output", "create       start a guided private room setup"),
-      line("output", "join <code>  enter a shared room"),
-      line("output", "style        switch the live app theme"),
-      line("output", "sound        show sound status, or use sound on/off"),
-      line("output", "clear        reset this local transcript"),
-      line("output", "keys         Enter submit, Up/Down history, Tab complete, Esc cancel"),
+      ...directionTwoCommandReferenceLines.map(referenceLine => line("output", referenceLine)),
     );
-    setKeyboardStatus("Help printed.");
+    setKeyboardStatus("Command list printed.");
   };
 
   const beginCreate = (command = "create") => {
     appendLines(
       line("input", command),
       line("output", "starting private room setup"),
-      line("output", "answer each prompt, or use: create <title> <minutes> <members> <password|no>"),
+      line("output", "answer each prompt, or use: create <room name> <time> <participants> <y/n>"),
     );
     setFlow({ type: "create", step: "topic", draft: initialDraft });
     sound.play("press");
-    setKeyboardStatus("Create flow started. Enter the room topic.");
+    setKeyboardStatus("Create flow started. What should we call the room?");
   };
 
   const beginJoin = (command = "join") => {
@@ -526,25 +531,21 @@ export function DirectionTwoShell() {
     focusInput();
   };
 
-  const answerStylePrompt = (rawAnswer: string) => {
+  const answerStylePrompt = (rawAnswer: string, inputText = rawAnswer) => {
     const theme = resolveDirectionTwoThemeChoice(rawAnswer);
     if (!theme) {
-      appendLines(line("input", rawAnswer), line("error", "choose 1, 2, 3, 4, or 5"));
-      sound.play("error");
-      setKeyboardStatus("Theme choice must be 1 through 5.");
+      rejectInputInline(inputText, "Theme choice must be 1 through 5.");
       return;
     }
 
-    commitThemeSelection(theme, rawAnswer, rawAnswer.trim() === "5" ? "surprise" : "manual");
+    commitThemeSelection(theme, inputText, rawAnswer.trim() === "5" ? "surprise" : "manual");
   };
 
   const openRoom = (rawRoomId: string, command = `join ${rawRoomId}`) => {
     const id = cleanRoomId(rawRoomId);
 
     if (!id) {
-      appendLines(line("input", command), line("error", "missing room id"));
-      sound.play("error");
-      setKeyboardStatus("Missing room id.");
+      rejectInputInline(command, "Missing room id.");
       return;
     }
 
@@ -579,9 +580,7 @@ export function DirectionTwoShell() {
       const data = await res.json();
 
       if (!res.ok) {
-        appendLines(line("error", data.message || "room creation failed"));
-        sound.play("error");
-        setKeyboardStatus("Room creation failed.");
+        rejectInputInline("", data.message || "Room creation failed.");
         return;
       }
 
@@ -593,9 +592,7 @@ export function DirectionTwoShell() {
       sound.play("success");
       router.push(`/room/${data.id}`);
     } catch {
-      appendLines(line("error", "could not reach room server"));
-      sound.play("error");
-      setKeyboardStatus("Could not reach room server.");
+      rejectInputInline("", "Could not reach room server.");
     } finally {
       setCreating(false);
       setFlow(null);
@@ -604,9 +601,7 @@ export function DirectionTwoShell() {
 
   const applyInlineCreateCommand = (command: string, parsed: Exclude<ParsedCreateCommand, { status: "not-create" }>) => {
     if (parsed.status === "invalid") {
-      appendLines(line("input", command), line("error", parsed.message));
-      sound.play("error");
-      setKeyboardStatus(parsed.message);
+      rejectInputInline(command, parsed.message);
       return;
     }
 
@@ -629,51 +624,38 @@ export function DirectionTwoShell() {
 
   const answerCreatePrompt = (flowState: Extract<SessionFlow, { type: "create" }>, rawAnswer: string) => {
     const answer = rawAnswer.trim();
+    const answerError = getDirectionTwoCreateAnswerError(flowState.step, rawAnswer);
+
+    if (answerError) {
+      rejectInputInline(rawAnswer, answerError);
+      return;
+    }
 
     if (flowState.step === "topic") {
-      if (!answer) {
-        appendLines(line("error", "topic cannot be empty"));
-        sound.play("error");
-        setKeyboardStatus("Topic cannot be empty.");
-        return;
-      }
-
       appendLines(line("input", answer), line("output", "topic saved"));
       sound.play("success");
       setFlow({ type: "create", step: "expiry", draft: { ...flowState.draft, topic: answer } });
-      setKeyboardStatus("Enter expiry in minutes.");
+      setKeyboardStatus("What should be total time?");
       return;
     }
 
     if (flowState.step === "expiry") {
       const expiry = Number(answer);
-      if (!Number.isFinite(expiry) || expiry < 15) {
-        appendLines(line("input", answer), line("error", "expiry must be 15 minutes or more"));
-        sound.play("error");
-        setKeyboardStatus("Expiry must be 15 minutes or more.");
-        return;
-      }
 
       appendLines(line("input", answer), line("output", `expires in ${expiry}m`));
       sound.play("success");
       setFlow({ type: "create", step: "limit", draft: { ...flowState.draft, expiry } });
-      setKeyboardStatus("Enter member limit.");
+      setKeyboardStatus("Maximum participants?");
       return;
     }
 
     if (flowState.step === "limit") {
       const roomLimit = Number(answer);
-      if (!Number.isInteger(roomLimit) || roomLimit < 1 || roomLimit > 30) {
-        appendLines(line("input", answer), line("error", "member limit must be a whole number from 1 to 30"));
-        sound.play("error");
-        setKeyboardStatus("Member limit must be from 1 to 30.");
-        return;
-      }
 
       appendLines(line("input", answer), line("output", `member limit set: ${roomLimit}`));
       sound.play("success");
       setFlow({ type: "create", step: "password-choice", draft: { ...flowState.draft, roomLimit } });
-      setKeyboardStatus("Choose whether the room needs a password.");
+      setKeyboardStatus("Add password? Answer y or n.");
       return;
     }
 
@@ -682,7 +664,7 @@ export function DirectionTwoShell() {
         appendLines(line("input", answer), line("output", "password: off"));
         sound.play("success");
         setFlow({ type: "create", step: "confirm", draft: { ...flowState.draft, password: "" } });
-        setKeyboardStatus("Confirm room creation.");
+        setKeyboardStatus("Tap Enter to create.");
         return;
       }
 
@@ -690,28 +672,16 @@ export function DirectionTwoShell() {
         appendLines(line("input", answer), line("output", "password: on"));
         sound.play("success");
         setFlow({ type: "create", step: "password", draft: flowState.draft });
-        setKeyboardStatus("Enter the room password.");
+        setKeyboardStatus("Write password.");
         return;
       }
-
-      appendLines(line("input", answer), line("error", "answer y or n"));
-      sound.play("error");
-      setKeyboardStatus("Answer y or n.");
-      return;
     }
 
     if (flowState.step === "password") {
-      if (!answer) {
-        appendLines(line("error", "password cannot be empty when password protection is on"));
-        sound.play("error");
-        setKeyboardStatus("Password cannot be empty.");
-        return;
-      }
-
       appendLines(line("input", "********"), line("output", "password stored locally until room creation"));
       sound.play("success");
       setFlow({ type: "create", step: "confirm", draft: { ...flowState.draft, password: answer } });
-      setKeyboardStatus("Confirm room creation.");
+      setKeyboardStatus("Tap Enter to create.");
       return;
     }
 
@@ -724,14 +694,12 @@ export function DirectionTwoShell() {
         return;
       }
 
-      if (isYes(answer)) {
-        void createRoom(flowState.draft);
+      if (!answer || isYes(answer)) {
+        void createRoom(flowState.draft, { confirmInput: answer || null });
         return;
       }
 
-      appendLines(line("input", answer), line("error", "answer y or n"));
-      sound.play("error");
-      setKeyboardStatus("Answer y or n.");
+      rejectInputInline(rawAnswer, "Answer y or n.");
     }
   };
 
@@ -741,9 +709,7 @@ export function DirectionTwoShell() {
     if (flow.type === "join") {
       const id = cleanRoomId(rawAnswer);
       if (!id) {
-        appendLines(line("error", "room id cannot be empty"));
-        sound.play("error");
-        setKeyboardStatus("Room id cannot be empty.");
+        rejectInputInline(rawAnswer, "Room id cannot be empty.");
         return;
       }
 
@@ -760,20 +726,18 @@ export function DirectionTwoShell() {
     answerCreatePrompt(flow, rawAnswer);
   };
 
-  const handleSoundCommand = (rawCommand: string) => {
+  const handleSoundCommand = (rawCommand: string, transcriptCommand = rawCommand) => {
     const command = rawCommand.startsWith("/") ? rawCommand : `/${rawCommand}`;
     const parsed = parseSystemSoundCommand(command);
 
     if (parsed.type === "invalid") {
-      appendLines(line("input", command), line("error", parsed.message ?? "usage: /sound on, /sound off, or /sound status"));
-      sound.play("error");
-      setKeyboardStatus("Sound command usage printed.");
+      rejectInputInline(rawCommand, parsed.message ?? "Use sound on, sound off, or sound status.");
       return;
     }
 
     if (parsed.type === "status") {
       const status = formatSystemSoundStatus(sound.muted);
-      appendLines(line("input", command), line("output", status));
+      appendLines(line("input", transcriptCommand), line("output", status));
       sound.play("notify");
       setKeyboardStatus(status);
       return;
@@ -785,7 +749,7 @@ export function DirectionTwoShell() {
     }
     sound.setMuted(nextMuted);
     const status = formatSystemSoundStatus(nextMuted);
-    appendLines(line("input", command), line("output", status));
+    appendLines(line("input", transcriptCommand), line("output", status));
     setKeyboardStatus(status);
   };
 
@@ -793,9 +757,19 @@ export function DirectionTwoShell() {
     const command = rawCommand.trim();
     const normalized = command.toLowerCase().replace(/^\/+/, "");
 
-    if (!command || creating) return;
+    if (creating) return;
+
+    if (!command) {
+      if (flow?.type === "create" && flow.step === "confirm") {
+        setInputValue("");
+        setInputFeedbackMessage(null);
+        submitFlowAnswer(command);
+      }
+      return;
+    }
 
     setInputValue("");
+    setInputFeedbackMessage(null);
 
     if (flow) {
       submitFlowAnswer(command);
@@ -815,6 +789,20 @@ export function DirectionTwoShell() {
       return;
     }
 
+    const parsedInlineCommand = parseDirectionTwoInlineCommand(command);
+
+    if (parsedInlineCommand?.command === "join") {
+      if (parsedInlineCommand.argument) {
+        openRoom(parsedInlineCommand.argument, command);
+        return;
+      }
+
+      if (parsedInlineCommand.usesSlash) {
+        rejectInputInline(command, "Room id cannot be empty.");
+        return;
+      }
+    }
+
     if (normalized === "join" || normalized === "open") {
       beginJoin(command);
       return;
@@ -830,8 +818,30 @@ export function DirectionTwoShell() {
       return;
     }
 
+    if (parsedInlineCommand?.command === "style") {
+      if (parsedInlineCommand.argument) {
+        answerStylePrompt(parsedInlineCommand.argument, command);
+        return;
+      }
+
+      if (parsedInlineCommand.usesSlash) {
+        rejectInputInline(command, "Choose 1, 2, 3, 4, or 5.");
+        return;
+      }
+    }
+
     if (normalized === "style") {
       beginStyle(command.startsWith("/") ? command : "/style");
+      return;
+    }
+
+    if (normalized.startsWith("style ")) {
+      answerStylePrompt(command.replace(/^\/?style\s+/i, ""), command);
+      return;
+    }
+
+    if (parsedInlineCommand?.command === "sound") {
+      handleSoundCommand(parsedInlineCommand.usesSlash ? `sound ${parsedInlineCommand.argument}` : command, command);
       return;
     }
 
@@ -840,25 +850,83 @@ export function DirectionTwoShell() {
       return;
     }
 
-    if (normalized === "help" || normalized === "?") {
+    if (
+      parsedInlineCommand?.command === "help" ||
+      parsedInlineCommand?.command === "command" ||
+      parsedInlineCommand?.command === "commands" ||
+      normalized === "?"
+    ) {
       printHelp(command);
       return;
     }
 
-    appendLines(
-      line("input", command),
-      line("error", `command not found: ${command}`),
-      line("output", "try help"),
-    );
-    sound.play("error");
-    setKeyboardStatus(`Command not found: ${command}.`);
+    if (normalized === "help" || normalized.startsWith("help ")) {
+      printHelp(command);
+      return;
+    }
+
+    rejectInputInline(command, `Command not found: ${command}.`);
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (creating) return;
 
+    const createEditingStep = !flow ? getDirectionTwoCreateEditingStep(event.currentTarget.value) : null;
+
+    if (!flow && createEditingStep === "expiry" && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      event.preventDefault();
+      const nextTimeValue = getDirectionTwoCreateTimeArrowValue(
+        event.currentTarget.value,
+        event.key === "ArrowUp" ? "up" : "down",
+      );
+
+      if (!nextTimeValue) {
+        nudgeInput("Type a number for total time first.");
+        return;
+      }
+
+      setInputValue(nextTimeValue);
+      setInputFeedbackMessage(null);
+      setHistoryIndex(null);
+      sound.play("press");
+      setKeyboardStatus(`Total time set to ${nextTimeValue.split("/").at(-1)?.trim()} minutes.`);
+      return;
+    }
+
+    if (
+      !flow &&
+      createEditingStep === "expiry" &&
+      event.key.length === 1 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !/^\d$/.test(event.key)
+    ) {
+      event.preventDefault();
+      nudgeInput("Total time only accepts numbers.");
+      return;
+    }
+
     if (event.key === "Enter") {
       event.preventDefault();
+      if (!flow) {
+        const enterAction = resolveDirectionTwoEnterAction(event.currentTarget.value);
+
+        if (enterAction?.type === "continue-inline" && enterAction.value) {
+          setInputValue(enterAction.value);
+          setInputFeedbackMessage(null);
+          sound.play("press");
+          setKeyboardStatus(enterAction.hint);
+          return;
+        }
+
+        if (enterAction?.type === "hold-inline") {
+          sound.play("press");
+          setKeyboardStatus(enterAction.hint);
+          return;
+        }
+      }
+
       executeCommand(event.currentTarget.value);
       return;
     }
@@ -870,6 +938,7 @@ export function DirectionTwoShell() {
       const nextIndex = historyIndex === null ? history.length - 1 : Math.max(0, historyIndex - 1);
       setHistoryIndex(nextIndex);
       setInputValue(history[nextIndex]);
+      setInputFeedbackMessage(null);
       sound.play("press");
       setKeyboardStatus("Previous command loaded.");
       return;
@@ -883,6 +952,7 @@ export function DirectionTwoShell() {
       if (nextIndex >= history.length) {
         setHistoryIndex(null);
         setInputValue("");
+        setInputFeedbackMessage(null);
         sound.play("press");
         setKeyboardStatus("Command history cleared from prompt.");
         return;
@@ -890,6 +960,7 @@ export function DirectionTwoShell() {
 
       setHistoryIndex(nextIndex);
       setInputValue(history[nextIndex]);
+      setInputFeedbackMessage(null);
       sound.play("press");
       setKeyboardStatus("Next command loaded.");
       return;
@@ -897,29 +968,54 @@ export function DirectionTwoShell() {
 
     if (event.key === "Tab" && !flow) {
       event.preventDefault();
-      const partial = inputValue.trim().toLowerCase().replace(/^\/+/, "");
-      if (!partial) return;
+      const commandCompletion = completeDirectionTwoCommand(inputValue);
+      const createFieldCompletion = completeDirectionTwoCreateField(inputValue);
 
-      const match = commands.find(command => command.startsWith(partial));
-      if (match) {
-        setInputValue(inputValue.trim().startsWith("/") ? `/${match}` : match);
+      if (commandCompletion) {
+        setInputValue(commandCompletion);
+        setInputFeedbackMessage(null);
         sound.play("press");
-        setKeyboardStatus(`${match} autocompleted.`);
+        setKeyboardStatus(`${commandCompletion.replace(/^\/+/, "")} autocompleted.`);
+        return;
+      }
+
+      if (createFieldCompletion) {
+        setInputValue(createFieldCompletion);
+        setInputFeedbackMessage(null);
+        sound.play("press");
+        setKeyboardStatus("Create field autocompleted.");
       }
     }
   };
 
+  const handleInputValueChange = (nextValue: string) => {
+    const createInlineInputError = !flow ? getDirectionTwoCreateInlineInputError(nextValue) : null;
+    if (createInlineInputError) {
+      nudgeInput(createInlineInputError);
+      return;
+    }
+
+    setInputValue(nextValue);
+    setInputFeedbackMessage(null);
+    setHistoryIndex(null);
+  };
+
   const activePrompt = promptFor(flow);
   const completionSuggestion = commandCompletionFor(inputValue, flow);
-  const createFieldSuggestion = !completionSuggestion && !flow ? getDirectionTwoCreateHint(inputValue) : null;
-  const inlineHint = completionSuggestion ?? createFieldSuggestion;
+  const createFieldSuggestion = !completionSuggestion && !flow ? getDirectionTwoInlineGhostText(inputValue) : null;
+  const createFieldHint = createFieldSuggestion ? getDirectionTwoCreateHint(inputValue) : null;
+  const createFieldPresentation = createFieldSuggestion ? getDirectionTwoInlinePromptPresentation(inputValue) : null;
+  const styleGhostChoices = createFieldSuggestion ? getDirectionTwoStyleGhostChoices(inputValue) : null;
+  const activePromptPresentation = createPromptPresentationForFlow(flow);
+  const visibleCreateFieldSuggestion = inputFeedbackMessage ? null : createFieldSuggestion;
+  const inlineHint = inputFeedbackMessage ?? createFieldHint;
+  const visualInputText = inputValue || (creating ? "creating room..." : placeholderFor(flow));
+  const visualCreateSegments = inputValue ? getDirectionTwoCreateVisualSegments(inputValue) : null;
 
   return (
     <main
       ref={mainRef}
-      className={`relative isolate min-h-screen overflow-hidden bg-[var(--background)] px-5 py-7 font-mono text-[var(--foreground)] sm:px-10 sm:py-10 ${
-        supportsCustomCursor ? "direction-two-cursor-scope" : ""
-      }`}
+      className="direction-two-pixel-cursor relative isolate min-h-screen overflow-hidden bg-[var(--background)] px-5 py-7 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
       onClick={focusInput}
     >
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-0 h-screen overflow-hidden">
@@ -935,48 +1031,26 @@ export function DirectionTwoShell() {
                 width: `${pixel.size}px`,
                 height: `${pixel.size}px`,
                 "--pixel-opacity": String(pixel.opacity),
-                "--pixel-opacity-peak": String(Math.min(pixel.opacity * 1.14, 1)),
+                "--pixel-opacity-peak": String(Math.min(pixel.opacity * 1.38, 1)),
                 "--pixel-drift-x": `${pixel.driftX}px`,
                 "--pixel-drift-y": `${pixel.driftY}px`,
-                "--pixel-drift-x-mid": `${pixel.driftX * 0.34}px`,
-                "--pixel-drift-y-mid": `${pixel.driftY * 0.34}px`,
-                "--pixel-drift-x-late": `${pixel.driftX * 0.78}px`,
-                "--pixel-drift-y-late": `${pixel.driftY * 0.78}px`,
-                "--pixel-wave-delay": `${pixel.waveDelay}s`,
-                "--pixel-sweep-duration": `${pixel.sweepDuration}s`,
-                "--pixel-shimmer-delay": `${pixel.shimmerDelay}s`,
-                "--pixel-shimmer-duration": `${pixel.duration}s`,
-                "--pixel-shimmer-phase": `${pixel.shimmerPhase}s`,
+                "--pixel-field-delay": `${pixel.fieldDelay}s`,
+                "--pixel-field-duration": `${pixel.fieldDuration}s`,
+                "--pixel-glow-delay": `${pixel.glowDelay}s`,
+                "--pixel-glow-duration": `${pixel.glowDuration}s`,
+                "--pixel-drift-delay": `${pixel.driftDelay}s`,
+                "--pixel-drift-duration": `${pixel.driftDuration}s`,
                 "--pixel-glow-strength": `${directionTwoAmbientAtmosphere.glowStrength}px`,
                 "--pixel-glow-soft": `${directionTwoAmbientAtmosphere.glowStrength * 0.45}px`,
+                "--direction-two-ambient-signal": directionTwoAmbientAtmosphere.signalColor,
+                "--direction-two-ambient-glow": directionTwoAmbientAtmosphere.signalGlow,
               } as CSSProperties
             }
           >
-            <span className="direction-two-ambient-pixel-core block h-full w-full rounded-[1px] bg-[var(--color-signal)]" />
+            <span className="direction-two-ambient-pixel-core block h-full w-full rounded-[1px]" />
           </span>
         ))}
       </div>
-      {supportsCustomCursor && (
-        <div
-          ref={cursorRef}
-          aria-hidden="true"
-          className={`pointer-events-none fixed left-0 top-0 z-40 h-[10px] w-[10px] transition-opacity duration-100 ${
-            isCursorVisible ? "opacity-100" : "opacity-0"
-          }`}
-        >
-          <div
-            className={`h-full w-full transition-[transform,background-color,box-shadow] duration-100 [transition-timing-function:var(--ease-out-strong)] ${
-              isCursorPressed ? "scale-[0.72]" : "scale-100"
-            }`}
-            style={{
-              backgroundColor: isCursorPressed ? "var(--color-signal-dim)" : "var(--color-signal)",
-              boxShadow: isCursorPressed
-                ? "0 0 0 1px rgba(0,0,0,0.28), 0 0 12px var(--color-signal-glow)"
-                : "0 0 0 1px rgba(0,0,0,0.22), 0 0 10px var(--color-signal-glow)",
-            }}
-          />
-        </div>
-      )}
       <p id="direction-two-keyboard-shortcuts" className="sr-only">
         Enter submits a command or answer. Arrow up and arrow down move through command history. Tab autocompletes commands. Escape cancels the current prompt.
       </p>
@@ -1005,13 +1079,14 @@ export function DirectionTwoShell() {
             <div className="space-y-6 pt-6 text-[12px] leading-[18px] text-[var(--muted-foreground)] sm:text-[13px]">
               {introHighlights.map((item, index) => (
                 <div
-                  className={`direction-two-intro-row flex items-center gap-3 ${prefersReducedMotion ? "" : "direction-two-intro-item"}`}
+                  className={`direction-two-intro-row flex items-center gap-[16px] text-[14px] leading-[20px] sm:text-[15px] ${prefersReducedMotion ? "" : "direction-two-intro-item"}`}
                   key={item.text}
                   style={
                     prefersReducedMotion
                       ? undefined
                       : ({
                           animationDelay: `${620 + index * 70}ms`,
+                          "--highlight-shimmer-duration": `${directionTwoMarkMotion.highlightHoverShimmerMs}ms`,
                         } as CSSProperties)
                   }
                 >
@@ -1069,13 +1144,93 @@ export function DirectionTwoShell() {
 
           <div
             ref={promptRowRef}
-            className={`${lines.length > 0 ? "mt-2 " : ""}flex min-w-0 items-baseline text-[14px] leading-[24px] text-[var(--foreground)]`}
+            className={`${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 items-center text-[14px] leading-[24px] text-[var(--foreground)]`}
           >
             <label className="sr-only" htmlFor="terminal-command">{activePrompt}</label>
-            <span className="shrink-0 whitespace-nowrap text-[var(--foreground)]" aria-hidden="true">
-              {activePrompt === "$" ? "$" : `> ${activePrompt}:`}
+            <span
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap ${
+                activePromptPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
+              }`}
+              aria-hidden="true"
+            >
+              {activePrompt === "$" ? (
+                "$"
+              ) : (
+                <>
+                  <span>{">"}</span>
+                  {activePromptPresentation && <PromptPixelGlyph pattern={activePromptPresentation.pattern} />}
+                  <span>{activePrompt}:</span>
+                </>
+              )}
             </span>
-            <div className="relative ml-2 flex min-w-0 flex-1 items-baseline">
+            <div className="relative ml-2 min-w-0 flex-1">
+              <div className="flex min-h-[24px] min-w-0 items-center overflow-hidden text-[14px] leading-[24px]" aria-hidden="true">
+                {inputValue && visualCreateSegments ? (
+                  <span className="shrink-0 whitespace-pre">
+                    {visualCreateSegments.map((segment, index) => (
+                      <span
+                        className={segment.tone === "topic" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"}
+                        data-create-segment-tone={segment.tone}
+                        key={`${segment.tone}-${index}`}
+                      >
+                        {segment.text}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span
+                    className={`shrink-0 whitespace-pre ${
+                      inputValue ? "text-[var(--foreground)]" : "text-[var(--color-dim)]"
+                    }`}
+                  >
+                    {visualInputText}
+                  </span>
+                )}
+                {inputFeedbackMessage && (
+                  <span
+                    className="pointer-events-none ml-2 shrink-0 whitespace-pre text-[14px] leading-[24px] text-[var(--color-dim)] opacity-80"
+                    id="terminal-inline-hint"
+                  >
+                    {inputFeedbackMessage}
+                  </span>
+                )}
+                {visibleCreateFieldSuggestion && (
+                  <span
+                    className={`pointer-events-none ml-2 inline-flex shrink-0 items-center gap-2 whitespace-pre ${
+                      createFieldPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
+                    } opacity-[0.55]`}
+                    id="terminal-inline-hint"
+                  >
+                    {createFieldPresentation && (
+                      <span className="inline-flex h-[24px] shrink-0 items-center opacity-80">
+                        <PromptPixelGlyph pattern={createFieldPresentation.pattern} />
+                      </span>
+                    )}
+                    {styleGhostChoices ? (
+                      <span className="inline-flex items-center gap-3">
+                        {styleGhostChoices.map(choice => {
+                          const color =
+                            choice.id === "surprise"
+                              ? `conic-gradient(from 45deg, ${themePreviewColorById.orange}, ${themePreviewColorById.blue}, ${themePreviewColorById.green}, ${themePreviewColorById.purple}, ${themePreviewColorById.orange})`
+                              : themePreviewColorById[choice.id];
+
+                          return (
+                            <span className="inline-flex items-center gap-1.5" key={choice.selection} aria-label={`${choice.selection}. ${choice.label}`}>
+                              <span>{choice.selection}.</span>
+                              <span
+                                className="inline-block size-[10px] shrink-0 rounded-[1px] border border-current/25"
+                                style={{ background: color }}
+                              />
+                            </span>
+                          );
+                        })}
+                      </span>
+                    ) : (
+                      <span>{visibleCreateFieldSuggestion}</span>
+                    )}
+                  </span>
+                )}
+              </div>
               <input
                 ref={inputRef}
                 aria-describedby={inlineHint ? "terminal-inline-hint" : undefined}
@@ -1083,16 +1238,39 @@ export function DirectionTwoShell() {
                 autoCapitalize="off"
                 autoComplete="off"
                 autoCorrect="off"
-                className="min-w-0 flex-1 appearance-none p-0 font-mono text-[14px] leading-[24px] text-[var(--foreground)] caret-[var(--foreground)] placeholder:text-[var(--color-dim)] disabled:cursor-wait disabled:opacity-60"
+                className="absolute inset-0 h-[24px] w-full appearance-none p-0 font-mono text-[14px] leading-[24px] text-transparent caret-[var(--foreground)] placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
                 disabled={creating}
                 id="terminal-command"
                 name="command"
+                onBeforeInput={event => {
+                  const insertedText = (event.nativeEvent as InputEvent).data ?? "";
+                  const createEditingStep = getDirectionTwoCreateEditingStep(inputValue);
+                  if (
+                    !flow &&
+                    (createEditingStep === "expiry" || createEditingStep === "limit") &&
+                    insertedText &&
+                    /\D/.test(insertedText)
+                  ) {
+                    event.preventDefault();
+                    nudgeInput(createEditingStep === "expiry" ? "Total time only accepts numbers." : "Member limit only accepts numbers.");
+                    return;
+                  }
+
+                  if (
+                    !flow &&
+                    createEditingStep === "password-choice" &&
+                    insertedText &&
+                    !/^[ynoes]+$/i.test(insertedText)
+                  ) {
+                    event.preventDefault();
+                    nudgeInput("Answer y or n.");
+                  }
+                }}
                 onChange={event => {
-                  setInputValue(event.target.value);
-                  setHistoryIndex(null);
+                  handleInputValueChange(event.target.value);
                 }}
                 onKeyDown={handleInputKeyDown}
-                placeholder={creating ? "creating room..." : placeholderFor(flow)}
+                placeholder=""
                 spellCheck={false}
                 style={{
                   background: "transparent",
@@ -1103,22 +1281,6 @@ export function DirectionTwoShell() {
                 type={flow?.type === "create" && flow.step === "password" ? "password" : "text"}
                 value={inputValue}
               />
-              {completionSuggestion && (
-                <span
-                  className="ml-3 shrink-0 text-[12px] leading-[24px] text-[var(--color-dim)]"
-                  id="terminal-inline-hint"
-                >
-                  tab {`->`} {completionSuggestion}
-                </span>
-              )}
-              {createFieldSuggestion && (
-                <span
-                  className="ml-3 shrink-0 text-[12px] leading-[24px] text-[var(--color-dim)]"
-                  id="terminal-inline-hint"
-                >
-                  {`->`} {createFieldSuggestion}
-                </span>
-              )}
             </div>
           </div>
 
@@ -1126,6 +1288,31 @@ export function DirectionTwoShell() {
         </div>
       </section>
     </main>
+  );
+}
+
+function PromptPixelGlyph({ pattern }: { pattern: string[] }) {
+  const columnCount = pattern[0]?.length ?? 0;
+  const rowCount = pattern.length;
+
+  return (
+    <span
+      aria-hidden="true"
+      className="grid shrink-0 -translate-y-px gap-[1px]"
+      style={{
+        gridTemplateColumns: `repeat(${columnCount}, 2px)`,
+        gridTemplateRows: `repeat(${rowCount}, 2px)`,
+      }}
+    >
+      {pattern.flatMap((row, rowIndex) =>
+        [...row].map((cell, columnIndex) => (
+          <span
+            className={cell === "1" ? "block size-[2px] bg-current opacity-95" : "block size-[2px] bg-current opacity-[0.12]"}
+            key={`${rowIndex}-${columnIndex}`}
+          />
+        )),
+      )}
+    </span>
   );
 }
 
@@ -1149,9 +1336,17 @@ function InkPatternMark({
       aria-label={`${word}, ${icon.label}`}
       className="direction-two-mark relative flex w-fit max-w-full items-start gap-[calc(var(--letter-gap)*2)] overflow-hidden [--cell:clamp(4px,0.56vw,7px)] [--gap:clamp(1px,0.12vw,2px)] [--letter-gap:clamp(5px,0.44vw,9px)]"
       role="img"
+      style={
+        {
+          "--mark-intro-shimmer-duration": `${directionTwoMarkMotion.introShimmerMs}ms`,
+          "--mark-intro-shimmer-count": directionTwoMarkMotion.introShimmerIterationCount,
+          "--mark-hover-shimmer-duration": `${directionTwoMarkMotion.hoverShimmerMs}ms`,
+          "--mark-hover-shimmer-count": directionTwoMarkMotion.hoverShimmerIterationCount,
+        } as CSSProperties
+      }
     >
       <InkPatternMarkLayer
-        className={reducedMotion ? "" : "direction-two-mark-layer-entering"}
+        className={`${reducedMotion ? "" : "direction-two-mark-layer-entering"} direction-two-mark-word`}
         key={word}
         word={word}
       />
@@ -1181,7 +1376,7 @@ function InkPatternIconLayer({
   className?: string;
 }) {
   return (
-    <div className={`direction-two-mark-layer flex w-fit origin-left items-start gap-[var(--letter-gap)] ${className}`}>
+    <div className={`direction-two-mark-layer direction-two-mark-symbol flex w-fit origin-left items-start gap-[var(--letter-gap)] ${className}`}>
       <PixelPatternGrid density={2} letterIndex={0} pattern={pattern} />
     </div>
   );
@@ -1287,7 +1482,7 @@ function PixelIcon({ pattern }: { pattern: string[] }) {
             style={
               cell === "1"
                 ? ({
-                    "--highlight-shimmer-delay": `${columnIndex * 18 + rowIndex * 8}ms`,
+                    "--highlight-shimmer-delay": `${columnIndex * 6 + rowIndex * 3}ms`,
                   } as CSSProperties)
                 : undefined
             }
