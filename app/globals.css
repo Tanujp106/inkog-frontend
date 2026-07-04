@@ -341,13 +341,18 @@ body::before {
 }
 @keyframes direction-two-mark-hover-shimmer {
   0% {
-    background-color: color-mix(in srgb, var(--foreground) 76%, var(--color-signal) 24%);
-    filter: brightness(1.1);
+    background-color: var(--foreground);
+    filter: brightness(1);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+  }
+  12% {
+    background-color: color-mix(in srgb, var(--foreground) 82%, var(--color-signal) 18%);
+    filter: brightness(1.08);
     box-shadow:
       0 0 0 1px rgba(0, 0, 0, 0.18),
       0 0 5px var(--color-signal-glow);
   }
-  28% {
+  34% {
     background-color: color-mix(in srgb, var(--foreground) 42%, var(--color-signal) 58%);
     filter: brightness(1.32);
     box-shadow:
@@ -355,7 +360,7 @@ body::before {
       0 0 9px color-mix(in srgb, var(--color-signal) 70%, transparent),
       0 0 17px var(--color-signal-glow);
   }
-  52% {
+  60% {
     background-color: color-mix(in srgb, var(--foreground) 82%, var(--color-signal) 18%);
     filter: brightness(1.08);
     box-shadow:
