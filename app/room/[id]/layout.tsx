@@ -34,7 +34,7 @@ export async function generateMetadata({ params }: Pick<RoomLayoutProps, "params
           width: ROOM_OG_WIDTH,
           height: ROOM_OG_HEIGHT,
           alt: `${room.topic} Inkog room invite`,
-          type: "image/png",
+          type: "image/gif",
         },
       ],
     },

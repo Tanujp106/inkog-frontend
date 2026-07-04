@@ -345,24 +345,31 @@ body::before {
     filter: brightness(1);
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
   }
-  12% {
-    background-color: color-mix(in srgb, var(--foreground) 82%, var(--color-signal) 18%);
-    filter: brightness(1.08);
+  18% {
+    background-color: color-mix(in srgb, var(--foreground) 90%, var(--color-signal) 10%);
+    filter: brightness(1.04);
     box-shadow:
       0 0 0 1px rgba(0, 0, 0, 0.18),
-      0 0 5px var(--color-signal-glow);
+      0 0 3px var(--color-signal-glow);
   }
-  34% {
-    background-color: color-mix(in srgb, var(--foreground) 42%, var(--color-signal) 58%);
-    filter: brightness(1.32);
+  38% {
+    background-color: color-mix(in srgb, var(--foreground) 72%, var(--color-signal) 28%);
+    filter: brightness(1.14);
     box-shadow:
       0 0 0 1px rgba(0, 0, 0, 0.18),
-      0 0 9px color-mix(in srgb, var(--color-signal) 70%, transparent),
-      0 0 17px var(--color-signal-glow);
+      0 0 6px var(--color-signal-glow);
   }
-  60% {
-    background-color: color-mix(in srgb, var(--foreground) 82%, var(--color-signal) 18%);
-    filter: brightness(1.08);
+  58% {
+    background-color: color-mix(in srgb, var(--foreground) 46%, var(--color-signal) 54%);
+    filter: brightness(1.26);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.18),
+      0 0 8px color-mix(in srgb, var(--color-signal) 62%, transparent),
+      0 0 15px var(--color-signal-glow);
+  }
+  78% {
+    background-color: color-mix(in srgb, var(--foreground) 78%, var(--color-signal) 22%);
+    filter: brightness(1.1);
     box-shadow:
       0 0 0 1px rgba(0, 0, 0, 0.18),
       0 0 5px var(--color-signal-glow);
@@ -434,7 +441,7 @@ body::before {
     direction-two-mark-soft-shimmer var(--mark-intro-shimmer-duration, 1180ms) cubic-bezier(0.22, 0.65, 0.18, 1) calc(var(--mark-pixel-delay, 0ms) + 180ms + var(--mark-shimmer-delay, 0ms)) var(--mark-intro-shimmer-count, 1);
 }
 .direction-two-mark:hover .direction-two-mark-word .direction-two-mark-pixel-active {
-  animation: direction-two-mark-hover-shimmer var(--mark-hover-shimmer-duration, 980ms) cubic-bezier(0.22, 0.65, 0.18, 1) var(--mark-shimmer-delay, 0ms) var(--mark-hover-shimmer-count, 1);
+  animation: direction-two-mark-hover-shimmer var(--mark-hover-shimmer-duration, 1200ms) cubic-bezier(0.22, 0.65, 0.18, 1) var(--mark-shimmer-delay, 0ms) var(--mark-hover-shimmer-count, 1);
 }
 .direction-two-mark:hover .direction-two-mark-symbol .direction-two-mark-pixel-active {
   animation: direction-two-mark-shimmer var(--highlight-shimmer-duration, 320ms) linear var(--mark-shimmer-delay, 0ms) 1;
