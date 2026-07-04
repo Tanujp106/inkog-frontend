@@ -2,10 +2,40 @@ import type { Metadata } from "next";
 import { AgentationProvider } from "./agentation-provider";
 import "./globals.css";
 import { SystemSoundProvider } from "@/lib/system-sound-provider";
+import { buildInkogFaviconHref } from "@/lib/inkog-favicon.mjs";
+import { ThemeFavicon } from "./theme-favicon";
 
 export const metadata: Metadata = {
-  title: "Inkog — Honest Group Decisions",
-  description: "Anonymous group chat for people who already know each other.",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
+  title: "Inkog — Honest Chats, Quick Votes",
+  description: "Temporary rooms for honest chats, quick votes, and no identity trails.",
+  icons: {
+    icon: [
+      {
+        url: buildInkogFaviconHref("green"),
+        type: "image/svg+xml",
+      },
+    ],
+  },
+  openGraph: {
+    title: "Inkog — Honest Chats, Quick Votes",
+    description: "Temporary rooms for honest chats, quick votes, and no identity trails.",
+    images: [
+      {
+        url: "/og-image.gif",
+        width: 1208,
+        height: 630,
+        alt: "Inkog pixel logo with shimmer animation",
+        type: "image/gif",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Inkog — Honest Chats, Quick Votes",
+    description: "Temporary rooms for honest chats, quick votes, and no identity trails.",
+    images: ["/og-image.png"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -18,6 +48,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
         <SystemSoundProvider>
+          <ThemeFavicon />
           {children}
           <AgentationProvider />
         </SystemSoundProvider>

@@ -1,5 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap');
 @import "tailwindcss";
+
+@font-face {
+  font-family: "Departure Mono";
+  src: url("/fonts/DepartureMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   --color-black: #050505;
@@ -54,9 +61,9 @@
   --ring: var(--color-action);
   --radius-card: 4px;
 
-  --font-mono: "IBM Plex Mono", "DM Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --font-sans: Inter, Syne, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-mono: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-sans: var(--font-mono);
+  --font-serif: var(--font-mono);
   --radius-shell: 12px;
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
@@ -141,6 +148,19 @@ h1, h2, h3, h4 {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 2px; }
 
+html:has(.direction-two-pixel-cursor),
+body:has(.direction-two-pixel-cursor) {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html:has(.direction-two-pixel-cursor)::-webkit-scrollbar,
+body:has(.direction-two-pixel-cursor)::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
 /* Noise texture overlay */
 body::before {
   content: '';
@@ -223,26 +243,6 @@ body::before {
     transform: translateZ(0) scale(0.82);
   }
 }
-@keyframes direction-two-ambient-pixel-glow {
-  0%,
-  100% {
-    filter: brightness(0.68) saturate(0.94);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14), 0 0 calc(var(--pixel-glow-soft, 4px) * 0.45) var(--direction-two-ambient-glow, var(--color-signal-glow));
-  }
-  46% {
-    filter: brightness(1.95) saturate(1.16);
-    box-shadow:
-      0 0 0 1px rgba(0, 0, 0, 0.16),
-      0 0 calc(var(--pixel-glow-soft, 4px) * 1.08) var(--direction-two-ambient-signal, var(--color-signal)),
-      0 0 var(--pixel-glow-strength, 10px) var(--direction-two-ambient-glow, var(--color-signal-glow));
-  }
-  72% {
-    filter: brightness(1.04) saturate(1.02);
-    box-shadow:
-      0 0 0 1px rgba(0, 0, 0, 0.14),
-      0 0 calc(var(--pixel-glow-soft, 4px) + 3px) var(--direction-two-ambient-glow, var(--color-signal-glow));
-  }
-}
 @keyframes direction-two-mark-layer-enter {
   from {
     opacity: 0;
@@ -308,6 +308,66 @@ body::before {
       0 0 7px var(--color-signal-glow);
   }
 }
+@keyframes direction-two-mark-soft-shimmer {
+  0%,
+  18%,
+  100% {
+    background-color: var(--foreground);
+    filter: brightness(1);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+  }
+  38% {
+    background-color: color-mix(in srgb, var(--foreground) 72%, var(--color-signal) 28%);
+    filter: brightness(1.16);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.18),
+      0 0 5px var(--color-signal-glow);
+  }
+  50% {
+    background-color: color-mix(in srgb, var(--foreground) 38%, var(--color-signal) 62%);
+    filter: brightness(1.34);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.18),
+      0 0 9px color-mix(in srgb, var(--color-signal) 72%, transparent),
+      0 0 18px var(--color-signal-glow);
+  }
+  64% {
+    background-color: color-mix(in srgb, var(--foreground) 78%, var(--color-signal) 22%);
+    filter: brightness(1.1);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.18),
+      0 0 6px var(--color-signal-glow);
+  }
+}
+@keyframes direction-two-mark-hover-shimmer {
+  0% {
+    background-color: color-mix(in srgb, var(--foreground) 76%, var(--color-signal) 24%);
+    filter: brightness(1.1);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.18),
+      0 0 5px var(--color-signal-glow);
+  }
+  28% {
+    background-color: color-mix(in srgb, var(--foreground) 42%, var(--color-signal) 58%);
+    filter: brightness(1.32);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.18),
+      0 0 9px color-mix(in srgb, var(--color-signal) 70%, transparent),
+      0 0 17px var(--color-signal-glow);
+  }
+  52% {
+    background-color: color-mix(in srgb, var(--foreground) 82%, var(--color-signal) 18%);
+    filter: brightness(1.08);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.18),
+      0 0 5px var(--color-signal-glow);
+  }
+  100% {
+    background-color: var(--foreground);
+    filter: brightness(1);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+  }
+}
 @keyframes direction-two-input-stagger {
   0%,
   100% {
@@ -354,11 +414,7 @@ body::before {
   transform-origin: center;
   transition:
     transform 360ms var(--ease-out-strong),
-    opacity 260ms var(--ease-out-strong),
-    background-color 260ms var(--ease-out-strong),
-    box-shadow 260ms var(--ease-out-strong),
-    filter 260ms var(--ease-out-strong);
-  transition-delay: var(--mark-pixel-delay, 0ms);
+    opacity 260ms var(--ease-out-strong);
   will-change: transform, opacity, background-color, box-shadow, filter;
 }
 .direction-two-mark-pixel-active {
@@ -370,10 +426,13 @@ body::before {
 .direction-two-mark-word.direction-two-mark-layer-entering .direction-two-mark-pixel-active {
   animation:
     direction-two-mark-pixel-resolve 420ms var(--ease-out-strong) var(--mark-pixel-delay, 0ms) both,
-    direction-two-mark-shimmer var(--mark-intro-shimmer-duration, 720ms) linear calc(var(--mark-pixel-delay, 0ms) + 220ms + var(--mark-shimmer-delay, 0ms)) var(--mark-intro-shimmer-count, 1);
+    direction-two-mark-soft-shimmer var(--mark-intro-shimmer-duration, 1180ms) cubic-bezier(0.22, 0.65, 0.18, 1) calc(var(--mark-pixel-delay, 0ms) + 180ms + var(--mark-shimmer-delay, 0ms)) var(--mark-intro-shimmer-count, 1);
 }
 .direction-two-mark:hover .direction-two-mark-word .direction-two-mark-pixel-active {
-  animation: direction-two-mark-shimmer var(--mark-hover-shimmer-duration, 420ms) linear var(--mark-shimmer-delay, 0ms) var(--mark-hover-shimmer-count, 1);
+  animation: direction-two-mark-hover-shimmer var(--mark-hover-shimmer-duration, 980ms) cubic-bezier(0.22, 0.65, 0.18, 1) var(--mark-shimmer-delay, 0ms) var(--mark-hover-shimmer-count, 1);
+}
+.direction-two-mark:hover .direction-two-mark-symbol .direction-two-mark-pixel-active {
+  animation: direction-two-mark-shimmer var(--highlight-shimmer-duration, 320ms) linear var(--mark-shimmer-delay, 0ms) 1;
 }
 .direction-two-mark-pixel-idle {
   background: var(--color-border);
@@ -443,13 +502,10 @@ body::before {
 }
 .direction-two-ambient-pixel-core {
   background-color: var(--direction-two-ambient-signal, var(--color-signal));
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14), 0 0 var(--pixel-glow-soft, 4px) var(--direction-two-ambient-glow, var(--color-signal-glow));
   opacity: calc(var(--pixel-opacity, 0.24) * 0.5);
   transform-origin: center;
-  animation:
-    direction-two-ambient-pixel-presence var(--pixel-field-duration, 10s) ease-in-out var(--pixel-field-delay, 0s) infinite,
-    direction-two-ambient-pixel-glow var(--pixel-glow-duration, 9s) ease-in-out var(--pixel-glow-delay, 0s) infinite;
-  will-change: transform, filter, opacity, box-shadow;
+  animation: direction-two-ambient-pixel-presence var(--pixel-field-duration, 10s) ease-in-out var(--pixel-field-delay, 0s) infinite;
+  will-change: transform, opacity;
 }
 .direction-two-input-nudge {
   animation: direction-two-input-stagger 240ms var(--ease-out-strong) both;
@@ -470,7 +526,7 @@ input, textarea {
   background: var(--bg-2);
   border: 1px solid var(--border);
   color: var(--text);
-  font-family: 'DM Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 14px;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -486,7 +542,7 @@ input::placeholder, textarea::placeholder {
 .btn-accent {
   background: var(--accent);
   color: #0c0c0e;
-  font-family: 'Syne', sans-serif;
+  font-family: var(--font-mono);
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0;
@@ -502,7 +558,7 @@ input::placeholder, textarea::placeholder {
 .btn-ghost {
   background: transparent;
   color: var(--text-muted);
-  font-family: 'DM Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   border: 1px solid var(--border);
   cursor: pointer;
@@ -514,7 +570,7 @@ input::placeholder, textarea::placeholder {
 .btn-danger {
   background: transparent;
   color: var(--red);
-  font-family: 'DM Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   border: 1px solid rgba(255, 87, 87, 0.3);
   cursor: pointer;

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
@@ -73,18 +74,19 @@ export default function Home() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <header style={{ padding: "28px 40px", borderBottom: "1px solid var(--border)" }}>
+    <div style={{ isolation: "isolate", minHeight: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
+      <AmbientShaderBackground opacity={0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
+      <header style={{ padding: "28px 40px", borderBottom: "1px solid var(--border)", position: "relative", zIndex: 1 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: "20px", letterSpacing: "-0.04em" }}>inkog</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: "20px", letterSpacing: "-0.04em" }}>inkog</span>
           <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--accent)", display: "inline-block" }} />
         </div>
       </header>
 
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 24px" }}>
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 24px", position: "relative", zIndex: 1 }}>
         <div style={{ maxWidth: "540px", width: "100%" }}>
           <div className="animate-fadeUp" style={{ textAlign: "center", marginBottom: "48px" }}>
-            <p style={{ fontFamily: "DM Mono, monospace", fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: "20px" }}>
+            <p style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: "20px" }}>
               anonymous group chat
             </p>
             <h1 style={{ fontSize: "clamp(44px, 8vw, 76px)", lineHeight: 0.95, marginBottom: "22px", letterSpacing: "-0.04em" }}>
@@ -92,7 +94,7 @@ export default function Home() {
               <span className="serif" style={{ fontStyle: "italic", color: "var(--accent)" }}>actually</span>
               {" "}think
             </h1>
-            <p style={{ color: "var(--text-muted)", fontSize: "14px", lineHeight: 1.8, fontFamily: "DM Mono, monospace" }}>
+            <p style={{ color: "var(--text-muted)", fontSize: "14px", lineHeight: 1.8, fontFamily: "var(--font-mono)" }}>
               Create a room, share the link, everyone gets an anonymous alias.<br />
               No accounts. No traces. The room self-destructs.
             </p>
@@ -213,7 +215,7 @@ export default function Home() {
         </div>
       </main>
 
-      <footer style={{ padding: "18px 40px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "center" }}>
+      <footer style={{ padding: "18px 40px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "center", position: "relative", zIndex: 1 }}>
         <p style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.08em", margin: 0 }}>
           rooms expire and vanish forever — no logs, no accounts
         </p>

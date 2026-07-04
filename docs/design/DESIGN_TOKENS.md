@@ -38,7 +38,7 @@ These tokens are derived from the Paper `Incog` terminal direction and the curre
   --accent-status: var(--color-signal);
 
   /* Font families */
-  --font-mono: "IBM Plex Mono", "DM Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-mono: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --font-sans: var(--font-mono);
   --font-serif: var(--font-mono);
 
@@ -123,7 +123,7 @@ These tokens are derived from the Paper `Incog` terminal direction and the curre
 
 ```css
 @theme {
-  --font-mono: "IBM Plex Mono", "DM Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-mono: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --font-sans: Inter, Syne, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-serif: "Instrument Serif", Georgia, serif;
 
@@ -216,7 +216,7 @@ These tokens are derived from the Paper `Incog` terminal direction and the curre
     "private": { "$value": "#a857ff", "$type": "color", "$description": "Private or masked state when a separate state color is useful" }
   },
   "font": {
-    "mono": { "$value": "IBM Plex Mono, DM Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Primary shell and chat UI family" },
+    "mono": { "$value": "Departure Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Primary shell and chat UI family" },
     "sans": { "$value": "Inter, Syne, ui-sans-serif, system-ui, sans-serif", "$type": "fontFamily", "$description": "Secondary brand and landing family" },
     "serif": { "$value": "Instrument Serif, Georgia, serif", "$type": "fontFamily", "$description": "Rare expressive italic accent" }
   },

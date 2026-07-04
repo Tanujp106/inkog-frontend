@@ -6,16 +6,23 @@ import { Link2, LogOut, Power } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
+import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import {
   buildRoomPeerColorMap,
   classifyRoomMessage,
 } from "@/lib/room-chat-ui.mjs";
+import { getRoomComposerChrome } from "@/lib/room-composer-ui.mjs";
 import {
   applyInkogTheme,
-  resolveInkogThemeChoice,
+  inkogThemeChoices,
 } from "@/lib/inkog-theme.mjs";
 import { roomThemeBackground } from "@/lib/room-background.mjs";
 import { formatRoomCountdown, getRoomRoster } from "@/lib/room-header-ui.mjs";
+import { getRoomCountdownNotification } from "@/lib/room-notifications.mjs";
+import {
+  getRoomStylePrompt,
+  resolveRoomStyleSelection,
+} from "@/lib/room-style-command.mjs";
 import { parseRoomCommand } from "@/lib/room-terminal.mjs";
 import type { RoomCommand } from "@/lib/room-terminal-types";
 import {
@@ -58,6 +65,7 @@ interface TerminalEvent {
 type Stage = "loading" | "password" | "joined" | "expired" | "error";
 type RoomRoster = { visible: { alias: string; initials: string }[]; overflow: number };
 type ComposerStatus = { tone: "muted" | "accent" | "error"; message: string };
+type PendingComposerCommand = { type: "style" } | null;
 type TranscriptItem =
   | { type: "message"; message: Message; timestamp: number }
   | { type: "poll"; poll: Poll; timestamp: number }
@@ -104,6 +112,7 @@ export default function RoomPage() {
   const [onlineCount, setOnlineCount] = useState(0);
   const [roomUsers, setRoomUsers] = useState<string[]>([]);
   const [alias, setAlias] = useState("");
+  const [activeThemeId, setActiveThemeId] = useState("green");
   const [isCreator, setIsCreator] = useState(false);
   const anonTokenRef = useRef<string>("");
 
@@ -117,16 +126,27 @@ export default function RoomPage() {
   const [socketError, setSocketError] = useState("");
   const [cursorVisible, setCursorVisible] = useState(true);
   const [composerStatus, setComposerStatus] = useState<ComposerStatus | null>(null);
+  const [pendingCommand, setPendingCommand] = useState<PendingComposerCommand>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const soundRef = useRef(sound);
   const composerStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousSecondsLeftRef = useRef<number | null>(null);
+  const localPollCreationRef = useRef(false);
 
   useEffect(() => {
     soundRef.current = sound;
   }, [sound]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const currentThemeId = document.documentElement.getAttribute("data-inkog-theme");
+    if (inkogThemeChoices.some(theme => theme.id === currentThemeId)) {
+      setActiveThemeId(currentThemeId ?? "green");
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -153,13 +173,21 @@ export default function RoomPage() {
     }, 3200);
   };
 
+  const clearComposerStatus = () => {
+    if (composerStatusTimeoutRef.current) {
+      clearTimeout(composerStatusTimeoutRef.current);
+      composerStatusTimeoutRef.current = null;
+    }
+    setComposerStatus(null);
+  };
+
   const transcript = useMemo(
     () => transcriptFrom(messages, polls, terminalEvents),
     [messages, polls, terminalEvents],
   );
   const peerColorMap = useMemo(
-    () => buildRoomPeerColorMap([...roomUsers, ...messages.map(message => message.alias)], alias),
-    [alias, messages, roomUsers],
+    () => buildRoomPeerColorMap([...roomUsers, ...messages.map(message => message.alias)], alias, activeThemeId),
+    [activeThemeId, alias, messages, roomUsers],
   );
 
   useEffect(() => {
@@ -184,6 +212,32 @@ export default function RoomPage() {
   useEffect(() => {
     if (stage === "joined") requestAnimationFrame(() => composerRef.current?.focus());
   }, [stage]);
+
+  useEffect(() => {
+    if (stage !== "joined") {
+      previousSecondsLeftRef.current = secondsLeft;
+      return;
+    }
+
+    const previousSecondsLeft = previousSecondsLeftRef.current;
+    previousSecondsLeftRef.current = secondsLeft;
+    if (previousSecondsLeft === null) return;
+
+    const notification = getRoomCountdownNotification(previousSecondsLeft, secondsLeft);
+    if (!notification) return;
+
+    soundRef.current.play("countdownWarning");
+    setMessages(current => [
+      ...current,
+      {
+        id: makeId(),
+        alias: "system",
+        content: notification.message,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      },
+    ]);
+  }, [secondsLeft, stage]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -258,7 +312,11 @@ export default function RoomPage() {
     });
 
     socket.on("poll_created", (poll: Poll) => {
-      soundRef.current.play("notify");
+      if (localPollCreationRef.current) {
+        localPollCreationRef.current = false;
+      } else {
+        soundRef.current.play("pollCreated");
+      }
       setPolls(prev => [...prev, poll]);
     });
 
@@ -419,8 +477,9 @@ export default function RoomPage() {
       return false;
     }
 
+    localPollCreationRef.current = true;
     socketRef.current.emit("create_poll", { question, options });
-    sound.play("success");
+    sound.play("pollCreated");
     return true;
   };
 
@@ -495,18 +554,21 @@ export default function RoomPage() {
     return true;
   };
 
-  const handleStyleCommand = (argument: string) => {
-    if (!argument) {
-      setComposerStatusMessage("style: 1 orange, 2 blue, 3 green, 4 purple, 5 surprise", "muted");
-      sound.play("notify");
-      return;
+  const applyResolvedStyleChoice = (argument: string) => {
+    const result = resolveRoomStyleSelection(argument);
+
+    if (!result.ok) {
+      sound.play("error");
+      setComposerStatusMessage(result.message ?? "choose 1, 2, 3, 4, 5, or a theme name", "error");
+      return false;
     }
 
-    const choice = resolveInkogThemeChoice(argument);
-    if (!choice) {
+    const theme = result.theme;
+    const transcriptMessage = result.transcriptMessage;
+    if (!theme || !transcriptMessage) {
       sound.play("error");
       setComposerStatusMessage("choose 1, 2, 3, 4, 5, or a theme name", "error");
-      return;
+      return false;
     }
 
     applyInkogTheme(
@@ -514,16 +576,56 @@ export default function RoomPage() {
         documentElement: typeof document !== "undefined" ? document.documentElement : undefined,
         storage: typeof window !== "undefined" ? window.localStorage : undefined,
       },
-      choice.id,
+      theme.id,
     );
+    setActiveThemeId(theme.id);
     sound.play("notify");
-    setComposerStatusMessage(`style set: ${choice.label}`, "accent");
+    clearComposerStatus();
+    setMessages(current => [
+      ...current,
+      {
+        id: makeId(),
+        alias: "system",
+        content: transcriptMessage,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      },
+    ]);
+    return true;
+  };
+
+  const handleStyleCommand = (argument: string) => {
+    if (!argument) {
+      setPendingCommand({ type: "style" });
+      setComposerStatusMessage(getRoomStylePrompt(), "muted");
+      sound.play("notify");
+      return;
+    }
+
+    setPendingCommand(null);
+    applyResolvedStyleChoice(argument);
   };
 
   const runComposer = () => {
     const rawValue = composerValue;
     const value = rawValue.trim();
     setComposerValue("");
+
+    if (pendingCommand?.type === "style") {
+      if (!value) {
+        setComposerStatusMessage(getRoomStylePrompt(), "muted");
+        return;
+      }
+
+      if (value.startsWith("/")) {
+        setPendingCommand(null);
+      } else {
+        if (applyResolvedStyleChoice(value)) {
+          setPendingCommand(null);
+        }
+        return;
+      }
+    }
 
     const command = parseRoomCommand(value) as RoomCommand;
 
@@ -542,6 +644,7 @@ export default function RoomPage() {
       case "message":
         sendChatMessage(command.text);
         setComposerStatus(null);
+        setPendingCommand(null);
         return;
       case "style":
         handleStyleCommand(command.argument);
@@ -583,7 +686,7 @@ export default function RoomPage() {
   };
 
   const votePoll = (pollId: string, optionIndex: number) => {
-    sound.play("press");
+    sound.play("pollVoted");
     socketRef.current?.emit("vote_poll", { pollId, optionIndex });
   };
 
@@ -593,6 +696,13 @@ export default function RoomPage() {
   const usersTitle = roomUsers.length ? roomUsers.join("\n") : "No users online";
   const roster = getRoomRoster(roomUsers);
   const showIdleCursor = composerValue.length === 0;
+  const composerChrome = getRoomComposerChrome({ composerStatus, pendingCommand });
+  const composerStatusColor =
+    composerStatus?.tone === "error"
+      ? "var(--red)"
+      : composerStatus?.tone === "accent"
+        ? "var(--accent)"
+        : "var(--text-muted)";
 
   if (stage === "expired") {
     return (
@@ -623,6 +733,7 @@ export default function RoomPage() {
   if (stage === "password") {
     return (
       <main style={styles.stateShell}>
+        <AmbientShaderBackground opacity={0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
         <section style={styles.passwordPanel}>
           <p style={styles.stateKicker}>private room</p>
           <h1 style={styles.stateTitle}>{topic}</h1>
@@ -662,6 +773,7 @@ export default function RoomPage() {
 
   return (
     <main style={styles.roomShell} onClick={() => composerRef.current?.focus()}>
+      <AmbientShaderBackground opacity={0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
       <header style={styles.roomHeader}>
         <div style={styles.headerIdentity}>
           <span style={styles.brand}>inkog</span>
@@ -764,23 +876,38 @@ export default function RoomPage() {
           event.preventDefault();
           runComposer();
         }}
-        style={styles.composer}
+        style={{
+          ...styles.composer,
+          gap: composerChrome.expanded ? "6px" : "0px",
+          minHeight: composerChrome.expanded ? "74px" : "52px",
+          paddingBottom: composerChrome.expanded ? "10px" : "8px",
+          paddingTop: composerChrome.expanded ? "10px" : "8px",
+        }}
       >
-        {composerStatus ? (
-          <p
-            style={{
-              ...styles.composerStatus,
-              color:
-                composerStatus.tone === "error"
-                  ? "var(--red)"
-                  : composerStatus.tone === "accent"
-                    ? "var(--accent)"
-                    : "var(--text-muted)",
-            }}
-          >
-            {composerStatus.message}
+        <div
+          aria-hidden={composerChrome.statusMode !== "overlay"}
+          style={{
+            ...styles.composerOverlayStatus,
+            opacity: composerChrome.statusMode === "overlay" ? 1 : 0,
+            transform: composerChrome.statusMode === "overlay" ? "translateY(0)" : "translateY(6px)",
+          }}
+        >
+          <p style={{ ...styles.composerStatus, color: composerStatusColor }}>
+            {composerChrome.statusMode === "overlay" ? (composerStatus?.message ?? "") : ""}
           </p>
-        ) : null}
+        </div>
+        <div
+          aria-hidden={composerChrome.statusMode !== "inline"}
+          style={{
+            ...styles.composerInlineStatus,
+            maxHeight: composerChrome.statusMode === "inline" ? "22px" : "0px",
+            opacity: composerChrome.statusMode === "inline" ? 1 : 0,
+          }}
+        >
+          <p style={{ ...styles.composerStatus, color: composerStatusColor }}>
+            {composerChrome.statusMode === "inline" ? (composerStatus?.message ?? "") : ""}
+          </p>
+        </div>
         <div style={styles.composerRow}>
         <label htmlFor="room-terminal-input" style={styles.srOnly}>room command</label>
         <span aria-hidden="true" style={styles.composerPrompt}>$</span>
@@ -830,6 +957,7 @@ function TerminalState({
 
   return (
     <main style={styles.stateShell}>
+      <AmbientShaderBackground opacity={0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
       <section style={styles.statePanel}>
         <h1 style={styles.stateTitle}>{title}</h1>
         <p style={styles.mutedLine}>{copy}</p>
@@ -991,7 +1119,9 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: "column",
     fontFamily: "var(--font-mono)",
     height: "100dvh",
+    isolation: "isolate",
     overflow: "hidden",
+    position: "relative",
   },
   roomHeader: {
     alignItems: "center",
@@ -1002,6 +1132,8 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "space-between",
     minHeight: "64px",
     padding: "12px clamp(16px, 3vw, 32px)",
+    position: "relative",
+    zIndex: 1,
   },
   headerIdentity: {
     alignItems: "center",
@@ -1097,6 +1229,8 @@ const styles: Record<string, CSSProperties> = {
     flexShrink: 0,
     fontSize: "12px",
     padding: "8px clamp(16px, 3vw, 32px)",
+    position: "relative",
+    zIndex: 1,
   },
   transcript: {
     display: "flex",
@@ -1105,6 +1239,8 @@ const styles: Record<string, CSSProperties> = {
     gap: "6px",
     overflowY: "auto",
     padding: "24px clamp(16px, 4vw, 56px)",
+    position: "relative",
+    zIndex: 1,
   },
   emptyTranscript: {
     color: "var(--text-dim)",
@@ -1178,9 +1314,24 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     flexShrink: 0,
-    gap: "6px",
-    minHeight: "56px",
+    gap: 0,
+    minHeight: "52px",
     padding: "10px clamp(16px, 3vw, 32px)",
+    position: "relative",
+    transition: "min-height 180ms cubic-bezier(0.22, 1, 0.36, 1), padding-top 180ms cubic-bezier(0.22, 1, 0.36, 1), padding-bottom 180ms cubic-bezier(0.22, 1, 0.36, 1), gap 180ms cubic-bezier(0.22, 1, 0.36, 1)",
+    zIndex: 1,
+  },
+  composerInlineStatus: {
+    overflow: "hidden",
+    transition: "max-height 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease",
+  },
+  composerOverlayStatus: {
+    bottom: "calc(100% + 8px)",
+    left: "clamp(16px, 3vw, 32px)",
+    pointerEvents: "none",
+    position: "absolute",
+    right: "clamp(16px, 3vw, 32px)",
+    transition: "opacity 140ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1)",
   },
   composerRow: {
     alignItems: "center",
@@ -1226,17 +1377,24 @@ const styles: Record<string, CSSProperties> = {
     color: "var(--text)",
     display: "flex",
     fontFamily: "var(--font-mono)",
+    isolation: "isolate",
     justifyContent: "center",
     minHeight: "100dvh",
+    overflow: "hidden",
     padding: "24px",
+    position: "relative",
   },
   statePanel: {
     maxWidth: "520px",
+    position: "relative",
     width: "100%",
+    zIndex: 1,
   },
   passwordPanel: {
     maxWidth: "420px",
+    position: "relative",
     width: "100%",
+    zIndex: 1,
   },
   stateKicker: {
     color: "var(--text-dim)",

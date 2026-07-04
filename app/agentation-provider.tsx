@@ -20,6 +20,7 @@ export function AgentationProvider() {
   }, []);
 
   const config = getAgentationConfig({
+    enabled: process.env.NEXT_PUBLIC_ENABLE_AGENTATION === "true",
     endpoint: process.env.NEXT_PUBLIC_AGENTATION_ENDPOINT || undefined,
     isMounted,
     nodeEnv: process.env.NODE_ENV,

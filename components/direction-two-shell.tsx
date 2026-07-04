@@ -3,6 +3,7 @@
 import { CSSProperties, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import {
   completeDirectionTwoCommand,
   completeDirectionTwoCreateField,
@@ -261,6 +262,7 @@ export function DirectionTwoShell() {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isInputNudging, setIsInputNudging] = useState(false);
+  const [hasMarkIntroPlayed, setHasMarkIntroPlayed] = useState(false);
   const [markIconState, setMarkIconState] = useState({
     current: directionTwoMarkIcons[0],
     previous: null as DirectionTwoMarkIcon | null,
@@ -346,6 +348,19 @@ export function DirectionTwoShell() {
   }, []);
 
   useEffect(() => {
+    if (prefersReducedMotion) {
+      setHasMarkIntroPlayed(true);
+      return;
+    }
+
+    const introTimer = window.setTimeout(() => {
+      setHasMarkIntroPlayed(true);
+    }, directionTwoMarkMotion.introShimmerMs + 1000);
+
+    return () => window.clearTimeout(introTimer);
+  }, [prefersReducedMotion]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -382,6 +397,13 @@ export function DirectionTwoShell() {
     setIsTerminalVisible(prefersReducedMotion);
 
     if (prefersReducedMotion) return;
+    if (markFlipDelayMs <= 0) {
+      const terminalTimer = window.setTimeout(() => {
+        setIsTerminalVisible(true);
+      }, terminalRevealDelayMs);
+
+      return () => window.clearTimeout(terminalTimer);
+    }
 
     let markIconIndex = 0;
     const clearTimers: number[] = [];
@@ -1018,6 +1040,7 @@ export function DirectionTwoShell() {
       className="direction-two-pixel-cursor relative isolate min-h-screen overflow-hidden bg-[var(--background)] px-5 py-7 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
       onClick={focusInput}
     >
+      <AmbientShaderBackground opacity={0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-0 h-screen overflow-hidden">
         <div className="direction-two-ambient-glow absolute inset-0" style={ambientAtmosphereStyle} />
         {ambientPixels.map(pixel => (
@@ -1068,6 +1091,7 @@ export function DirectionTwoShell() {
               icon={markIconState.current}
               previousIcon={markIconState.previous}
               reducedMotion={prefersReducedMotion}
+              showIntro={!hasMarkIntroPlayed && !prefersReducedMotion}
               swapId={markIconState.swapId}
               word={directionTwoMarkWords[0]}
             />
@@ -1079,7 +1103,7 @@ export function DirectionTwoShell() {
             <div className="space-y-6 pt-6 text-[12px] leading-[18px] text-[var(--muted-foreground)] sm:text-[13px]">
               {introHighlights.map((item, index) => (
                 <div
-                  className={`direction-two-intro-row flex items-center gap-[16px] text-[14px] leading-[20px] sm:text-[15px] ${prefersReducedMotion ? "" : "direction-two-intro-item"}`}
+                  className={`direction-two-intro-row flex items-center gap-[16px] text-[13px] leading-[22px] sm:text-[14px] ${prefersReducedMotion ? "" : "direction-two-intro-item"}`}
                   key={item.text}
                   style={
                     prefersReducedMotion
@@ -1321,12 +1345,14 @@ function InkPatternMark({
   icon,
   previousIcon,
   reducedMotion,
+  showIntro,
   swapId,
 }: {
   word: string;
   icon: DirectionTwoMarkIcon;
   previousIcon: DirectionTwoMarkIcon | null;
   reducedMotion: boolean;
+  showIntro: boolean;
   swapId: number;
 }) {
   const isSwapping = Boolean(previousIcon) && !reducedMotion;
@@ -1334,7 +1360,7 @@ function InkPatternMark({
   return (
     <div
       aria-label={`${word}, ${icon.label}`}
-      className="direction-two-mark relative flex w-fit max-w-full items-start gap-[calc(var(--letter-gap)*2)] overflow-hidden [--cell:clamp(4px,0.56vw,7px)] [--gap:clamp(1px,0.12vw,2px)] [--letter-gap:clamp(5px,0.44vw,9px)]"
+      className="direction-two-mark relative flex w-fit max-w-full items-start gap-[16px] overflow-hidden [--cell:clamp(4px,0.56vw,7px)] [--gap:clamp(1px,0.12vw,2px)] [--letter-gap:clamp(5px,0.44vw,9px)]"
       role="img"
       style={
         {
@@ -1346,7 +1372,7 @@ function InkPatternMark({
       }
     >
       <InkPatternMarkLayer
-        className={`${reducedMotion ? "" : "direction-two-mark-layer-entering"} direction-two-mark-word`}
+        className={`${showIntro ? "direction-two-mark-layer-entering" : ""} direction-two-mark-word`}
         key={word}
         word={word}
       />
@@ -1432,7 +1458,10 @@ function PixelPatternGrid({
           const active = cell === "1";
           const shimmerColumn = letterIndex * (columnCount + 2) + columnIndex;
           const resolveDelay = Math.min(shimmerColumn * 14 + rowIndex * 5, 520);
-          const shimmerDelay = shimmerColumn * 5 + rowIndex * 3;
+          const shimmerDelay = Math.min(
+            shimmerColumn * 10 + rowIndex * 5,
+            directionTwoMarkMotion.markHoverMaxDelayMs,
+          );
 
           return (
             <span
@@ -1475,19 +1504,26 @@ function PixelIcon({ pattern }: { pattern: string[] }) {
       }}
     >
       {pattern.flatMap((row, rowIndex) =>
-        [...row].map((cell, columnIndex) => (
-          <span
-            className={cell === "1" ? "direction-two-highlight-pixel-active block size-[2px] bg-[var(--color-signal)] opacity-80" : "direction-two-highlight-pixel-idle block size-[2px] bg-[var(--color-border)] opacity-10"}
-            key={`${rowIndex}-${columnIndex}`}
-            style={
-              cell === "1"
-                ? ({
-                    "--highlight-shimmer-delay": `${columnIndex * 6 + rowIndex * 3}ms`,
-                  } as CSSProperties)
-                : undefined
-            }
-          />
-        )),
+        [...row].map((cell, columnIndex) => {
+          const highlightDelay = Math.min(
+            columnIndex * 10 + rowIndex * 6,
+            directionTwoMarkMotion.highlightHoverMaxDelayMs,
+          );
+
+          return (
+            <span
+              className={cell === "1" ? "direction-two-highlight-pixel-active block size-[2px] bg-[var(--color-signal)] opacity-80" : "direction-two-highlight-pixel-idle block size-[2px] bg-[var(--color-border)] opacity-10"}
+              key={`${rowIndex}-${columnIndex}`}
+              style={
+                cell === "1"
+                  ? ({
+                      "--highlight-shimmer-delay": `${highlightDelay}ms`,
+                    } as CSSProperties)
+                  : undefined
+              }
+            />
+          );
+        }),
       )}
     </div>
   );

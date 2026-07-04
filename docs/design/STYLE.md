@@ -24,7 +24,7 @@ Incog Direction 2 should look like a private terminal session rather than a gene
 
 ## Typography
 
-### IBM Plex Mono / DM Mono - Shell Voice
+### Departure Mono - Shell Voice
 
 Use mono type for all Direction 2 UI, including brand text, headings, command labels, fields, output, buttons, and status copy.
 
