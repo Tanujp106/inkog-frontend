@@ -6,7 +6,6 @@ export type AgentationConfig = {
 };
 
 export function getAgentationConfig(input: {
-  enabled?: boolean;
   endpoint?: string;
   isMounted: boolean;
   nodeEnv: string | undefined;

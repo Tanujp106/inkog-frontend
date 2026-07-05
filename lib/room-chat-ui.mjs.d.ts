@@ -16,3 +16,12 @@ export const ROOM_PEER_COLOR_THEMES: Readonly<Record<string, readonly string[]>>
 export function buildRoomPeerColorMap(aliases: string[], viewerAlias: string, themeId?: string): Record<string, string>;
 
 export function classifyRoomMessage(message: RoomMessageRecord, viewerAlias: string): RoomMessagePresentation;
+
+export function buildRoomGateTranscriptLines(input: {
+  topic: string;
+  state: "locked" | "unlocked";
+}): string[];
+
+export function buildRoomLoadingTranscriptLines(): string[];
+
+export function resolveRoomStageAfterAuthenticatedJoin(): "joined";

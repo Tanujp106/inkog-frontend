@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
@@ -23,6 +23,7 @@ import {
   parseDirectionTwoInlineCommand,
   parseDirectionTwoCreateCommand,
   resolveDirectionTwoEnterAction,
+  resolveDirectionTwoGhostTapCompletion,
   resolveDirectionTwoThemeChoice,
 } from "@/lib/direction-two-shell.mjs";
 import {
@@ -43,6 +44,8 @@ import {
   formatSystemSoundStatus,
   parseSystemSoundCommand,
 } from "@/lib/system-sound.mjs";
+import { askInkogHelp } from "@/lib/inkog-help-api";
+import { extractInkogHelpQuestion } from "@/lib/inkog-help.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
@@ -88,6 +91,7 @@ const initialDraft: CreateDraft = {
 
 const initialLines: TerminalLine[] = [];
 const introHeadline = "Create a temporary room where friends can speak honestly, vote quickly, and disappear without leaving identity trails behind.";
+const mobileIntroHeadline = "Create a temporary room for honest chats, quick votes, and no identity trail.";
 const introScrambleDelayMs = 140;
 const introScrambleDurationMs = 1080;
 const terminalRevealDelayMs = 1640;
@@ -107,6 +111,7 @@ const introHighlights = [
       "1111111",
     ],
     text: "private rooms for people who already know each other",
+    mobileText: "private rooms for known people",
   },
   {
     icon: [
@@ -119,6 +124,7 @@ const introHighlights = [
       "1111111",
     ],
     text: "temporary spaces that expire on their own",
+    mobileText: "temporary spaces that expire",
   },
   {
     icon: [
@@ -131,6 +137,7 @@ const introHighlights = [
       "1111110",
     ],
     text: "quick prompts for polls and lightweight decisions",
+    mobileText: "quick prompts for decisions",
   },
 ];
 
@@ -255,11 +262,13 @@ export function DirectionTwoShell() {
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
+  const [helping, setHelping] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
   const [inputFeedbackMessage, setInputFeedbackMessage] = useState<string | null>(null);
   const [scrollReserveHeight, setScrollReserveHeight] = useState(0);
   const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isInputNudging, setIsInputNudging] = useState(false);
   const [hasMarkIntroPlayed, setHasMarkIntroPlayed] = useState(false);
@@ -278,6 +287,11 @@ export function DirectionTwoShell() {
     "--direction-two-ambient-glow": directionTwoAmbientAtmosphere.signalGlow,
   } as CSSProperties;
   const headlineText = useDirectionTwoScrambleText(introHeadline, {
+    durationMs: introScrambleDurationMs,
+    startDelayMs: introScrambleDelayMs,
+    disabled: prefersReducedMotion,
+  });
+  const mobileHeadlineText = useDirectionTwoScrambleText(mobileIntroHeadline, {
     durationMs: introScrambleDurationMs,
     startDelayMs: introScrambleDelayMs,
     disabled: prefersReducedMotion,
@@ -374,6 +388,23 @@ export function DirectionTwoShell() {
 
     return () => {
       reduceMotionQuery.removeEventListener("change", syncPreferences);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mobileQuery = window.matchMedia("(max-width: 639px)");
+
+    const syncViewport = () => {
+      setIsMobileViewport(mobileQuery.matches);
+    };
+
+    syncViewport();
+    mobileQuery.addEventListener("change", syncViewport);
+
+    return () => {
+      mobileQuery.removeEventListener("change", syncViewport);
     };
   }, []);
 
@@ -507,6 +538,24 @@ export function DirectionTwoShell() {
       ...directionTwoCommandReferenceLines.map(referenceLine => line("output", referenceLine)),
     );
     setKeyboardStatus("Command list printed.");
+  };
+
+  const askProjectHelp = async (command: string, question: string) => {
+    setHelping(true);
+    appendLines(line("input", command), line("output", "asking inkog..."));
+
+    try {
+      const result = await askInkogHelp(API, question);
+      appendLines(line("output", result.answer));
+      sound.play("notify");
+      setKeyboardStatus("inkog answered.");
+    } catch {
+      appendLines(line("error", "I could not reach the inkog help brain right now."));
+      sound.play("error");
+      setKeyboardStatus("Help request failed.");
+    } finally {
+      setHelping(false);
+    }
   };
 
   const beginCreate = (command = "create") => {
@@ -779,7 +828,7 @@ export function DirectionTwoShell() {
     const command = rawCommand.trim();
     const normalized = command.toLowerCase().replace(/^\/+/, "");
 
-    if (creating) return;
+    if (creating || helping) return;
 
     if (!command) {
       if (flow?.type === "create" && flow.step === "confirm") {
@@ -799,6 +848,12 @@ export function DirectionTwoShell() {
     }
 
     pushHistory(command);
+
+    const helpQuestion = extractInkogHelpQuestion(command);
+    if (helpQuestion) {
+      void askProjectHelp(command, helpQuestion);
+      return;
+    }
 
     const parsedCreateCommand = parseDirectionTwoCreateCommand(command) as ParsedCreateCommand;
     if (parsedCreateCommand.status !== "not-create") {
@@ -1030,17 +1085,39 @@ export function DirectionTwoShell() {
   const styleGhostChoices = createFieldSuggestion ? getDirectionTwoStyleGhostChoices(inputValue) : null;
   const activePromptPresentation = createPromptPresentationForFlow(flow);
   const visibleCreateFieldSuggestion = inputFeedbackMessage ? null : createFieldSuggestion;
+  const visibleCommandCompletion = inputFeedbackMessage ? null : completionSuggestion;
+  const visibleGhostCompletionText =
+    visibleCommandCompletion && visibleCommandCompletion.startsWith(inputValue)
+      ? visibleCommandCompletion.slice(inputValue.length)
+      : null;
+  const ghostTapCompletion = resolveDirectionTwoGhostTapCompletion(inputValue, Boolean(flow));
   const inlineHint = inputFeedbackMessage ?? createFieldHint;
   const visualInputText = inputValue || (creating ? "creating room..." : placeholderFor(flow));
   const visualCreateSegments = inputValue ? getDirectionTwoCreateVisualSegments(inputValue) : null;
 
+  const handleGhostSuggestionTap = (event: PointerEvent<HTMLElement>) => {
+    if (!ghostTapCompletion) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setInputValue(ghostTapCompletion);
+    setInputFeedbackMessage(null);
+    sound.play("press");
+    setKeyboardStatus(
+      visibleCommandCompletion
+        ? `${ghostTapCompletion.replace(/^\/+/, "")} autocompleted.`
+        : "Create field autocompleted.",
+    );
+    focusInput();
+  };
+
   return (
     <main
       ref={mainRef}
-      className="direction-two-pixel-cursor relative isolate min-h-screen overflow-hidden bg-[var(--background)] px-5 py-7 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
+      className="direction-two-pixel-cursor relative isolate min-h-screen overflow-hidden bg-[var(--background)] px-6 py-5 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
       onClick={focusInput}
     >
-      <AmbientShaderBackground opacity={0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
+      <AmbientShaderBackground opacity={isMobileViewport ? 0.34 : 0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-0 h-screen overflow-hidden">
         <div className="direction-two-ambient-glow absolute inset-0" style={ambientAtmosphereStyle} />
         {ambientPixels.map(pixel => (
@@ -1083,9 +1160,47 @@ export function DirectionTwoShell() {
 
       <section
         aria-describedby="direction-two-keyboard-shortcuts"
-        className="relative z-10 mx-auto flex min-h-[calc(100vh-56px)] w-full max-w-[1120px] flex-col"
+        className="relative z-10 mx-auto flex min-h-[calc(100vh-40px)] w-full max-w-[1120px] flex-col sm:min-h-[calc(100vh-56px)]"
       >
-        <header className="flex flex-col gap-4 pb-5 pt-8 sm:pt-12">
+        <header className="sm:hidden direction-two-mobile-landing flex flex-col gap-3 pb-2 pt-4">
+          <div>
+            <InkPatternMark
+              icon={markIconState.current}
+              previousIcon={markIconState.previous}
+              reducedMotion={prefersReducedMotion}
+              showIntro={!hasMarkIntroPlayed && !prefersReducedMotion}
+              size="mobile"
+              swapId={markIconState.swapId}
+              word={directionTwoMarkWords[0]}
+            />
+          </div>
+          <div className="max-w-[360px] space-y-6 text-[12px] leading-[18px] text-[var(--muted-foreground)]">
+            <p className="direction-two-intro-copy pt-2">
+              {mobileHeadlineText}
+            </p>
+            <div className="space-y-3 pt-2 text-[12px] leading-[18px] text-[var(--muted-foreground)]">
+              {introHighlights.map((item, index) => (
+                <div
+                  className={`direction-two-intro-row flex items-center gap-3 ${prefersReducedMotion ? "" : "direction-two-intro-item"}`}
+                  key={item.text}
+                  style={
+                    prefersReducedMotion
+                      ? undefined
+                      : ({
+                          animationDelay: `${420 + index * 55}ms`,
+                          "--highlight-shimmer-duration": `${directionTwoMarkMotion.highlightHoverShimmerMs}ms`,
+                        } as CSSProperties)
+                  }
+                >
+                  <PixelIcon pattern={item.icon} size="mobile" />
+                  <span>{item.mobileText}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        <header className="hidden flex-col gap-4 pb-5 pt-8 sm:flex sm:pt-12">
           <div>
             <InkPatternMark
               icon={markIconState.current}
@@ -1123,7 +1238,7 @@ export function DirectionTwoShell() {
         </header>
 
         <div
-          className={`pb-6 pt-12 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] ${
+          className={`direction-two-mobile-terminal pb-6 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:pt-12 ${
             isTerminalVisible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"
           }`}
         >
@@ -1188,9 +1303,9 @@ export function DirectionTwoShell() {
               )}
             </span>
             <div className="relative ml-2 min-w-0 flex-1">
-              <div className="flex min-h-[24px] min-w-0 items-center overflow-hidden text-[14px] leading-[24px]" aria-hidden="true">
+              <div className="flex min-h-[24px] min-w-0 items-center overflow-hidden text-[14px] leading-[24px]">
                 {inputValue && visualCreateSegments ? (
-                  <span className="shrink-0 whitespace-pre">
+                  <span className="shrink-0 whitespace-pre" aria-hidden="true">
                     {visualCreateSegments.map((segment, index) => (
                       <span
                         className={segment.tone === "topic" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"}
@@ -1203,12 +1318,24 @@ export function DirectionTwoShell() {
                   </span>
                 ) : (
                   <span
+                    aria-hidden="true"
                     className={`shrink-0 whitespace-pre ${
                       inputValue ? "text-[var(--foreground)]" : "text-[var(--color-dim)]"
                     }`}
                   >
                     {visualInputText}
                   </span>
+                )}
+                {visibleGhostCompletionText && (
+                  <button
+                    aria-label="Autocomplete suggestion"
+                    className="relative z-10 ml-0 shrink-0 whitespace-pre bg-transparent p-0 font-mono text-[14px] leading-[24px] text-[var(--foreground)] opacity-[0.38] pointer-events-auto sm:pointer-events-none"
+                    onPointerDown={handleGhostSuggestionTap}
+                    tabIndex={-1}
+                    type="button"
+                  >
+                    {visibleGhostCompletionText}
+                  </button>
                 )}
                 {inputFeedbackMessage && (
                   <span
@@ -1219,11 +1346,15 @@ export function DirectionTwoShell() {
                   </span>
                 )}
                 {visibleCreateFieldSuggestion && (
-                  <span
-                    className={`pointer-events-none ml-2 inline-flex shrink-0 items-center gap-2 whitespace-pre ${
+                  <button
+                    aria-label="Autocomplete suggestion"
+                    className={`relative z-10 ml-2 inline-flex shrink-0 items-center gap-2 whitespace-pre bg-transparent p-0 font-mono text-[14px] leading-[24px] pointer-events-auto sm:pointer-events-none ${
                       createFieldPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
                     } opacity-[0.55]`}
                     id="terminal-inline-hint"
+                    onPointerDown={handleGhostSuggestionTap}
+                    tabIndex={-1}
+                    type="button"
                   >
                     {createFieldPresentation && (
                       <span className="inline-flex h-[24px] shrink-0 items-center opacity-80">
@@ -1252,7 +1383,7 @@ export function DirectionTwoShell() {
                     ) : (
                       <span>{visibleCreateFieldSuggestion}</span>
                     )}
-                  </span>
+                  </button>
                 )}
               </div>
               <input
@@ -1346,6 +1477,7 @@ function InkPatternMark({
   previousIcon,
   reducedMotion,
   showIntro,
+  size = "desktop",
   swapId,
 }: {
   word: string;
@@ -1353,14 +1485,19 @@ function InkPatternMark({
   previousIcon: DirectionTwoMarkIcon | null;
   reducedMotion: boolean;
   showIntro: boolean;
+  size?: "desktop" | "mobile";
   swapId: number;
 }) {
   const isSwapping = Boolean(previousIcon) && !reducedMotion;
+  const markScaleClass =
+    size === "mobile"
+      ? "[--cell:clamp(3.2px,0.84vw,3.6px)] [--gap:1px] [--letter-gap:4px]"
+      : "[--cell:clamp(4px,0.56vw,7px)] [--gap:clamp(1px,0.12vw,2px)] [--letter-gap:clamp(5px,0.44vw,9px)]";
 
   return (
     <div
       aria-label={`${word}, ${icon.label}`}
-      className="direction-two-mark relative flex w-fit max-w-full items-start gap-[16px] overflow-hidden [--cell:clamp(4px,0.56vw,7px)] [--gap:clamp(1px,0.12vw,2px)] [--letter-gap:clamp(5px,0.44vw,9px)]"
+      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-hidden ${size === "mobile" ? "gap-[10px]" : "gap-[16px]"} ${markScaleClass}`}
       role="img"
       style={
         {
@@ -1490,17 +1627,18 @@ function createDensePixelPattern(pattern: string[], density: number) {
   });
 }
 
-function PixelIcon({ pattern }: { pattern: string[] }) {
+function PixelIcon({ pattern, size = "desktop" }: { pattern: string[]; size?: "desktop" | "mobile" }) {
   const columnCount = pattern[0]?.length ?? 0;
   const rowCount = pattern.length;
+  const cellSize = size === "mobile" ? 1.5 : 2;
 
   return (
     <div
       aria-hidden="true"
       className="direction-two-highlight-icon grid shrink-0 gap-[1px]"
       style={{
-        gridTemplateColumns: `repeat(${columnCount}, 2px)`,
-        gridTemplateRows: `repeat(${rowCount}, 2px)`,
+        gridTemplateColumns: `repeat(${columnCount}, ${cellSize}px)`,
+        gridTemplateRows: `repeat(${rowCount}, ${cellSize}px)`,
       }}
     >
       {pattern.flatMap((row, rowIndex) =>
@@ -1512,14 +1650,19 @@ function PixelIcon({ pattern }: { pattern: string[] }) {
 
           return (
             <span
-              className={cell === "1" ? "direction-two-highlight-pixel-active block size-[2px] bg-[var(--color-signal)] opacity-80" : "direction-two-highlight-pixel-idle block size-[2px] bg-[var(--color-border)] opacity-10"}
+              className={cell === "1" ? "direction-two-highlight-pixel-active block bg-[var(--color-signal)] opacity-80" : "direction-two-highlight-pixel-idle block bg-[var(--color-border)] opacity-10"}
               key={`${rowIndex}-${columnIndex}`}
               style={
                 cell === "1"
                   ? ({
+                      height: `${cellSize}px`,
+                      width: `${cellSize}px`,
                       "--highlight-shimmer-delay": `${highlightDelay}ms`,
                     } as CSSProperties)
-                  : undefined
+                  : {
+                      height: `${cellSize}px`,
+                      width: `${cellSize}px`,
+                    }
               }
             />
           );

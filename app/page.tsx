@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AmbientShaderBackground } from "@/components/ambient-shader-background";
+import { askInkogHelp } from "@/lib/inkog-help-api";
+import { extractInkogHelpQuestion } from "@/lib/inkog-help.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
@@ -26,6 +27,9 @@ export default function Home() {
 
   const [joinId, setJoinId] = useState("");
   const [joinError, setJoinError] = useState("");
+  const [helpQuestion, setHelpQuestion] = useState("");
+  const [helpAnswer, setHelpAnswer] = useState("");
+  const [helpLoading, setHelpLoading] = useState(false);
 
   const handleCreate = async () => {
     if (!topic.trim()) {
@@ -73,20 +77,41 @@ export default function Home() {
     router.push(`/room/${id}`);
   };
 
+  const handleHelp = async () => {
+    const question = extractInkogHelpQuestion(helpQuestion) ?? helpQuestion.trim();
+    if (!question) {
+      sound.play("error");
+      setHelpAnswer("Ask me something about inkog.");
+      return;
+    }
+
+    setHelpLoading(true);
+    setHelpAnswer("");
+    try {
+      const result = await askInkogHelp(API, question);
+      sound.play("notify");
+      setHelpAnswer(result.answer);
+    } catch {
+      sound.play("error");
+      setHelpAnswer("I could not reach the inkog help brain right now.");
+    } finally {
+      setHelpLoading(false);
+    }
+  };
+
   return (
-    <div style={{ isolation: "isolate", minHeight: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
-      <AmbientShaderBackground opacity={0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
-      <header style={{ padding: "28px 40px", borderBottom: "1px solid var(--border)", position: "relative", zIndex: 1 }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <header style={{ padding: "28px 40px", borderBottom: "1px solid var(--border)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: "20px", letterSpacing: "-0.04em" }}>inkog</span>
+          <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: "20px", letterSpacing: "-0.04em" }}>inkog</span>
           <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--accent)", display: "inline-block" }} />
         </div>
       </header>
 
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 24px", position: "relative", zIndex: 1 }}>
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 24px" }}>
         <div style={{ maxWidth: "540px", width: "100%" }}>
           <div className="animate-fadeUp" style={{ textAlign: "center", marginBottom: "48px" }}>
-            <p style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: "20px" }}>
+            <p style={{ fontFamily: "DM Mono, monospace", fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: "20px" }}>
               anonymous group chat
             </p>
             <h1 style={{ fontSize: "clamp(44px, 8vw, 76px)", lineHeight: 0.95, marginBottom: "22px", letterSpacing: "-0.04em" }}>
@@ -94,23 +119,52 @@ export default function Home() {
               <span className="serif" style={{ fontStyle: "italic", color: "var(--accent)" }}>actually</span>
               {" "}think
             </h1>
-            <p style={{ color: "var(--text-muted)", fontSize: "14px", lineHeight: 1.8, fontFamily: "var(--font-mono)" }}>
+            <p style={{ color: "var(--text-muted)", fontSize: "14px", lineHeight: 1.8, fontFamily: "DM Mono, monospace" }}>
               Create a room, share the link, everyone gets an anonymous alias.<br />
               No accounts. No traces. The room self-destructs.
             </p>
           </div>
 
           {mode === "idle" && (
-            <div className="animate-fadeUp" style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
-              <button className="btn-accent" onClick={() => { sound.play("press"); setMode("create"); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
-                Create a Room
-              </button>
-              <button className="btn-ghost" onClick={() => { sound.play("press"); setMode("join"); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
-                Join via Link →
-              </button>
-              <button className="btn-ghost" onClick={() => { sound.play("press"); router.push("/playground"); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
-                Playground
-              </button>
+            <div className="animate-fadeUp" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+              <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+                <button className="btn-accent" onClick={() => { sound.play("press"); setMode("create"); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
+                  Create a Room
+                </button>
+                <button className="btn-ghost" onClick={() => { sound.play("press"); setMode("join"); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
+                  Join via Link →
+                </button>
+                <button className="btn-ghost" onClick={() => { sound.play("press"); router.push("/playground"); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "14px 32px", borderRadius: "6px" }}>
+                  Playground
+                </button>
+              </div>
+              <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "8px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                <label htmlFor="landing-help" style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                  ask inkog
+                </label>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <input
+                    id="landing-help"
+                    value={helpQuestion}
+                    onChange={event => setHelpQuestion(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === "Enter") {
+                        void handleHelp();
+                      }
+                    }}
+                    placeholder="/help who made inkog?"
+                    style={{ flex: 1, minWidth: 0, padding: "11px 14px", borderRadius: "6px" }}
+                  />
+                  <button className="btn-ghost" onClick={() => { sound.play("press"); void handleHelp(); }} onMouseEnter={() => sound.play("hover")} disabled={helpLoading} style={{ padding: "0 14px", borderRadius: "6px", whiteSpace: "nowrap" }}>
+                    {helpLoading ? "..." : "ask"}
+                  </button>
+                </div>
+                {helpAnswer && (
+                  <p style={{ color: "var(--text-muted)", fontFamily: "DM Mono, monospace", fontSize: "13px", lineHeight: 1.7, margin: 0 }}>
+                    {helpAnswer}
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -215,7 +269,7 @@ export default function Home() {
         </div>
       </main>
 
-      <footer style={{ padding: "18px 40px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "center", position: "relative", zIndex: 1 }}>
+      <footer style={{ padding: "18px 40px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "center" }}>
         <p style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.08em", margin: 0 }}>
           rooms expire and vanish forever — no logs, no accounts
         </p>

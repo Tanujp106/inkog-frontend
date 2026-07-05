@@ -124,8 +124,8 @@ These tokens are derived from the Paper `Incog` terminal direction and the curre
 ```css
 @theme {
   --font-mono: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --font-sans: Inter, Syne, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-sans: var(--font-mono);
+  --font-serif: var(--font-mono);
 
   --color-black: #050505;
   --color-shell: #0b0b0c;
@@ -217,8 +217,8 @@ These tokens are derived from the Paper `Incog` terminal direction and the curre
   },
   "font": {
     "mono": { "$value": "Departure Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Primary shell and chat UI family" },
-    "sans": { "$value": "Inter, Syne, ui-sans-serif, system-ui, sans-serif", "$type": "fontFamily", "$description": "Secondary brand and landing family" },
-    "serif": { "$value": "Instrument Serif, Georgia, serif", "$type": "fontFamily", "$description": "Rare expressive italic accent" }
+    "sans": { "$value": "Departure Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Secondary alias for the app-wide mono family" },
+    "serif": { "$value": "Departure Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Expressive alias for the app-wide mono family" }
   },
   "spacing": {
     "4": { "$value": "4px", "$type": "dimension" },
