@@ -8,7 +8,6 @@ import { io, type Socket } from "socket.io-client";
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import {
   buildRoomGateTranscriptLines,
-  buildRoomLoadingTranscriptLines,
   buildRoomPeerColorMap,
   classifyRoomMessage,
   resolveRoomStageAfterAuthenticatedJoin,
@@ -902,7 +901,7 @@ export default function RoomPage() {
   const composerExpanded = composerChrome.expanded;
   const showComposerHint = showIdleCursor && !showSlashSuggestions && composerChrome.statusMode === "hidden";
   const gateTranscriptLines = isRoomBooting
-    ? buildRoomLoadingTranscriptLines()
+    ? []
     : isPasswordGate
       ? buildRoomGateTranscriptLines({ topic, state: "locked" })
       : passwordGateUnlocked
@@ -1080,7 +1079,7 @@ export default function RoomPage() {
               ) : null}
               {showComposerHint ? (
                 <span style={styles.composerHint}>
-                  {isRoomBooting ? "loading room" : isPasswordGate ? "write password to enter chat" : "type to chat, or start with / for commands"}
+                  {isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or start with / for commands"}
                 </span>
               ) : null}
             </span>
@@ -1124,7 +1123,7 @@ export default function RoomPage() {
             ref={composerRef}
             spellCheck={false}
             disabled={isRoomBooting}
-            placeholder={isRoomBooting ? "loading room" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
+            placeholder={isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
             style={{
               ...styles.composerInput,
               caretColor: showIdleCursor ? "transparent" : "var(--text)",

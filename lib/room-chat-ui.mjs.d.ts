@@ -22,6 +22,4 @@ export function buildRoomGateTranscriptLines(input: {
   state: "locked" | "unlocked";
 }): string[];
 
-export function buildRoomLoadingTranscriptLines(): string[];
-
 export function resolveRoomStageAfterAuthenticatedJoin(): "joined";
