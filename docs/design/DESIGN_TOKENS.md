@@ -38,9 +38,9 @@ These tokens are derived from the Paper `Incog` terminal direction and the curre
   --accent-status: var(--color-signal);
 
   /* Font families */
-  --font-mono: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --font-sans: var(--font-mono);
-  --font-serif: var(--font-mono);
+  --font-mono: "IBM Plex Mono", "DM Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-sans: Inter, Syne, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Instrument Serif", Georgia, serif;
 
   /* Font sizes */
   --text-micro: 11px;
@@ -123,9 +123,12 @@ These tokens are derived from the Paper `Incog` terminal direction and the curre
 
 ```css
 @theme {
-  --font-mono: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --font-sans: var(--font-mono);
-  --font-serif: var(--font-mono);
+  --font-mono: "IBM Plex Mono", "DM Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-sans: Inter, Syne, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Instrument Serif", Georgia, serif;
+
+  /* Direction 2 scope */
+  --font-direction-two: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
   --color-black: #050505;
   --color-shell: #0b0b0c;
@@ -216,9 +219,10 @@ These tokens are derived from the Paper `Incog` terminal direction and the curre
     "private": { "$value": "#a857ff", "$type": "color", "$description": "Private or masked state when a separate state color is useful" }
   },
   "font": {
-    "mono": { "$value": "Departure Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Primary shell and chat UI family" },
-    "sans": { "$value": "Departure Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Secondary alias for the app-wide mono family" },
-    "serif": { "$value": "Departure Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Expressive alias for the app-wide mono family" }
+    "mono": { "$value": "IBM Plex Mono, DM Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Primary Direction 1 shell and chat UI family" },
+    "directionTwoMono": { "$value": "Departure Mono, ui-monospace, monospace", "$type": "fontFamily", "$description": "Direction 2 shell family" },
+    "sans": { "$value": "Inter, Syne, ui-sans-serif, system-ui, sans-serif", "$type": "fontFamily", "$description": "Secondary brand and landing family" },
+    "serif": { "$value": "Instrument Serif, Georgia, serif", "$type": "fontFamily", "$description": "Rare expressive italic accent" }
   },
   "spacing": {
     "4": { "$value": "4px", "$type": "dimension" },

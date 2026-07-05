@@ -254,6 +254,7 @@ export function DirectionTwoShell() {
   const sound = useSystemSound();
   const mainRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputMirrorRef = useRef<HTMLDivElement | null>(null);
   const promptRowRef = useRef<HTMLDivElement | null>(null);
   const inputNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inputValue, setInputValue] = useState("");
@@ -303,6 +304,16 @@ export function DirectionTwoShell() {
 
   const focusInput = () => {
     requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const syncInputMirrorScroll = () => {
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      const inputMirror = inputMirrorRef.current;
+      if (!input || !inputMirror) return;
+
+      inputMirror.scrollLeft = input.scrollLeft;
+    });
   };
 
   const nudgeInput = (message: string) => {
@@ -1303,7 +1314,7 @@ export function DirectionTwoShell() {
               )}
             </span>
             <div className="relative ml-2 min-w-0 flex-1">
-              <div className="flex min-h-[24px] min-w-0 items-center overflow-hidden text-[14px] leading-[24px]">
+              <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden text-[14px] leading-[24px]">
                 {inputValue && visualCreateSegments ? (
                   <span className="shrink-0 whitespace-pre" aria-hidden="true">
                     {visualCreateSegments.map((segment, index) => (
@@ -1423,8 +1434,11 @@ export function DirectionTwoShell() {
                 }}
                 onChange={event => {
                   handleInputValueChange(event.target.value);
+                  syncInputMirrorScroll();
                 }}
                 onKeyDown={handleInputKeyDown}
+                onKeyUp={syncInputMirrorScroll}
+                onScroll={syncInputMirrorScroll}
                 placeholder=""
                 spellCheck={false}
                 style={{
