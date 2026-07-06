@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import { AgentationProvider } from "./agentation-provider";
-import "dialkit/styles.css";
 import "./globals.css";
 import { SystemSoundProvider } from "@/lib/system-sound-provider";
 import { buildInkogFaviconHref } from "@/lib/inkog-favicon.mjs";
-import { PlaygroundDialRoot } from "./playground-dial-root/index";
 import { ThemeFavicon } from "./theme-favicon";
 
 export const metadata: Metadata = {
@@ -53,7 +51,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <ThemeFavicon />
           {children}
           <AgentationProvider />
-          <PlaygroundDialRoot />
         </SystemSoundProvider>
       </body>
     </html>

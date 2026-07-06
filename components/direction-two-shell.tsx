@@ -2,7 +2,6 @@
 
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useDialKit } from "dialkit";
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import {
@@ -33,7 +32,6 @@ import {
   directionTwoAmbientAtmosphere,
   directionTwoAmbientConfig,
   createDirectionTwoAmbientPixels,
-  directionTwoMarkIcons,
   directionTwoMarkMotion,
   directionTwoMarkWords,
   getDirectionTwoScrambleFrame,
@@ -54,43 +52,6 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
 const roomIdPattern = /([a-z0-9]{6})$/i;
 const themeStorageKey = "inkog-theme";
 type DirectionTwoTheme = (typeof directionTwoThemes)[number];
-type DirectionTwoDialTuple = [number, number, number, number?];
-
-const directionTwoShimmerDialConfig = {
-  title: {
-    duration: [660, 520, 2600, 20] as DirectionTwoDialTuple,
-    sweepDelay: [280, 120, 1200, 10] as DirectionTwoDialTuple,
-    burstTail: [130, 0, 900, 10] as DirectionTwoDialTuple,
-    colorMix: [62, 0, 92, 1] as DirectionTwoDialTuple,
-    peakBrightness: [1.34, 0.9, 2.4, 0.01] as DirectionTwoDialTuple,
-    settleBrightness: [1.08, 0.8, 1.6, 0.01] as DirectionTwoDialTuple,
-    signalRadius: [6, 0, 28, 1] as DirectionTwoDialTuple,
-    haloRadius: [16, 0, 48, 1] as DirectionTwoDialTuple,
-    signalOpacity: [58, 0, 100, 1] as DirectionTwoDialTuple,
-    haloOpacity: [64, 0, 100, 1] as DirectionTwoDialTuple,
-  },
-  timing: {
-    duration: [1040, 320, 2200, 20] as DirectionTwoDialTuple,
-    sweepDelay: [120, 0, 420, 5] as DirectionTwoDialTuple,
-    transition: [360, 80, 900, 10] as DirectionTwoDialTuple,
-    burstTail: [120, 0, 600, 10] as DirectionTwoDialTuple,
-  },
-  intensity: {
-    colorMix: [38, 0, 80, 1] as DirectionTwoDialTuple,
-    idleOpacity: [1, 0.2, 1, 0.01] as DirectionTwoDialTuple,
-    peakOpacity: [1, 0.2, 1, 0.01] as DirectionTwoDialTuple,
-    settleOpacity: [1, 0.2, 1, 0.01] as DirectionTwoDialTuple,
-    idleBrightness: [1, 0.7, 1.4, 0.01] as DirectionTwoDialTuple,
-    peakBrightness: [1.16, 0.8, 2, 0.01] as DirectionTwoDialTuple,
-    settleBrightness: [1, 0.7, 1.4, 0.01] as DirectionTwoDialTuple,
-  },
-  glow: {
-    signalRadius: [4, 0, 24, 1] as DirectionTwoDialTuple,
-    haloRadius: [11, 0, 40, 1] as DirectionTwoDialTuple,
-    signalOpacity: [38, 0, 100, 1] as DirectionTwoDialTuple,
-    haloOpacity: [46, 0, 100, 1] as DirectionTwoDialTuple,
-  },
-};
 
 type TerminalLine = {
   id: string;
@@ -134,9 +95,6 @@ const mobileIntroHeadline = "Create a temporary room for honest chats, quick vot
 const introScrambleDelayMs = 140;
 const introScrambleDurationMs = 1080;
 const terminalRevealDelayMs = 1640;
-const markFlipDelayMs = directionTwoMarkMotion.iconFlipDelayMs;
-const markSwapDurationMs = directionTwoMarkMotion.iconSwapDurationMs;
-type DirectionTwoMarkIcon = (typeof directionTwoMarkIcons)[number];
 
 const introHighlights = [
   {
@@ -214,6 +172,34 @@ type DirectionTwoShimmerSettings = {
   titleHaloRadius: number;
   titleSignalOpacity: number;
   titleHaloOpacity: number;
+};
+
+const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
+  durationMs: 1040,
+  delayMaxMs: 120,
+  transitionMs: 360,
+  burstTailMs: 120,
+  titleDurationMs: 660,
+  titleDelayMaxMs: 280,
+  titleBurstTailMs: 130,
+  idleOpacity: 1,
+  peakOpacity: 1,
+  settleOpacity: 1,
+  idleBrightness: 1,
+  peakBrightness: 1.16,
+  settleBrightness: 1,
+  signalRadius: 4,
+  haloRadius: 11,
+  signalOpacity: 38,
+  haloOpacity: 46,
+  colorMixPercent: 38,
+  titleColorMixPercent: 62,
+  titlePeakBrightness: 1.34,
+  titleSettleBrightness: 1.08,
+  titleSignalRadius: 6,
+  titleHaloRadius: 16,
+  titleSignalOpacity: 58,
+  titleHaloOpacity: 64,
 };
 
 function percent(value: number) {
@@ -376,42 +362,7 @@ export function DirectionTwoShell() {
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isInputNudging, setIsInputNudging] = useState(false);
   const [hasMarkIntroPlayed, setHasMarkIntroPlayed] = useState(false);
-  const [markIconState, setMarkIconState] = useState({
-    current: directionTwoMarkIcons[0],
-    previous: null as DirectionTwoMarkIcon | null,
-    swapId: 0,
-  });
-  const shimmerDials = useDialKit("Direction 2 shimmer", directionTwoShimmerDialConfig, {
-    id: "direction-two-shimmer",
-    persist: true,
-  });
-  const shimmerSettings: DirectionTwoShimmerSettings = {
-    durationMs: shimmerDials.timing.duration,
-    delayMaxMs: shimmerDials.timing.sweepDelay,
-    transitionMs: shimmerDials.timing.transition,
-    burstTailMs: shimmerDials.timing.burstTail,
-    titleDurationMs: shimmerDials.title.duration,
-    titleDelayMaxMs: shimmerDials.title.sweepDelay,
-    titleBurstTailMs: shimmerDials.title.burstTail,
-    colorMixPercent: shimmerDials.intensity.colorMix,
-    titleColorMixPercent: shimmerDials.title.colorMix,
-    idleOpacity: shimmerDials.intensity.idleOpacity,
-    peakOpacity: shimmerDials.intensity.peakOpacity,
-    settleOpacity: shimmerDials.intensity.settleOpacity,
-    idleBrightness: shimmerDials.intensity.idleBrightness,
-    peakBrightness: shimmerDials.intensity.peakBrightness,
-    settleBrightness: shimmerDials.intensity.settleBrightness,
-    titlePeakBrightness: shimmerDials.title.peakBrightness,
-    titleSettleBrightness: shimmerDials.title.settleBrightness,
-    signalRadius: shimmerDials.glow.signalRadius,
-    haloRadius: shimmerDials.glow.haloRadius,
-    signalOpacity: shimmerDials.glow.signalOpacity,
-    haloOpacity: shimmerDials.glow.haloOpacity,
-    titleSignalRadius: shimmerDials.title.signalRadius,
-    titleHaloRadius: shimmerDials.title.haloRadius,
-    titleSignalOpacity: shimmerDials.title.signalOpacity,
-    titleHaloOpacity: shimmerDials.title.haloOpacity,
-  };
+  const shimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
   const slashCommandSuggestions = !flow && !inputFeedbackMessage ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const shouldReserveScrollSpace = slashCommandSuggestions.length > 0 || lines.length > 0;
@@ -568,50 +519,16 @@ export function DirectionTwoShell() {
   }, []);
 
   useEffect(() => {
-    setMarkIconState({
-      current: directionTwoMarkIcons[0],
-      previous: null,
-      swapId: 0,
-    });
     setIsTerminalVisible(prefersReducedMotion);
 
     if (prefersReducedMotion) return;
-    if (markFlipDelayMs <= 0) {
-      const terminalTimer = window.setTimeout(() => {
-        setIsTerminalVisible(true);
-      }, terminalRevealDelayMs);
 
-      return () => window.clearTimeout(terminalTimer);
-    }
-
-    let markIconIndex = 0;
-    const clearTimers: number[] = [];
-    const markIntervalId = window.setInterval(() => {
-      markIconIndex = (markIconIndex + 1) % directionTwoMarkIcons.length;
-      const nextIcon = directionTwoMarkIcons[markIconIndex];
-
-      setMarkIconState(current => ({
-        current: nextIcon,
-        previous: current.current,
-        swapId: current.swapId + 1,
-      }));
-
-      const clearTimer = window.setTimeout(() => {
-        setMarkIconState(current => ({
-          ...current,
-          previous: null,
-        }));
-      }, markSwapDurationMs);
-      clearTimers.push(clearTimer);
-    }, markFlipDelayMs);
     const terminalTimer = window.setTimeout(() => {
       setIsTerminalVisible(true);
     }, terminalRevealDelayMs);
 
     return () => {
-      window.clearInterval(markIntervalId);
       window.clearTimeout(terminalTimer);
-      clearTimers.forEach(timer => window.clearTimeout(timer));
     };
   }, [prefersReducedMotion]);
 
@@ -640,12 +557,15 @@ export function DirectionTwoShell() {
     if (typeof window === "undefined") return;
     if (!promptRowRef.current) return;
 
-    const slashMenuHeight = slashCommandSuggestions.length > 0 ? slashMenuRef.current?.offsetHeight ?? 0 : 0;
+    const slashMenuRect = slashCommandSuggestions.length > 0 ? slashMenuRef.current?.getBoundingClientRect() : null;
+    const slashMenuHeight = slashMenuRect?.height ?? 0;
     const nextScrollTop = getDirectionTwoAutoScrollTop({
       anchorRatio: slashCommandSuggestions.length > 0 ? 0.8 : 0.85,
       currentScrollY: window.scrollY,
+      floatingBottom: slashMenuRect?.bottom,
       floatingHeight: slashMenuHeight,
       promptTop: promptRowRef.current.getBoundingClientRect().top,
+      viewportPadding: slashCommandSuggestions.length > 0 ? 24 : 0,
       viewportHeight: window.innerHeight,
     });
 
@@ -655,7 +575,7 @@ export function DirectionTwoShell() {
       top: nextScrollTop,
       behavior: "smooth",
     });
-  }, [flow, inputValue, lines.length, slashCommandSuggestions.length]);
+  }, [flow, inputValue, lines.length, scrollReserveHeight, slashCommandSuggestions.length]);
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1373,14 +1293,11 @@ export function DirectionTwoShell() {
         <header className="sm:hidden direction-two-mobile-landing flex flex-col gap-3 pb-2 pt-4">
           <div>
             <InkPatternMark
-              icon={markIconState.current}
-              previousIcon={markIconState.previous}
               reducedMotion={prefersReducedMotion}
               shimmerSettings={shimmerSettings}
               shimmerStyle={shimmerStyle}
               showIntro={!hasMarkIntroPlayed && !prefersReducedMotion}
               size="mobile"
-              swapId={markIconState.swapId}
               word={directionTwoMarkWords[0]}
             />
           </div>
@@ -1390,21 +1307,17 @@ export function DirectionTwoShell() {
             </p>
             <div className="space-y-3 pt-2 text-[12px] leading-[18px] text-[var(--muted-foreground)]">
               {introHighlights.map((item, index) => (
-                <div
-                  className={`direction-two-intro-row flex items-center gap-3 ${prefersReducedMotion ? "" : "direction-two-intro-item"}`}
+                <DirectionTwoIntroRow
                   key={item.text}
-                  style={
-                    prefersReducedMotion
-                      ? undefined
-                      : ({
-                          animationDelay: `${420 + index * 55}ms`,
-                          ...shimmerStyle,
-                        } as CSSProperties)
-                  }
-                >
-                  <PixelIcon pattern={item.icon} shimmerDelayMaxMs={shimmerSettings.delayMaxMs} size="mobile" />
-                  <span>{item.mobileText}</span>
-                </div>
+                  pattern={item.icon}
+                  reducedMotion={prefersReducedMotion}
+                  rowClassName="flex items-center gap-3"
+                  shimmerSettings={shimmerSettings}
+                  shimmerStyle={shimmerStyle}
+                  size="mobile"
+                  startDelayMs={420 + index * 55}
+                  text={item.mobileText}
+                />
               ))}
             </div>
           </div>
@@ -1413,37 +1326,29 @@ export function DirectionTwoShell() {
         <header className="hidden flex-col gap-4 pb-5 pt-8 sm:flex sm:pt-12">
           <div>
             <InkPatternMark
-              icon={markIconState.current}
-              previousIcon={markIconState.previous}
               reducedMotion={prefersReducedMotion}
               shimmerSettings={shimmerSettings}
               shimmerStyle={shimmerStyle}
               showIntro={!hasMarkIntroPlayed && !prefersReducedMotion}
-              swapId={markIconState.swapId}
               word={directionTwoMarkWords[0]}
             />
           </div>
           <div className="max-w-[680px] space-y-4 text-[13px] leading-[22px] text-[var(--muted-foreground)] sm:text-[14px]">
-            <p className="direction-two-intro-copy pt-4">
+            <p className="direction-two-intro-copy pt-5">
               {headlineText}
             </p>
-            <div className="space-y-6 pt-6 text-[12px] leading-[18px] text-[var(--muted-foreground)] sm:text-[13px]">
+            <div className="space-y-6 pt-8 text-[12px] leading-[18px] text-[var(--muted-foreground)] sm:text-[13px]">
               {introHighlights.map((item, index) => (
-                <div
-                  className={`direction-two-intro-row flex items-center gap-[16px] text-[13px] leading-[22px] sm:text-[14px] ${prefersReducedMotion ? "" : "direction-two-intro-item"}`}
+                <DirectionTwoIntroRow
                   key={item.text}
-                  style={
-                    prefersReducedMotion
-                      ? undefined
-                      : ({
-                          animationDelay: `${620 + index * 70}ms`,
-                          ...shimmerStyle,
-                        } as CSSProperties)
-                  }
-                >
-                  <PixelIcon pattern={item.icon} shimmerDelayMaxMs={shimmerSettings.delayMaxMs} />
-                  <span>{item.text}</span>
-                </div>
+                  pattern={item.icon}
+                  reducedMotion={prefersReducedMotion}
+                  rowClassName="flex items-center gap-[16px] text-[13px] leading-[22px] sm:text-[14px]"
+                  shimmerSettings={shimmerSettings}
+                  shimmerStyle={shimmerStyle}
+                  startDelayMs={620 + index * 70}
+                  text={item.text}
+                />
               ))}
             </div>
           </div>
@@ -1749,26 +1654,19 @@ function PromptPixelGlyph({ pattern }: { pattern: string[] }) {
 
 function InkPatternMark({
   word,
-  icon,
-  previousIcon,
   reducedMotion,
   shimmerSettings,
   shimmerStyle,
   showIntro,
   size = "desktop",
-  swapId,
 }: {
   word: string;
-  icon: DirectionTwoMarkIcon;
-  previousIcon: DirectionTwoMarkIcon | null;
   reducedMotion: boolean;
   shimmerSettings: DirectionTwoShimmerSettings;
   shimmerStyle: CSSProperties;
   showIntro: boolean;
   size?: "desktop" | "mobile";
-  swapId: number;
 }) {
-  const isSwapping = Boolean(previousIcon) && !reducedMotion;
   const [isMarkShimmering, setIsMarkShimmering] = useState(false);
   const shimmerFrameRef = useRef<number | null>(null);
   const shimmerTimeoutRef = useRef<number | null>(null);
@@ -1813,8 +1711,8 @@ function InkPatternMark({
 
   return (
     <div
-      aria-label={`${word}, ${icon.label}`}
-      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-hidden ${isMarkShimmering ? "direction-two-mark-shimmering" : ""} ${size === "mobile" ? "gap-[10px]" : "gap-[16px]"} ${markScaleClass}`}
+      aria-label={word}
+      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-hidden ${isMarkShimmering ? "direction-two-mark-shimmering" : ""} ${markScaleClass}`}
       onPointerEnter={triggerMarkShimmer}
       role="img"
       style={
@@ -1833,38 +1731,6 @@ function InkPatternMark({
         shimmerDelayMaxMs={shimmerSettings.titleDelayMaxMs}
         word={word}
       />
-      <div aria-hidden="true" className="direction-two-mark-icon relative shrink-0 overflow-hidden">
-        <InkPatternIconLayer
-          className={isSwapping ? "direction-two-mark-layer-entering" : ""}
-          key={`current-icon-${icon.id}-${swapId}`}
-          pattern={icon.pattern}
-          shimmerDelayMaxMs={shimmerSettings.delayMaxMs}
-        />
-        {isSwapping && previousIcon && (
-          <InkPatternIconLayer
-            className="direction-two-mark-layer-exiting"
-            key={`previous-icon-${previousIcon.id}-${swapId}`}
-            pattern={previousIcon.pattern}
-            shimmerDelayMaxMs={shimmerSettings.delayMaxMs}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function InkPatternIconLayer({
-  pattern,
-  className = "",
-  shimmerDelayMaxMs,
-}: {
-  pattern: string[];
-  className?: string;
-  shimmerDelayMaxMs: number;
-}) {
-  return (
-    <div className={`direction-two-mark-layer direction-two-mark-symbol flex w-fit origin-left items-start gap-[var(--letter-gap)] ${className}`}>
-      <PixelPatternGrid density={2} letterIndex={0} pattern={pattern} shimmerDelayMaxMs={shimmerDelayMaxMs} />
     </div>
   );
 }
@@ -1954,6 +1820,49 @@ function createDensePixelPattern(pattern: string[], density: number) {
     const expandedRow = [...row].map(cell => cell.repeat(density)).join("");
     return Array.from({ length: density }, () => expandedRow);
   });
+}
+
+function DirectionTwoIntroRow({
+  pattern,
+  reducedMotion,
+  rowClassName,
+  shimmerSettings,
+  shimmerStyle,
+  size = "desktop",
+  startDelayMs,
+  text,
+}: {
+  pattern: string[];
+  reducedMotion: boolean;
+  rowClassName: string;
+  shimmerSettings: DirectionTwoShimmerSettings;
+  shimmerStyle: CSSProperties;
+  size?: "desktop" | "mobile";
+  startDelayMs: number;
+  text: string;
+}) {
+  const displayText = useDirectionTwoScrambleText(text, {
+    durationMs: introScrambleDurationMs,
+    startDelayMs,
+    disabled: reducedMotion,
+  });
+
+  return (
+    <div
+      className={`direction-two-intro-row ${rowClassName} ${reducedMotion ? "" : "direction-two-intro-item"}`}
+      style={
+        reducedMotion
+          ? undefined
+          : ({
+              animationDelay: `${startDelayMs}ms`,
+              ...shimmerStyle,
+            } as CSSProperties)
+      }
+    >
+      <PixelIcon pattern={pattern} shimmerDelayMaxMs={shimmerSettings.delayMaxMs} size={size} />
+      <span>{displayText}</span>
+    </div>
+  );
 }
 
 function PixelIcon({
