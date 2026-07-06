@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Lightbulb } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
@@ -19,6 +20,7 @@ import {
 } from "@/lib/inkog-theme.mjs";
 import { roomAmbientShaderOpacity, roomThemeBackground } from "@/lib/room-background.mjs";
 import { getRoomRoster, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
+import { getRoomNameTrivia } from "@/lib/room-name-trivia.mjs";
 import { getRoomCountdownNotification } from "@/lib/room-notifications.mjs";
 import {
   createEmptyRoomPollDraft,
@@ -44,8 +46,8 @@ import {
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
-const TERMINAL_RAIL = "> ________________________________________________________________________________________________________________________________";
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://127.0.0.1:3001";
+const ROOM_FONT_FAMILY = '"Departure Mono", monospace';
 
 interface Message {
   id: string;
@@ -953,7 +955,6 @@ export default function RoomPage() {
           <span style={styles.headerDivider}>/</span>
           <span style={styles.topic} title={topic}>{topic}</span>
         </div>
-        <span aria-hidden="true" style={styles.headerRail}>{TERMINAL_RAIL}</span>
         <div style={styles.headerMeta}>
           <AvatarRoster roster={roster} usersTitle={usersTitle} />
           <RoomTtlMeter meter={ttlMeter} />
@@ -1011,12 +1012,11 @@ export default function RoomPage() {
         style={{
           ...styles.composer,
           gap: composerExpanded ? "6px" : "0px",
-          minHeight: composerChrome.expanded ? "86px" : "64px",
+          minHeight: composerChrome.expanded ? "74px" : "52px",
           paddingBottom: composerExpanded ? "10px" : "8px",
-          paddingTop: composerExpanded ? "22px" : "20px",
+          paddingTop: composerExpanded ? "10px" : "8px",
         }}
       >
-        <span aria-hidden="true" style={styles.composerRail}>{TERMINAL_RAIL}</span>
         {showSlashSuggestions ? (
           <div style={styles.slashCommandMenu}>
             {slashSuggestions.map((item, index) => {
@@ -1251,23 +1251,159 @@ function AvatarRoster({
   roster: RoomRoster;
   usersTitle: string;
 }) {
+  const [activeAlias, setActiveAlias] = useState<string | null>(null);
+  const [expandedAlias, setExpandedAlias] = useState<string | null>(null);
+  const closeTooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearCloseTooltipTimeout = () => {
+    if (!closeTooltipTimeoutRef.current) return;
+    clearTimeout(closeTooltipTimeoutRef.current);
+    closeTooltipTimeoutRef.current = null;
+  };
+
+  const openTooltip = (alias: string) => {
+    clearCloseTooltipTimeout();
+    setActiveAlias(alias);
+  };
+
+  const scheduleCloseTooltip = (
+    currentTarget?: HTMLElement,
+    relatedTarget?: EventTarget | null,
+  ) => {
+    if (currentTarget && relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) {
+      return;
+    }
+
+    clearCloseTooltipTimeout();
+    closeTooltipTimeoutRef.current = setTimeout(() => {
+      setActiveAlias(null);
+      closeTooltipTimeoutRef.current = null;
+    }, 360);
+  };
+
+  useEffect(() => clearCloseTooltipTimeout, []);
+
   return (
-    <div aria-label={`${roster.visible.length + roster.overflow} online`} style={styles.roster} title={usersTitle}>
-      {roster.visible.map((member, index) => (
+    <div aria-label={`${roster.visible.length + roster.overflow} online`} style={styles.roster}>
+      {roster.visible.map((member, index) => {
+        const active = activeAlias === member.alias;
+        const expanded = active && expandedAlias === member.alias;
+
+        return (
+          <span
+            key={member.alias}
+            onBlur={event => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setActiveAlias(null);
+            }}
+            onFocus={() => openTooltip(member.alias)}
+            onMouseEnter={() => openTooltip(member.alias)}
+            onMouseLeave={event => scheduleCloseTooltip(event.currentTarget, event.relatedTarget)}
+            style={{
+              ...styles.rosterMember,
+              marginLeft: index === 0 ? 0 : "-8px",
+              zIndex: roster.visible.length - index,
+            }}
+          >
+            <span aria-label={member.alias} style={styles.rosterAvatar}>
+              {member.initials}
+            </span>
+            <span
+              aria-hidden="true"
+              onMouseEnter={() => openTooltip(member.alias)}
+              onMouseLeave={event => scheduleCloseTooltip(event.currentTarget, event.relatedTarget)}
+              style={{
+                ...styles.rosterHoverBridge,
+                pointerEvents: active ? "auto" : "none",
+              }}
+            />
+            <span
+              onMouseEnter={() => openTooltip(member.alias)}
+              onMouseLeave={event => scheduleCloseTooltip(event.currentTarget, event.relatedTarget)}
+              role="dialog"
+              style={{
+                ...styles.rosterTriviaShell,
+                opacity: active ? 1 : 0,
+                pointerEvents: active ? "auto" : "none",
+                transform: active ? "translateY(0) scale(1)" : "translateY(-2px) scale(0.98)",
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  ...styles.rosterTriviaSurface,
+                  transform: expanded ? "scaleX(1) scaleY(1)" : "scaleX(0.79) scaleY(0.31)",
+                }}
+              />
+              <span
+                style={{
+                  ...styles.rosterTriviaCompactContent,
+                  opacity: expanded ? 0 : 1,
+                  pointerEvents: expanded ? "none" : "auto",
+                  transform: expanded ? "translateY(-3px)" : "translateY(0)",
+                }}
+              >
+                <span style={styles.rosterTriviaName}>{member.alias}</span>
+                <button
+                  aria-expanded={expanded}
+                  aria-label={`Show name trivia for ${member.alias}`}
+                  onClick={event => {
+                    event.stopPropagation();
+                    setExpandedAlias(current => (current === member.alias ? null : member.alias));
+                  }}
+                  style={{
+                    ...styles.rosterTriviaButton,
+                    color: expanded ? "var(--accent)" : "var(--text-muted)",
+                    transform: expanded ? "rotate(-8deg)" : "rotate(0deg)",
+                  }}
+                  type="button"
+                >
+                  <Lightbulb aria-hidden="true" size={13} strokeWidth={2} />
+                </button>
+              </span>
+              <span
+                style={{
+                  ...styles.rosterTriviaExpandedContent,
+                  opacity: expanded ? 1 : 0,
+                  pointerEvents: expanded ? "auto" : "none",
+                  transform: expanded ? "translateY(0)" : "translateY(5px)",
+                }}
+              >
+                <span style={styles.rosterTriviaTop}>
+                  <span style={styles.rosterTriviaName}>{member.alias}</span>
+                  <button
+                    aria-expanded={expanded}
+                    aria-label={`Hide name trivia for ${member.alias}`}
+                    onClick={event => {
+                      event.stopPropagation();
+                      setExpandedAlias(current => (current === member.alias ? null : member.alias));
+                    }}
+                    style={{
+                      ...styles.rosterTriviaButton,
+                      color: "var(--accent)",
+                      transform: "rotate(-8deg)",
+                    }}
+                    type="button"
+                  >
+                    <Lightbulb aria-hidden="true" size={13} strokeWidth={2} />
+                  </button>
+                </span>
+                <span style={styles.rosterTriviaCopy}>
+                  {getRoomNameTrivia(member.alias)}
+                </span>
+              </span>
+            </span>
+          </span>
+        );
+      })}
+      {roster.overflow > 0 && (
         <span
-          key={member.alias}
           style={{
             ...styles.rosterAvatar,
-            marginLeft: index === 0 ? 0 : "-8px",
-            zIndex: roster.visible.length - index,
+            ...styles.rosterOverflow,
+            marginLeft: roster.visible.length > 0 ? "-8px" : 0,
           }}
-          title={member.alias}
+          title={usersTitle}
         >
-          {member.initials}
-        </span>
-      ))}
-      {roster.overflow > 0 && (
-        <span style={{ ...styles.rosterAvatar, ...styles.rosterOverflow, marginLeft: roster.visible.length > 0 ? "-8px" : 0 }}>
           +{roster.overflow}
         </span>
       )}
@@ -1401,7 +1537,7 @@ const styles: Record<string, CSSProperties> = {
     color: "var(--text)",
     display: "flex",
     flexDirection: "column",
-    fontFamily: "var(--font-mono)",
+    fontFamily: ROOM_FONT_FAMILY,
     height: "100dvh",
     isolation: "isolate",
     overflow: "hidden",
@@ -1409,6 +1545,7 @@ const styles: Record<string, CSSProperties> = {
   },
   roomHeader: {
     alignItems: "center",
+    borderBottom: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
     display: "flex",
     flexShrink: 0,
     gap: "16px",
@@ -1418,18 +1555,6 @@ const styles: Record<string, CSSProperties> = {
     position: "relative",
     zIndex: 1,
   },
-  headerRail: {
-    bottom: "2px",
-    color: "color-mix(in srgb, var(--text-dim) 86%, var(--text))",
-    fontSize: "11px",
-    left: "clamp(32px, calc(3vw + 16px), 48px)",
-    lineHeight: "12px",
-    overflow: "hidden",
-    pointerEvents: "none",
-    position: "absolute",
-    right: "clamp(32px, calc(3vw + 16px), 48px)",
-    whiteSpace: "nowrap",
-  },
   headerIdentity: {
     alignItems: "center",
     display: "flex",
@@ -1438,7 +1563,7 @@ const styles: Record<string, CSSProperties> = {
   },
   brand: {
     color: "var(--text)",
-    fontFamily: "var(--font-mono)",
+    fontFamily: ROOM_FONT_FAMILY,
     fontSize: "15px",
     fontWeight: 700,
   },
@@ -1520,6 +1645,11 @@ const styles: Record<string, CSSProperties> = {
     marginRight: "6px",
     minHeight: "32px",
   },
+  rosterMember: {
+    alignItems: "center",
+    display: "inline-flex",
+    position: "relative",
+  },
   rosterAvatar: {
     alignItems: "center",
     background: "var(--bg-3)",
@@ -1534,6 +1664,107 @@ const styles: Record<string, CSSProperties> = {
     minWidth: "32px",
     padding: "0 8px",
     position: "relative",
+  },
+  rosterTriviaButton: {
+    alignItems: "center",
+    background: "color-mix(in srgb, var(--accent) 7%, transparent)",
+    border: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
+    borderRadius: "999px",
+    color: "var(--text-muted)",
+    cursor: "pointer",
+    display: "inline-flex",
+    flexShrink: 0,
+    height: "32px",
+    justifyContent: "center",
+    padding: 0,
+    transition: "background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease",
+    width: "32px",
+  },
+  rosterHoverBridge: {
+    background: "transparent",
+    height: "8px",
+    position: "absolute",
+    right: "-4px",
+    top: "100%",
+    width: "180px",
+    zIndex: 9,
+  },
+  rosterTriviaShell: {
+    height: "132px",
+    position: "absolute",
+    right: "-4px",
+    top: "calc(100% + 4px)",
+    transformOrigin: "right top",
+    transition: "opacity 150ms ease-out, transform 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+    width: "224px",
+    zIndex: 10,
+  },
+  rosterTriviaSurface: {
+    background: "color-mix(in srgb, var(--bg) 94%, black)",
+    border: "1px solid color-mix(in srgb, var(--text-dim) 24%, transparent)",
+    borderRadius: "10px",
+    boxShadow: "0 12px 32px rgba(0, 0, 0, 0.32)",
+    position: "absolute",
+    right: 0,
+    top: 0,
+    transformOrigin: "right top",
+    transition: "transform 190ms cubic-bezier(0.23, 1, 0.32, 1)",
+    width: "224px",
+    height: "132px",
+    willChange: "transform",
+  },
+  rosterTriviaCompactContent: {
+    alignItems: "center",
+    color: "var(--text-muted)",
+    display: "flex",
+    gap: "10px",
+    height: "40px",
+    justifyContent: "space-between",
+    lineHeight: "16px",
+    padding: "0 8px 0 12px",
+    position: "absolute",
+    right: 0,
+    top: 0,
+    transition: "opacity 120ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+    width: "176px",
+    willChange: "opacity, transform",
+  },
+  rosterTriviaExpandedContent: {
+    color: "var(--text-muted)",
+    display: "flex",
+    flexDirection: "column",
+    height: "132px",
+    lineHeight: "16px",
+    padding: "0 10px 10px 12px",
+    position: "absolute",
+    right: 0,
+    top: 0,
+    transition: "opacity 150ms ease-out, transform 170ms cubic-bezier(0.23, 1, 0.32, 1)",
+    width: "224px",
+    willChange: "opacity, transform",
+  },
+  rosterTriviaTop: {
+    alignItems: "center",
+    display: "flex",
+    gap: "10px",
+    justifyContent: "space-between",
+    minHeight: "38px",
+  },
+  rosterTriviaName: {
+    color: "var(--text)",
+    flex: 1,
+    fontSize: "12px",
+    fontWeight: 700,
+    lineHeight: "16px",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  rosterTriviaCopy: {
+    display: "block",
+    overflow: "hidden",
+    paddingBottom: "8px",
   },
   rosterOverflow: {
     background: "var(--bg)",
@@ -1610,7 +1841,7 @@ const styles: Record<string, CSSProperties> = {
     border: 0,
     borderRadius: 0,
     cursor: "pointer",
-    fontFamily: "var(--font-mono)",
+    fontFamily: ROOM_FONT_FAMILY,
     fontSize: "14px",
     lineHeight: "24px",
     padding: "0 0 0 20px",
@@ -1669,6 +1900,7 @@ const styles: Record<string, CSSProperties> = {
     margin: "12px 0 0 20px",
   },
   composer: {
+    borderTop: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
     display: "flex",
     flexDirection: "column",
     flexShrink: 0,
@@ -1678,18 +1910,6 @@ const styles: Record<string, CSSProperties> = {
     position: "relative",
     transition: "min-height 180ms cubic-bezier(0.22, 1, 0.36, 1), padding-top 180ms cubic-bezier(0.22, 1, 0.36, 1), padding-bottom 180ms cubic-bezier(0.22, 1, 0.36, 1), gap 180ms cubic-bezier(0.22, 1, 0.36, 1)",
     zIndex: 1,
-  },
-  composerRail: {
-    color: "color-mix(in srgb, var(--text-dim) 86%, var(--text))",
-    fontSize: "11px",
-    left: "clamp(32px, calc(3vw + 16px), 48px)",
-    lineHeight: "12px",
-    overflow: "hidden",
-    pointerEvents: "none",
-    position: "absolute",
-    right: "clamp(32px, calc(3vw + 16px), 48px)",
-    top: "2px",
-    whiteSpace: "nowrap",
   },
   composerInlineStatus: {
     overflow: "hidden",
@@ -1713,7 +1933,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: 0,
     cursor: "pointer",
     display: "flex",
-    fontFamily: "var(--font-mono)",
+    fontFamily: ROOM_FONT_FAMILY,
     fontSize: "12px",
     gap: "10px",
     lineHeight: "20px",
@@ -1795,7 +2015,7 @@ const styles: Record<string, CSSProperties> = {
     boxShadow: "none",
     color: "var(--text)",
     flex: 1,
-    fontFamily: "var(--font-mono)",
+    fontFamily: ROOM_FONT_FAMILY,
     fontSize: "14px",
     lineHeight: "24px",
     minWidth: 0,
@@ -1807,7 +2027,7 @@ const styles: Record<string, CSSProperties> = {
     background: "var(--bg)",
     color: "var(--text)",
     display: "flex",
-    fontFamily: "var(--font-mono)",
+    fontFamily: ROOM_FONT_FAMILY,
     isolation: "isolate",
     justifyContent: "center",
     minHeight: "100dvh",
@@ -1834,7 +2054,7 @@ const styles: Record<string, CSSProperties> = {
   },
   stateTitle: {
     color: "var(--text)",
-    fontFamily: "var(--font-mono)",
+    fontFamily: ROOM_FONT_FAMILY,
     fontSize: "20px",
     lineHeight: "28px",
     margin: "0 0 14px",
@@ -1860,7 +2080,7 @@ const styles: Record<string, CSSProperties> = {
     borderBottom: "1px solid var(--border)",
     borderRadius: 0,
     color: "var(--text)",
-    fontFamily: "var(--font-mono)",
+    fontFamily: ROOM_FONT_FAMILY,
     padding: "10px 0",
     width: "100%",
   },

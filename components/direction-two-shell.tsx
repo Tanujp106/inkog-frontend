@@ -1673,7 +1673,7 @@ function InkPatternMark({
   const markScaleClass =
     size === "mobile"
       ? "[--cell:clamp(3.2px,0.84vw,3.6px)] [--gap:1px] [--letter-gap:4px]"
-      : "[--cell:clamp(4px,0.56vw,7px)] [--gap:clamp(1px,0.12vw,2px)] [--letter-gap:clamp(5px,0.44vw,9px)]";
+      : "[--cell:clamp(4.4px,0.62vw,7.8px)] [--gap:clamp(1px,0.14vw,2.2px)] [--letter-gap:clamp(5.5px,0.5vw,10px)]";
 
   useEffect(() => {
     return () => {
