@@ -2,6 +2,7 @@
 
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useDialKit } from "dialkit";
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import {
@@ -53,6 +54,43 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
 const roomIdPattern = /([a-z0-9]{6})$/i;
 const themeStorageKey = "inkog-theme";
 type DirectionTwoTheme = (typeof directionTwoThemes)[number];
+type DirectionTwoDialTuple = [number, number, number, number?];
+
+const directionTwoShimmerDialConfig = {
+  title: {
+    duration: [660, 520, 2600, 20] as DirectionTwoDialTuple,
+    sweepDelay: [280, 120, 1200, 10] as DirectionTwoDialTuple,
+    burstTail: [130, 0, 900, 10] as DirectionTwoDialTuple,
+    colorMix: [62, 0, 92, 1] as DirectionTwoDialTuple,
+    peakBrightness: [1.34, 0.9, 2.4, 0.01] as DirectionTwoDialTuple,
+    settleBrightness: [1.08, 0.8, 1.6, 0.01] as DirectionTwoDialTuple,
+    signalRadius: [6, 0, 28, 1] as DirectionTwoDialTuple,
+    haloRadius: [16, 0, 48, 1] as DirectionTwoDialTuple,
+    signalOpacity: [58, 0, 100, 1] as DirectionTwoDialTuple,
+    haloOpacity: [64, 0, 100, 1] as DirectionTwoDialTuple,
+  },
+  timing: {
+    duration: [1040, 320, 2200, 20] as DirectionTwoDialTuple,
+    sweepDelay: [120, 0, 420, 5] as DirectionTwoDialTuple,
+    transition: [360, 80, 900, 10] as DirectionTwoDialTuple,
+    burstTail: [120, 0, 600, 10] as DirectionTwoDialTuple,
+  },
+  intensity: {
+    colorMix: [38, 0, 80, 1] as DirectionTwoDialTuple,
+    idleOpacity: [1, 0.2, 1, 0.01] as DirectionTwoDialTuple,
+    peakOpacity: [1, 0.2, 1, 0.01] as DirectionTwoDialTuple,
+    settleOpacity: [1, 0.2, 1, 0.01] as DirectionTwoDialTuple,
+    idleBrightness: [1, 0.7, 1.4, 0.01] as DirectionTwoDialTuple,
+    peakBrightness: [1.16, 0.8, 2, 0.01] as DirectionTwoDialTuple,
+    settleBrightness: [1, 0.7, 1.4, 0.01] as DirectionTwoDialTuple,
+  },
+  glow: {
+    signalRadius: [4, 0, 24, 1] as DirectionTwoDialTuple,
+    haloRadius: [11, 0, 40, 1] as DirectionTwoDialTuple,
+    signalOpacity: [38, 0, 100, 1] as DirectionTwoDialTuple,
+    haloOpacity: [46, 0, 100, 1] as DirectionTwoDialTuple,
+  },
+};
 
 type TerminalLine = {
   id: string;
@@ -149,6 +187,66 @@ const themePreviewColorById: Record<DirectionTwoTheme["id"], string> = {
   purple: "#c792ff",
 };
 const slashMenuImmediateCommands = new Set(["/clear", "/command", "/commands"]);
+
+type DirectionTwoShimmerSettings = {
+  durationMs: number;
+  delayMaxMs: number;
+  transitionMs: number;
+  burstTailMs: number;
+  titleDurationMs: number;
+  titleDelayMaxMs: number;
+  titleBurstTailMs: number;
+  idleOpacity: number;
+  peakOpacity: number;
+  settleOpacity: number;
+  idleBrightness: number;
+  peakBrightness: number;
+  settleBrightness: number;
+  signalRadius: number;
+  haloRadius: number;
+  signalOpacity: number;
+  haloOpacity: number;
+  colorMixPercent: number;
+  titleColorMixPercent: number;
+  titlePeakBrightness: number;
+  titleSettleBrightness: number;
+  titleSignalRadius: number;
+  titleHaloRadius: number;
+  titleSignalOpacity: number;
+  titleHaloOpacity: number;
+};
+
+function percent(value: number) {
+  return `${value}%`;
+}
+
+function buildDirectionTwoShimmerStyle(settings: DirectionTwoShimmerSettings) {
+  return {
+    "--highlight-shimmer-duration": `${settings.durationMs}ms`,
+    "--direction-two-shimmer-transition-duration": `${settings.transitionMs}ms`,
+    "--direction-two-shimmer-idle-opacity": settings.idleOpacity,
+    "--direction-two-shimmer-peak-opacity": settings.peakOpacity,
+    "--direction-two-shimmer-settle-opacity": settings.settleOpacity,
+    "--direction-two-shimmer-idle-brightness": settings.idleBrightness,
+    "--direction-two-shimmer-peak-brightness": settings.peakBrightness,
+    "--direction-two-shimmer-settle-brightness": settings.settleBrightness,
+    "--direction-two-shimmer-signal-radius": `${settings.signalRadius}px`,
+    "--direction-two-shimmer-halo-radius": `${settings.haloRadius}px`,
+    "--direction-two-shimmer-signal-opacity": percent(settings.signalOpacity),
+    "--direction-two-shimmer-halo-opacity": percent(settings.haloOpacity),
+    "--direction-two-shimmer-color-mix": percent(settings.colorMixPercent),
+    "--direction-two-shimmer-foreground-mix": percent(100 - settings.colorMixPercent),
+    "--direction-two-title-shimmer-duration": `${settings.titleDurationMs}ms`,
+    "--direction-two-title-shimmer-color-mix": percent(settings.titleColorMixPercent),
+    "--direction-two-title-shimmer-foreground-mix": percent(100 - settings.titleColorMixPercent),
+    "--direction-two-title-shimmer-peak-brightness": settings.titlePeakBrightness,
+    "--direction-two-title-shimmer-settle-brightness": settings.titleSettleBrightness,
+    "--direction-two-title-shimmer-signal-radius": `${settings.titleSignalRadius}px`,
+    "--direction-two-title-shimmer-halo-radius": `${settings.titleHaloRadius}px`,
+    "--direction-two-title-shimmer-signal-opacity": percent(settings.titleSignalOpacity),
+    "--direction-two-title-shimmer-halo-opacity": percent(settings.titleHaloOpacity),
+  } as CSSProperties;
+}
 
 function setStoredToken(roomId: string, token: string) {
   if (typeof window === "undefined" || typeof window.localStorage?.setItem !== "function") return;
@@ -258,6 +356,7 @@ export function DirectionTwoShell() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const inputMirrorRef = useRef<HTMLDivElement | null>(null);
   const promptRowRef = useRef<HTMLDivElement | null>(null);
+  const slashMenuRef = useRef<HTMLDivElement | null>(null);
   const inputNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [lines, setLines] = useState<TerminalLine[]>(initialLines);
@@ -265,6 +364,7 @@ export function DirectionTwoShell() {
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [slashSuggestionIndex, setSlashSuggestionIndex] = useState(0);
+  const [slashSelectionMode, setSlashSelectionMode] = useState<"pointer" | "keyboard">("pointer");
   const [creating, setCreating] = useState(false);
   const [helping, setHelping] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
@@ -281,6 +381,40 @@ export function DirectionTwoShell() {
     previous: null as DirectionTwoMarkIcon | null,
     swapId: 0,
   });
+  const shimmerDials = useDialKit("Direction 2 shimmer", directionTwoShimmerDialConfig, {
+    id: "direction-two-shimmer",
+    persist: true,
+  });
+  const shimmerSettings: DirectionTwoShimmerSettings = {
+    durationMs: shimmerDials.timing.duration,
+    delayMaxMs: shimmerDials.timing.sweepDelay,
+    transitionMs: shimmerDials.timing.transition,
+    burstTailMs: shimmerDials.timing.burstTail,
+    titleDurationMs: shimmerDials.title.duration,
+    titleDelayMaxMs: shimmerDials.title.sweepDelay,
+    titleBurstTailMs: shimmerDials.title.burstTail,
+    colorMixPercent: shimmerDials.intensity.colorMix,
+    titleColorMixPercent: shimmerDials.title.colorMix,
+    idleOpacity: shimmerDials.intensity.idleOpacity,
+    peakOpacity: shimmerDials.intensity.peakOpacity,
+    settleOpacity: shimmerDials.intensity.settleOpacity,
+    idleBrightness: shimmerDials.intensity.idleBrightness,
+    peakBrightness: shimmerDials.intensity.peakBrightness,
+    settleBrightness: shimmerDials.intensity.settleBrightness,
+    titlePeakBrightness: shimmerDials.title.peakBrightness,
+    titleSettleBrightness: shimmerDials.title.settleBrightness,
+    signalRadius: shimmerDials.glow.signalRadius,
+    haloRadius: shimmerDials.glow.haloRadius,
+    signalOpacity: shimmerDials.glow.signalOpacity,
+    haloOpacity: shimmerDials.glow.haloOpacity,
+    titleSignalRadius: shimmerDials.title.signalRadius,
+    titleHaloRadius: shimmerDials.title.haloRadius,
+    titleSignalOpacity: shimmerDials.title.signalOpacity,
+    titleHaloOpacity: shimmerDials.title.haloOpacity,
+  };
+  const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
+  const slashCommandSuggestions = !flow && !inputFeedbackMessage ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
+  const shouldReserveScrollSpace = slashCommandSuggestions.length > 0 || lines.length > 0;
   const ambientPixels = useMemo(() => {
     return createDirectionTwoAmbientPixels(Math.random, directionTwoAmbientConfig);
   }, []);
@@ -486,8 +620,11 @@ export function DirectionTwoShell() {
 
     const syncScrollReserve = () => {
       const promptHeight = promptRowRef.current?.offsetHeight ?? 24;
+      const slashMenuHeight = slashCommandSuggestions.length > 0 ? slashMenuRef.current?.offsetHeight ?? 0 : 0;
       setScrollReserveHeight(
         getDirectionTwoScrollReserveHeight({
+          anchorRatio: slashCommandSuggestions.length > 0 ? 0.8 : 0.85,
+          floatingHeight: slashMenuHeight,
           viewportHeight: window.innerHeight,
           promptHeight,
         }),
@@ -497,14 +634,17 @@ export function DirectionTwoShell() {
     syncScrollReserve();
     window.addEventListener("resize", syncScrollReserve);
     return () => window.removeEventListener("resize", syncScrollReserve);
-  }, [flow, inputValue, lines.length]);
+  }, [flow, inputValue, lines.length, slashCommandSuggestions.length]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (!lines.length || !promptRowRef.current) return;
+    if (!promptRowRef.current) return;
 
+    const slashMenuHeight = slashCommandSuggestions.length > 0 ? slashMenuRef.current?.offsetHeight ?? 0 : 0;
     const nextScrollTop = getDirectionTwoAutoScrollTop({
+      anchorRatio: slashCommandSuggestions.length > 0 ? 0.8 : 0.85,
       currentScrollY: window.scrollY,
+      floatingHeight: slashMenuHeight,
       promptTop: promptRowRef.current.getBoundingClientRect().top,
       viewportHeight: window.innerHeight,
     });
@@ -515,7 +655,7 @@ export function DirectionTwoShell() {
       top: nextScrollTop,
       behavior: "smooth",
     });
-  }, [flow, lines.length]);
+  }, [flow, inputValue, lines.length, slashCommandSuggestions.length]);
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1005,6 +1145,7 @@ export function DirectionTwoShell() {
 
     if (!flow && slashCommandSuggestions.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       event.preventDefault();
+      setSlashSelectionMode("keyboard");
       setSlashSuggestionIndex(currentIndex => {
         const direction = event.key === "ArrowDown" ? 1 : -1;
         return (currentIndex + direction + slashCommandSuggestions.length) % slashCommandSuggestions.length;
@@ -1115,8 +1256,6 @@ export function DirectionTwoShell() {
 
   const activePrompt = promptFor(flow);
   const completionSuggestion = commandCompletionFor(inputValue, flow);
-  const slashCommandSuggestions = !flow && !inputFeedbackMessage ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
-
   useEffect(() => {
     setSlashSuggestionIndex(0);
   }, [inputValue, slashCommandSuggestions.length]);
@@ -1136,6 +1275,12 @@ export function DirectionTwoShell() {
   const inlineHint = inputFeedbackMessage ?? createFieldHint;
   const visualInputText = inputValue || (creating ? "creating room..." : placeholderFor(flow));
   const visualCreateSegments = inputValue ? getDirectionTwoCreateVisualSegments(inputValue) : null;
+  const slashCommandHoverClass = slashSelectionMode === "pointer"
+    ? "hover:bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] hover:text-[var(--color-signal)]"
+    : "";
+  const slashCommandLabelHoverClass = slashSelectionMode === "pointer"
+    ? "group-hover:text-[var(--color-signal)]/75"
+    : "";
 
   const handleGhostSuggestionTap = (event: PointerEvent<HTMLElement>) => {
     if (!ghostTapCompletion) return;
@@ -1231,6 +1376,8 @@ export function DirectionTwoShell() {
               icon={markIconState.current}
               previousIcon={markIconState.previous}
               reducedMotion={prefersReducedMotion}
+              shimmerSettings={shimmerSettings}
+              shimmerStyle={shimmerStyle}
               showIntro={!hasMarkIntroPlayed && !prefersReducedMotion}
               size="mobile"
               swapId={markIconState.swapId}
@@ -1251,11 +1398,11 @@ export function DirectionTwoShell() {
                       ? undefined
                       : ({
                           animationDelay: `${420 + index * 55}ms`,
-                          "--highlight-shimmer-duration": `${directionTwoMarkMotion.highlightHoverShimmerMs}ms`,
+                          ...shimmerStyle,
                         } as CSSProperties)
                   }
                 >
-                  <PixelIcon pattern={item.icon} size="mobile" />
+                  <PixelIcon pattern={item.icon} shimmerDelayMaxMs={shimmerSettings.delayMaxMs} size="mobile" />
                   <span>{item.mobileText}</span>
                 </div>
               ))}
@@ -1269,6 +1416,8 @@ export function DirectionTwoShell() {
               icon={markIconState.current}
               previousIcon={markIconState.previous}
               reducedMotion={prefersReducedMotion}
+              shimmerSettings={shimmerSettings}
+              shimmerStyle={shimmerStyle}
               showIntro={!hasMarkIntroPlayed && !prefersReducedMotion}
               swapId={markIconState.swapId}
               word={directionTwoMarkWords[0]}
@@ -1288,11 +1437,11 @@ export function DirectionTwoShell() {
                       ? undefined
                       : ({
                           animationDelay: `${620 + index * 70}ms`,
-                          "--highlight-shimmer-duration": `${directionTwoMarkMotion.highlightHoverShimmerMs}ms`,
+                          ...shimmerStyle,
                         } as CSSProperties)
                   }
                 >
-                  <PixelIcon pattern={item.icon} />
+                  <PixelIcon pattern={item.icon} shimmerDelayMaxMs={shimmerSettings.delayMaxMs} />
                   <span>{item.text}</span>
                 </div>
               ))}
@@ -1518,6 +1667,7 @@ export function DirectionTwoShell() {
               <div
                 aria-label="Slash command suggestions"
                 className="direction-two-slash-menu absolute left-0 top-full z-20 mt-2 flex w-full max-w-[560px] flex-col gap-1 overflow-hidden text-[14px] leading-[24px]"
+                ref={slashMenuRef}
                 role="listbox"
               >
                 {slashCommandSuggestions.map((item, index) => {
@@ -1527,8 +1677,8 @@ export function DirectionTwoShell() {
                     <button
                       aria-label={`${item.command} ${item.label}`}
                       aria-selected={selected}
-                      className={`group flex min-h-7 w-full items-center gap-3 rounded-[3px] bg-transparent px-2 py-1 text-left font-mono transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] hover:text-[var(--color-signal)] ${
-                        selected ? "bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] text-[var(--color-signal)]" : "text-[var(--foreground)]"
+                      className={`group flex min-h-7 w-full items-center gap-3 rounded-[3px] px-2 py-1 text-left font-mono transition-colors duration-150 ${slashCommandHoverClass} ${
+                        selected ? "bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] text-[var(--color-signal)]" : "bg-transparent text-[var(--foreground)]"
                       }`}
                       key={item.command}
                       onClick={event => {
@@ -1536,8 +1686,13 @@ export function DirectionTwoShell() {
                         handleSlashCommandSuggestionTap(item.command);
                       }}
                       onMouseEnter={() => {
+                        setSlashSelectionMode("pointer");
                         setSlashSuggestionIndex(index);
                         sound.play("hover");
+                      }}
+                      onMouseMove={() => {
+                        setSlashSelectionMode("pointer");
+                        setSlashSuggestionIndex(index);
                       }}
                       role="option"
                       type="button"
@@ -1547,7 +1702,7 @@ export function DirectionTwoShell() {
                       </span>
                       <span className="shrink-0">{item.command}</span>
                       <span
-                        className={`min-w-0 flex-1 truncate text-right transition-colors duration-150 group-hover:text-[var(--color-signal)]/75 ${
+                        className={`min-w-0 flex-1 truncate text-right transition-colors duration-150 ${slashCommandLabelHoverClass} ${
                           selected ? "text-[var(--color-signal)]/75" : "text-[var(--color-dim)]"
                         }`}
                       >
@@ -1560,7 +1715,7 @@ export function DirectionTwoShell() {
             )}
           </div>
 
-          <div aria-hidden="true" style={{ height: lines.length > 0 ? `${scrollReserveHeight}px` : "0px" }} />
+          <div aria-hidden="true" style={{ height: shouldReserveScrollSpace ? `${scrollReserveHeight}px` : "0px" }} />
         </div>
       </section>
     </main>
@@ -1597,6 +1752,8 @@ function InkPatternMark({
   icon,
   previousIcon,
   reducedMotion,
+  shimmerSettings,
+  shimmerStyle,
   showIntro,
   size = "desktop",
   swapId,
@@ -1605,26 +1762,67 @@ function InkPatternMark({
   icon: DirectionTwoMarkIcon;
   previousIcon: DirectionTwoMarkIcon | null;
   reducedMotion: boolean;
+  shimmerSettings: DirectionTwoShimmerSettings;
+  shimmerStyle: CSSProperties;
   showIntro: boolean;
   size?: "desktop" | "mobile";
   swapId: number;
 }) {
   const isSwapping = Boolean(previousIcon) && !reducedMotion;
+  const [isMarkShimmering, setIsMarkShimmering] = useState(false);
+  const shimmerFrameRef = useRef<number | null>(null);
+  const shimmerTimeoutRef = useRef<number | null>(null);
   const markScaleClass =
     size === "mobile"
       ? "[--cell:clamp(3.2px,0.84vw,3.6px)] [--gap:1px] [--letter-gap:4px]"
       : "[--cell:clamp(4px,0.56vw,7px)] [--gap:clamp(1px,0.12vw,2px)] [--letter-gap:clamp(5px,0.44vw,9px)]";
 
+  useEffect(() => {
+    return () => {
+      if (shimmerFrameRef.current !== null) {
+        window.cancelAnimationFrame(shimmerFrameRef.current);
+      }
+      if (shimmerTimeoutRef.current !== null) {
+        window.clearTimeout(shimmerTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function triggerMarkShimmer() {
+    if (reducedMotion || typeof window === "undefined") return;
+    if (shimmerFrameRef.current !== null) {
+      window.cancelAnimationFrame(shimmerFrameRef.current);
+    }
+    if (shimmerTimeoutRef.current !== null) {
+      window.clearTimeout(shimmerTimeoutRef.current);
+    }
+
+    setIsMarkShimmering(false);
+    shimmerFrameRef.current = window.requestAnimationFrame(() => {
+      shimmerFrameRef.current = null;
+      setIsMarkShimmering(true);
+      shimmerTimeoutRef.current = window.setTimeout(() => {
+        shimmerTimeoutRef.current = null;
+        setIsMarkShimmering(false);
+      }, Math.max(
+        shimmerSettings.durationMs + shimmerSettings.delayMaxMs + shimmerSettings.burstTailMs,
+        shimmerSettings.titleDurationMs + shimmerSettings.titleDelayMaxMs + shimmerSettings.titleBurstTailMs,
+      ));
+    });
+  }
+
   return (
     <div
       aria-label={`${word}, ${icon.label}`}
-      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-hidden ${size === "mobile" ? "gap-[10px]" : "gap-[16px]"} ${markScaleClass}`}
+      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-hidden ${isMarkShimmering ? "direction-two-mark-shimmering" : ""} ${size === "mobile" ? "gap-[10px]" : "gap-[16px]"} ${markScaleClass}`}
+      onPointerEnter={triggerMarkShimmer}
       role="img"
       style={
         {
+          ...shimmerStyle,
           "--mark-intro-shimmer-duration": `${directionTwoMarkMotion.introShimmerMs}ms`,
           "--mark-intro-shimmer-count": directionTwoMarkMotion.introShimmerIterationCount,
-          "--mark-hover-shimmer-duration": `${directionTwoMarkMotion.hoverShimmerMs}ms`,
+          "--mark-hover-shimmer-duration": `${shimmerSettings.durationMs}ms`,
           "--mark-hover-shimmer-count": directionTwoMarkMotion.hoverShimmerIterationCount,
         } as CSSProperties
       }
@@ -1632,6 +1830,7 @@ function InkPatternMark({
       <InkPatternMarkLayer
         className={`${showIntro ? "direction-two-mark-layer-entering" : ""} direction-two-mark-word`}
         key={word}
+        shimmerDelayMaxMs={shimmerSettings.titleDelayMaxMs}
         word={word}
       />
       <div aria-hidden="true" className="direction-two-mark-icon relative shrink-0 overflow-hidden">
@@ -1639,12 +1838,14 @@ function InkPatternMark({
           className={isSwapping ? "direction-two-mark-layer-entering" : ""}
           key={`current-icon-${icon.id}-${swapId}`}
           pattern={icon.pattern}
+          shimmerDelayMaxMs={shimmerSettings.delayMaxMs}
         />
         {isSwapping && previousIcon && (
           <InkPatternIconLayer
             className="direction-two-mark-layer-exiting"
             key={`previous-icon-${previousIcon.id}-${swapId}`}
             pattern={previousIcon.pattern}
+            shimmerDelayMaxMs={shimmerSettings.delayMaxMs}
           />
         )}
       </div>
@@ -1655,13 +1856,15 @@ function InkPatternMark({
 function InkPatternIconLayer({
   pattern,
   className = "",
+  shimmerDelayMaxMs,
 }: {
   pattern: string[];
   className?: string;
+  shimmerDelayMaxMs: number;
 }) {
   return (
     <div className={`direction-two-mark-layer direction-two-mark-symbol flex w-fit origin-left items-start gap-[var(--letter-gap)] ${className}`}>
-      <PixelPatternGrid density={2} letterIndex={0} pattern={pattern} />
+      <PixelPatternGrid density={2} letterIndex={0} pattern={pattern} shimmerDelayMaxMs={shimmerDelayMaxMs} />
     </div>
   );
 }
@@ -1669,9 +1872,11 @@ function InkPatternIconLayer({
 function InkPatternMarkLayer({
   word,
   className = "",
+  shimmerDelayMaxMs,
 }: {
   word: string;
   className?: string;
+  shimmerDelayMaxMs: number;
 }) {
   const patterns: string[][] = buildDirectionTwoMarkPattern(word);
 
@@ -1683,6 +1888,7 @@ function InkPatternMarkLayer({
           key={letterIndex}
           letterIndex={letterIndex}
           pattern={letter}
+          shimmerDelayMaxMs={shimmerDelayMaxMs}
         />
       ))}
     </div>
@@ -1693,10 +1899,12 @@ function PixelPatternGrid({
   density = 1,
   pattern,
   letterIndex,
+  shimmerDelayMaxMs = directionTwoMarkMotion.markHoverMaxDelayMs,
 }: {
   density?: number;
   pattern: string[];
   letterIndex: number;
+  shimmerDelayMaxMs?: number;
 }) {
   const densePattern = density > 1 ? createDensePixelPattern(pattern, density) : pattern;
   const columnCount = densePattern[0]?.length ?? 0;
@@ -1718,7 +1926,7 @@ function PixelPatternGrid({
           const resolveDelay = Math.min(shimmerColumn * 14 + rowIndex * 5, 520);
           const shimmerDelay = Math.min(
             shimmerColumn * 10 + rowIndex * 5,
-            directionTwoMarkMotion.markHoverMaxDelayMs,
+            shimmerDelayMaxMs,
           );
 
           return (
@@ -1748,7 +1956,15 @@ function createDensePixelPattern(pattern: string[], density: number) {
   });
 }
 
-function PixelIcon({ pattern, size = "desktop" }: { pattern: string[]; size?: "desktop" | "mobile" }) {
+function PixelIcon({
+  pattern,
+  shimmerDelayMaxMs = directionTwoMarkMotion.highlightHoverMaxDelayMs,
+  size = "desktop",
+}: {
+  pattern: string[];
+  shimmerDelayMaxMs?: number;
+  size?: "desktop" | "mobile";
+}) {
   const columnCount = pattern[0]?.length ?? 0;
   const rowCount = pattern.length;
   const cellSize = size === "mobile" ? 1.5 : 2;
@@ -1766,7 +1982,7 @@ function PixelIcon({ pattern, size = "desktop" }: { pattern: string[]; size?: "d
         [...row].map((cell, columnIndex) => {
           const highlightDelay = Math.min(
             columnIndex * 10 + rowIndex * 6,
-            directionTwoMarkMotion.highlightHoverMaxDelayMs,
+            shimmerDelayMaxMs,
           );
 
           return (
