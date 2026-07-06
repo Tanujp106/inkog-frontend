@@ -44,7 +44,7 @@ import {
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
-const TERMINAL_RAIL = "> --------------------------------------------------------------------------------------------------------------------------------";
+const TERMINAL_RAIL = "> ________________________________________________________________________________________________________________________________";
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://127.0.0.1:3001";
 
 interface Message {
@@ -1079,7 +1079,7 @@ export default function RoomPage() {
               ) : null}
               {showComposerHint ? (
                 <span style={styles.composerHint}>
-                  {isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or start with / for commands"}
+                  {isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or / for commands"}
                 </span>
               ) : null}
             </span>
@@ -1420,7 +1420,7 @@ const styles: Record<string, CSSProperties> = {
   },
   headerRail: {
     bottom: "2px",
-    color: "color-mix(in srgb, var(--accent) 58%, var(--text-dim))",
+    color: "color-mix(in srgb, var(--text-dim) 86%, var(--text))",
     fontSize: "11px",
     left: "clamp(32px, calc(3vw + 16px), 48px)",
     lineHeight: "12px",
@@ -1517,8 +1517,8 @@ const styles: Record<string, CSSProperties> = {
   roster: {
     alignItems: "center",
     display: "inline-flex",
-    marginRight: "4px",
-    minHeight: "24px",
+    marginRight: "6px",
+    minHeight: "32px",
   },
   rosterAvatar: {
     alignItems: "center",
@@ -1527,12 +1527,12 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "999px",
     color: "var(--text)",
     display: "inline-flex",
-    fontSize: "10px",
-    height: "24px",
+    fontSize: "12px",
+    height: "32px",
     justifyContent: "center",
     lineHeight: 1,
-    minWidth: "24px",
-    padding: "0 6px",
+    minWidth: "32px",
+    padding: "0 8px",
     position: "relative",
   },
   rosterOverflow: {
@@ -1680,7 +1680,7 @@ const styles: Record<string, CSSProperties> = {
     zIndex: 1,
   },
   composerRail: {
-    color: "color-mix(in srgb, var(--accent) 58%, var(--text-dim))",
+    color: "color-mix(in srgb, var(--text-dim) 86%, var(--text))",
     fontSize: "11px",
     left: "clamp(32px, calc(3vw + 16px), 48px)",
     lineHeight: "12px",

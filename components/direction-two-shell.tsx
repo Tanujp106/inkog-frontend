@@ -15,6 +15,7 @@ import {
   getDirectionTwoInlineFeedbackMessage,
   getDirectionTwoInlineGhostText,
   getDirectionTwoCreatePromptPresentation,
+  getDirectionTwoSlashCommandSuggestions,
   getDirectionTwoCreateTimeArrowValue,
   getDirectionTwoCreateVisualSegments,
   getDirectionTwoCreateInlineInputError,
@@ -147,6 +148,7 @@ const themePreviewColorById: Record<DirectionTwoTheme["id"], string> = {
   green: "#c8ff57",
   purple: "#c792ff",
 };
+const slashMenuImmediateCommands = new Set(["/clear", "/command", "/commands"]);
 
 function setStoredToken(roomId: string, token: string) {
   if (typeof window === "undefined" || typeof window.localStorage?.setItem !== "function") return;
@@ -205,7 +207,7 @@ function promptFor(flow: SessionFlow | null) {
 }
 
 function placeholderFor(flow: SessionFlow | null) {
-  if (!flow) return "write 'create' to start a room";
+  if (!flow) return "write '/' to create or join";
   if (flow.type === "join") return "abc123 or room link";
   if (flow.type === "style") return "1, 2, 3, 4, or 5";
 
@@ -230,17 +232,17 @@ function createPromptPresentationForFlow(flow: SessionFlow | null) {
 
   switch (flow.step) {
     case "topic":
-      return getDirectionTwoCreatePromptPresentation("create");
+      return getDirectionTwoCreatePromptPresentation("/create");
     case "expiry":
-      return getDirectionTwoCreatePromptPresentation("create room");
+      return getDirectionTwoCreatePromptPresentation("/create room");
     case "limit":
-      return getDirectionTwoCreatePromptPresentation("create room 60");
+      return getDirectionTwoCreatePromptPresentation("/create room 60");
     case "password-choice":
-      return getDirectionTwoCreatePromptPresentation("create room 60 8");
+      return getDirectionTwoCreatePromptPresentation("/create room 60 8");
     case "password":
-      return getDirectionTwoCreatePromptPresentation("create room 60 8 y");
+      return getDirectionTwoCreatePromptPresentation("/create room 60 8 y");
     case "confirm":
-      return getDirectionTwoCreatePromptPresentation("create room 60 8 n");
+      return getDirectionTwoCreatePromptPresentation("/create room 60 8 n");
   }
 }
 
@@ -262,6 +264,7 @@ export function DirectionTwoShell() {
   const [flow, setFlow] = useState<SessionFlow | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [slashSuggestionIndex, setSlashSuggestionIndex] = useState(0);
   const [creating, setCreating] = useState(false);
   const [helping, setHelping] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
@@ -569,11 +572,11 @@ export function DirectionTwoShell() {
     }
   };
 
-  const beginCreate = (command = "create") => {
+  const beginCreate = (command = "/create") => {
     appendLines(
       line("input", command),
       line("output", "starting private room setup"),
-      line("output", "answer each prompt, or use: create <room name> <time> <participants> <y/n>"),
+      line("output", "answer each prompt, or use: /create / room name / minutes / participants / y/n"),
     );
     setFlow({ type: "create", step: "topic", draft: initialDraft });
     sound.play("press");
@@ -866,6 +869,11 @@ export function DirectionTwoShell() {
       return;
     }
 
+    if (!command.startsWith("/")) {
+      rejectInputInline(command, `Command not found: ${command}. Try / for commands.`);
+      return;
+    }
+
     const parsedCreateCommand = parseDirectionTwoCreateCommand(command) as ParsedCreateCommand;
     if (parsedCreateCommand.status !== "not-create") {
       if (parsedCreateCommand.status === "partial" && parsedCreateCommand.nextStep === "topic") {
@@ -919,7 +927,7 @@ export function DirectionTwoShell() {
     }
 
     if (normalized === "style") {
-      beginStyle(command.startsWith("/") ? command : "/style");
+      beginStyle(command);
       return;
     }
 
@@ -995,8 +1003,25 @@ export function DirectionTwoShell() {
       return;
     }
 
+    if (!flow && slashCommandSuggestions.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault();
+      setSlashSuggestionIndex(currentIndex => {
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        return (currentIndex + direction + slashCommandSuggestions.length) % slashCommandSuggestions.length;
+      });
+      sound.play("hover");
+      setKeyboardStatus("Slash command suggestion changed.");
+      return;
+    }
+
     if (event.key === "Enter") {
       event.preventDefault();
+      if (!flow && slashCommandSuggestions.length > 0) {
+        const selectedCommand = slashCommandSuggestions[slashSuggestionIndex]?.command ?? slashCommandSuggestions[0].command;
+        handleSlashCommandSuggestionTap(selectedCommand);
+        return;
+      }
+
       if (!flow) {
         const enterAction = resolveDirectionTwoEnterAction(event.currentTarget.value);
 
@@ -1090,6 +1115,12 @@ export function DirectionTwoShell() {
 
   const activePrompt = promptFor(flow);
   const completionSuggestion = commandCompletionFor(inputValue, flow);
+  const slashCommandSuggestions = !flow && !inputFeedbackMessage ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
+
+  useEffect(() => {
+    setSlashSuggestionIndex(0);
+  }, [inputValue, slashCommandSuggestions.length]);
+
   const createFieldSuggestion = !completionSuggestion && !flow ? getDirectionTwoInlineGhostText(inputValue) : null;
   const createFieldHint = createFieldSuggestion ? getDirectionTwoCreateHint(inputValue) : null;
   const createFieldPresentation = createFieldSuggestion ? getDirectionTwoInlinePromptPresentation(inputValue) : null;
@@ -1119,6 +1150,27 @@ export function DirectionTwoShell() {
         ? `${ghostTapCompletion.replace(/^\/+/, "")} autocompleted.`
         : "Create field autocompleted.",
     );
+    focusInput();
+  };
+
+  const handleSlashCommandSuggestionTap = (command: string) => {
+    if (slashMenuImmediateCommands.has(command)) {
+      executeCommand(command);
+      focusInput();
+      return;
+    }
+
+    const enterAction = resolveDirectionTwoEnterAction(command);
+    const nextCommandValue =
+      enterAction?.type === "continue-inline" && enterAction.value
+        ? enterAction.value
+        : command;
+
+    setInputValue(nextCommandValue);
+    setInputFeedbackMessage(null);
+    setHistoryIndex(null);
+    sound.play("press");
+    setKeyboardStatus(enterAction?.hint ?? `${command} selected.`);
     focusInput();
   };
 
@@ -1292,29 +1344,33 @@ export function DirectionTwoShell() {
             </div>
           )}
 
-          <div
-            ref={promptRowRef}
-            className={`${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 items-center text-[14px] leading-[24px] text-[var(--foreground)]`}
-          >
-            <label className="sr-only" htmlFor="terminal-command">{activePrompt}</label>
-            <span
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap ${
-                activePromptPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
-              }`}
-              aria-hidden="true"
+          <div className="relative w-full">
+            <div
+              ref={promptRowRef}
+              className={`${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 items-center text-[14px] leading-[24px] text-[var(--foreground)]`}
             >
-              {activePrompt === "$" ? (
-                "$"
-              ) : (
-                <>
-                  <span>{">"}</span>
-                  {activePromptPresentation && <PromptPixelGlyph pattern={activePromptPresentation.pattern} />}
-                  <span>{activePrompt}:</span>
-                </>
-              )}
-            </span>
-            <div className="relative ml-2 min-w-0 flex-1">
-              <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden text-[14px] leading-[24px]">
+              <label className="sr-only" htmlFor="terminal-command">{activePrompt}</label>
+              <span
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap ${
+                  activePromptPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
+                }`}
+                aria-hidden="true"
+              >
+                {activePrompt === "$" ? (
+                  "$"
+                ) : (
+                  <>
+                    <span>{">"}</span>
+                    {activePromptPresentation && <PromptPixelGlyph pattern={activePromptPresentation.pattern} />}
+                    <span>{activePrompt}:</span>
+                  </>
+                )}
+              </span>
+              <div className="relative ml-2 min-w-0 flex-1">
+                <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden text-[14px] leading-[24px]">
+                {!inputValue && !creating && (
+                  <span aria-hidden="true" className="direction-two-visual-caret mr-px h-[22px] w-[2px] shrink-0 bg-[var(--foreground)]" />
+                )}
                 {inputValue && visualCreateSegments ? (
                   <span className="shrink-0 whitespace-pre" aria-hidden="true">
                     {visualCreateSegments.map((segment, index) => (
@@ -1336,6 +1392,9 @@ export function DirectionTwoShell() {
                   >
                     {visualInputText}
                   </span>
+                )}
+                {inputValue && !creating && (
+                  <span aria-hidden="true" className="direction-two-visual-caret ml-px h-[22px] w-[2px] shrink-0 bg-[var(--foreground)]" />
                 )}
                 {visibleGhostCompletionText && (
                   <button
@@ -1396,61 +1455,109 @@ export function DirectionTwoShell() {
                     )}
                   </button>
                 )}
-              </div>
-              <input
-                ref={inputRef}
-                aria-describedby={inlineHint ? "terminal-inline-hint" : undefined}
-                aria-label={activePrompt}
-                autoCapitalize="off"
-                autoComplete="off"
-                autoCorrect="off"
-                className="absolute inset-0 h-[24px] w-full appearance-none p-0 font-mono text-[14px] leading-[24px] text-transparent caret-[var(--foreground)] placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
-                disabled={creating}
-                id="terminal-command"
-                name="command"
-                onBeforeInput={event => {
-                  const insertedText = (event.nativeEvent as InputEvent).data ?? "";
-                  const createEditingStep = getDirectionTwoCreateEditingStep(inputValue);
-                  if (
-                    !flow &&
-                    (createEditingStep === "expiry" || createEditingStep === "limit") &&
-                    insertedText &&
-                    /\D/.test(insertedText)
-                  ) {
-                    event.preventDefault();
-                    nudgeInput(createEditingStep === "expiry" ? "Total time only accepts numbers." : "Member limit only accepts numbers.");
-                    return;
-                  }
+                </div>
+                <input
+                  ref={inputRef}
+                  aria-describedby={inlineHint ? "terminal-inline-hint" : undefined}
+                  aria-label={activePrompt}
+                  autoCapitalize="off"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  className="absolute inset-0 h-[24px] w-full appearance-none p-0 font-mono text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
+                  disabled={creating}
+                  id="terminal-command"
+                  name="command"
+                  onBeforeInput={event => {
+                    const insertedText = (event.nativeEvent as InputEvent).data ?? "";
+                    const createEditingStep = getDirectionTwoCreateEditingStep(inputValue);
+                    if (
+                      !flow &&
+                      (createEditingStep === "expiry" || createEditingStep === "limit") &&
+                      insertedText &&
+                      /\D/.test(insertedText)
+                    ) {
+                      event.preventDefault();
+                      nudgeInput(createEditingStep === "expiry" ? "Total time only accepts numbers." : "Member limit only accepts numbers.");
+                      return;
+                    }
 
-                  if (
-                    !flow &&
-                    createEditingStep === "password-choice" &&
-                    insertedText &&
-                    !/^[ynoes]+$/i.test(insertedText)
-                  ) {
-                    event.preventDefault();
-                    nudgeInput("Answer y or n.");
-                  }
-                }}
-                onChange={event => {
-                  handleInputValueChange(event.target.value);
-                  syncInputMirrorScroll();
-                }}
-                onKeyDown={handleInputKeyDown}
-                onKeyUp={syncInputMirrorScroll}
-                onScroll={syncInputMirrorScroll}
-                placeholder=""
-                spellCheck={false}
-                style={{
-                  background: "transparent",
-                  border: 0,
-                  boxShadow: "none",
-                  outline: "none",
-                }}
-                type={flow?.type === "create" && flow.step === "password" ? "password" : "text"}
-                value={inputValue}
-              />
+                    if (
+                      !flow &&
+                      createEditingStep === "password-choice" &&
+                      insertedText &&
+                      !/^[ynoes]+$/i.test(insertedText)
+                    ) {
+                      event.preventDefault();
+                      nudgeInput("Answer y or n.");
+                    }
+                  }}
+                  onChange={event => {
+                    handleInputValueChange(event.target.value);
+                    syncInputMirrorScroll();
+                  }}
+                  onKeyDown={handleInputKeyDown}
+                  onKeyUp={syncInputMirrorScroll}
+                  onScroll={syncInputMirrorScroll}
+                  placeholder=""
+                  spellCheck={false}
+                  style={{
+                    background: "transparent",
+                    border: 0,
+                    boxShadow: "none",
+                    color: "transparent",
+                    outline: "none",
+                    WebkitTextFillColor: "transparent",
+                  }}
+                  type={flow?.type === "create" && flow.step === "password" ? "password" : "text"}
+                  value={inputValue}
+                />
+              </div>
             </div>
+
+            {slashCommandSuggestions.length > 0 && (
+              <div
+                aria-label="Slash command suggestions"
+                className="direction-two-slash-menu absolute left-0 top-full z-20 mt-2 flex w-full max-w-[560px] flex-col gap-1 overflow-hidden text-[14px] leading-[24px]"
+                role="listbox"
+              >
+                {slashCommandSuggestions.map((item, index) => {
+                  const selected = slashSuggestionIndex === index;
+
+                  return (
+                    <button
+                      aria-label={`${item.command} ${item.label}`}
+                      aria-selected={selected}
+                      className={`group flex min-h-7 w-full items-center gap-3 rounded-[3px] bg-transparent px-2 py-1 text-left font-mono transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] hover:text-[var(--color-signal)] ${
+                        selected ? "bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] text-[var(--color-signal)]" : "text-[var(--foreground)]"
+                      }`}
+                      key={item.command}
+                      onClick={event => {
+                        event.stopPropagation();
+                        handleSlashCommandSuggestionTap(item.command);
+                      }}
+                      onMouseEnter={() => {
+                        setSlashSuggestionIndex(index);
+                        sound.play("hover");
+                      }}
+                      role="option"
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="w-3 shrink-0 text-[var(--color-signal)]">
+                        {selected ? ">" : ""}
+                      </span>
+                      <span className="shrink-0">{item.command}</span>
+                      <span
+                        className={`min-w-0 flex-1 truncate text-right transition-colors duration-150 group-hover:text-[var(--color-signal)]/75 ${
+                          selected ? "text-[var(--color-signal)]/75" : "text-[var(--color-dim)]"
+                        }`}
+                      >
+                        {item.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div aria-hidden="true" style={{ height: lines.length > 0 ? `${scrollReserveHeight}px` : "0px" }} />

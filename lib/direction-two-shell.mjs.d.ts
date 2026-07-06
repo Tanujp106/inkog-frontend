@@ -43,6 +43,11 @@ export declare const commands: string[];
 export declare const directionTwoCommandReferenceLines: string[];
 export declare const directionTwoThemes: DirectionTwoTheme[];
 export declare function completeDirectionTwoCommand(value: string): string | null;
+export declare function getDirectionTwoSlashCommandSuggestions(value: string): Array<{
+  id: string;
+  command: string;
+  label: string;
+}>;
 export declare function completeDirectionTwoCreateField(value: string): string | null;
 export declare function getDirectionTwoCreateAnswerError(
   step: DirectionTwoCreateStep,
