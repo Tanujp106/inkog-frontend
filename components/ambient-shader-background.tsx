@@ -7,16 +7,10 @@ import {
   ambientShaderColorTransitionMs,
   ambientShaderConfig,
   mixAmbientShaderColors,
-  resolveAmbientShaderLayerOpacity,
   resolveAmbientShaderColors,
 } from "@/lib/ambient-shader.mjs";
 
 type ResolvedShaderColors = ReturnType<typeof resolveAmbientShaderColors>;
-type ShaderLayerState = {
-  base: ResolvedShaderColors;
-  overlay: ResolvedShaderColors | null;
-  overlayOpacity: number;
-};
 
 type AmbientShaderBackgroundProps = {
   className?: string;
@@ -29,52 +23,43 @@ export function AmbientShaderBackground({
   opacity = 0.43,
   style,
 }: AmbientShaderBackgroundProps) {
-  const [shaderLayers, setShaderLayers] = useState<ShaderLayerState | null>(null);
+  const [resolvedColors, setResolvedColors] = useState<ResolvedShaderColors | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const shaderLayersRef = useRef<ShaderLayerState | null>(null);
+  const resolvedColorsRef = useRef<ResolvedShaderColors | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return;
 
-    const setDisplayedLayers = (layers: ShaderLayerState) => {
-      shaderLayersRef.current = layers;
-      setShaderLayers(layers);
+    const setDisplayedColors = (colors: ResolvedShaderColors) => {
+      resolvedColorsRef.current = colors;
+      setResolvedColors(colors);
     };
 
     const animateColors = (nextColors: ResolvedShaderColors) => {
-      const currentLayers = shaderLayersRef.current;
-      if (!currentLayers) {
-        setDisplayedLayers({ base: nextColors, overlay: null, overlayOpacity: 0 });
+      const currentColors = resolvedColorsRef.current;
+      if (!currentColors) {
+        setDisplayedColors(nextColors);
         return;
       }
 
-      const currentTarget = currentLayers.overlay ?? currentLayers.base;
-      if (JSON.stringify(currentTarget) === JSON.stringify(nextColors)) return;
+      if (JSON.stringify(currentColors) === JSON.stringify(nextColors)) return;
 
       if (animationFrameRef.current !== null) {
         window.cancelAnimationFrame(animationFrameRef.current);
       }
 
       const startedAt = window.performance.now();
-      const baseColors = currentLayers.overlay
-        ? mixAmbientShaderColors(currentLayers.base, currentLayers.overlay, currentLayers.overlayOpacity)
-        : currentLayers.base;
 
       const step = (timestamp: number) => {
         const progress = Math.min((timestamp - startedAt) / ambientShaderColorTransitionMs, 1);
-        const overlayOpacity = resolveAmbientShaderLayerOpacity(progress);
-        setDisplayedLayers({
-          base: baseColors,
-          overlay: nextColors,
-          overlayOpacity,
-        });
+        setDisplayedColors(mixAmbientShaderColors(currentColors, nextColors, progress));
 
         if (progress < 1) {
           animationFrameRef.current = window.requestAnimationFrame(step);
           return;
         }
 
-        setDisplayedLayers({ base: nextColors, overlay: null, overlayOpacity: 0 });
+        setDisplayedColors(nextColors);
         animationFrameRef.current = null;
       };
 
@@ -101,7 +86,7 @@ export function AmbientShaderBackground({
     };
   }, []);
 
-  if (!shaderLayers) return null;
+  if (!resolvedColors) return null;
 
   return (
     <div
@@ -116,30 +101,9 @@ export function AmbientShaderBackground({
         ...style,
       }}
     >
-      <ShaderLayer colors={shaderLayers.base} opacity={shaderLayers.overlay ? 1 - shaderLayers.overlayOpacity : 1} />
-      {shaderLayers.overlay ? <ShaderLayer colors={shaderLayers.overlay} opacity={shaderLayers.overlayOpacity} /> : null}
-    </div>
-  );
-}
-
-function ShaderLayer({
-  colors,
-  opacity,
-}: {
-  colors: ResolvedShaderColors;
-  opacity: number;
-}) {
-  return (
-    <div
-      style={{
-        inset: 0,
-        opacity,
-        position: "absolute",
-      }}
-    >
       <GrainGradient
-        colorBack={colors.colorBack}
-        colors={colors.colors}
+        colorBack={resolvedColors.colorBack}
+        colors={resolvedColors.colors}
         fit="cover"
         height="100%"
         intensity={ambientShaderConfig.intensity}

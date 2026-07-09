@@ -37,7 +37,9 @@ import {
   getDirectionTwoScrambleFrame,
 } from "@/lib/direction-two-intro.mjs";
 import {
+  directionTwoAutoScrollAnimationDurationMs,
   getDirectionTwoAutoScrollTop,
+  getDirectionTwoScrollAnimationTop,
   getDirectionTwoScrollReserveHeight,
 } from "@/lib/direction-two-scroll.mjs";
 import {
@@ -71,6 +73,13 @@ type ParsedCreateCommand =
   | { status: "partial"; nextStep: "topic" | "expiry" | "limit" | "password-choice" | "password"; draft: CreateDraft }
   | { status: "ready"; draft: CreateDraft }
   | { status: "invalid"; message: string };
+
+type DirectionTwoScrollAnimation = {
+  frameId: number | null;
+  startScrollY: number;
+  targetScrollY: number;
+  startTime: number;
+};
 
 type SessionFlow =
   | { type: "create"; step: "topic"; draft: CreateDraft }
@@ -291,7 +300,7 @@ function promptFor(flow: SessionFlow | null) {
 }
 
 function placeholderFor(flow: SessionFlow | null) {
-  if (!flow) return "write '/' to create or join";
+  if (!flow) return "write '/' to start";
   if (flow.type === "join") return "abc123 or room link";
   if (flow.type === "style") return "1, 2, 3, 4, or 5";
 
@@ -344,6 +353,7 @@ export function DirectionTwoShell() {
   const promptRowRef = useRef<HTMLDivElement | null>(null);
   const slashMenuRef = useRef<HTMLDivElement | null>(null);
   const inputNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollAnimationRef = useRef<DirectionTwoScrollAnimation | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [lines, setLines] = useState<TerminalLine[]>(initialLines);
   const [flow, setFlow] = useState<SessionFlow | null>(null);
@@ -392,6 +402,50 @@ export function DirectionTwoShell() {
 
   const focusInput = () => {
     requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const cancelDirectionTwoAutoScroll = () => {
+    const animation = scrollAnimationRef.current;
+    if (animation?.frameId !== null && animation?.frameId !== undefined) {
+      window.cancelAnimationFrame(animation.frameId);
+    }
+    scrollAnimationRef.current = null;
+  };
+
+  const animateDirectionTwoAutoScroll = (targetScrollY: number) => {
+    cancelDirectionTwoAutoScroll();
+
+    const animation: DirectionTwoScrollAnimation = {
+      frameId: null,
+      startScrollY: window.scrollY,
+      targetScrollY,
+      startTime: window.performance.now(),
+    };
+
+    const tick = (timestamp: number) => {
+      const currentAnimation = scrollAnimationRef.current;
+      if (currentAnimation !== animation) return;
+
+      const nextScrollY = getDirectionTwoScrollAnimationTop({
+        startScrollY: animation.startScrollY,
+        targetScrollY: animation.targetScrollY,
+        elapsedMs: timestamp - animation.startTime,
+        durationMs: directionTwoAutoScrollAnimationDurationMs,
+      });
+
+      window.scrollTo({ top: nextScrollY, behavior: "auto" });
+
+      if (Math.abs(nextScrollY - animation.targetScrollY) <= 0.5) {
+        window.scrollTo({ top: animation.targetScrollY, behavior: "auto" });
+        scrollAnimationRef.current = null;
+        return;
+      }
+
+      animation.frameId = window.requestAnimationFrame(tick);
+    };
+
+    scrollAnimationRef.current = animation;
+    animation.frameId = window.requestAnimationFrame(tick);
   };
 
   const syncInputMirrorScroll = () => {
@@ -457,6 +511,7 @@ export function DirectionTwoShell() {
       if (inputNudgeTimeoutRef.current) {
         clearTimeout(inputNudgeTimeoutRef.current);
       }
+      cancelDirectionTwoAutoScroll();
     };
   }, []);
 
@@ -560,6 +615,7 @@ export function DirectionTwoShell() {
     const slashMenuRect = slashCommandSuggestions.length > 0 ? slashMenuRef.current?.getBoundingClientRect() : null;
     const slashMenuHeight = slashMenuRect?.height ?? 0;
     const nextScrollTop = getDirectionTwoAutoScrollTop({
+      allowReverse: true,
       anchorRatio: slashCommandSuggestions.length > 0 ? 0.8 : 0.85,
       currentScrollY: window.scrollY,
       floatingBottom: slashMenuRect?.bottom,
@@ -569,13 +625,16 @@ export function DirectionTwoShell() {
       viewportHeight: window.innerHeight,
     });
 
-    if (nextScrollTop <= window.scrollY + 1) return;
+    if (Math.abs(nextScrollTop - window.scrollY) <= 1) return;
 
-    window.scrollTo({
-      top: nextScrollTop,
-      behavior: "smooth",
-    });
-  }, [flow, inputValue, lines.length, scrollReserveHeight, slashCommandSuggestions.length]);
+    if (prefersReducedMotion) {
+      cancelDirectionTwoAutoScroll();
+      window.scrollTo({ top: nextScrollTop, behavior: "auto" });
+      return;
+    }
+
+    animateDirectionTwoAutoScroll(nextScrollTop);
+  }, [flow, inputValue, lines.length, prefersReducedMotion, scrollReserveHeight, slashCommandSuggestions.length]);
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1411,7 +1470,7 @@ export function DirectionTwoShell() {
                 aria-hidden="true"
               >
                 {activePrompt === "$" ? (
-                  "$"
+                  <span className="text-[var(--color-signal)]">$</span>
                 ) : (
                   <>
                     <span>{">"}</span>

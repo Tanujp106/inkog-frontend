@@ -2,7 +2,6 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Lightbulb } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
@@ -20,7 +19,6 @@ import {
 } from "@/lib/inkog-theme.mjs";
 import { roomAmbientShaderOpacity, roomThemeBackground } from "@/lib/room-background.mjs";
 import { getRoomRoster, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
-import { getRoomNameTrivia } from "@/lib/room-name-trivia.mjs";
 import { getRoomCountdownNotification } from "@/lib/room-notifications.mjs";
 import {
   createEmptyRoomPollDraft,
@@ -1009,17 +1007,25 @@ export default function RoomPage() {
           event.preventDefault();
           runComposer();
         }}
-        style={{
-          ...styles.composer,
-          gap: composerExpanded ? "6px" : "0px",
-          minHeight: composerChrome.expanded ? "74px" : "52px",
-          paddingBottom: composerExpanded ? "10px" : "8px",
-          paddingTop: composerExpanded ? "10px" : "8px",
-        }}
+        style={styles.composer}
       >
-        {showSlashSuggestions ? (
-          <div style={styles.slashCommandMenu}>
-            {slashSuggestions.map((item, index) => {
+        <div
+          style={{
+            ...styles.composerFrame,
+            minHeight: composerExpanded ? "76px" : "56px",
+          }}
+        >
+          <div
+            aria-hidden={!showSlashSuggestions}
+            style={{
+              ...styles.slashCommandMenu,
+              maxHeight: showSlashSuggestions ? "220px" : "0px",
+              opacity: showSlashSuggestions ? 1 : 0,
+              marginBottom: showSlashSuggestions ? "6px" : "0px",
+              pointerEvents: showSlashSuggestions ? "auto" : "none",
+            }}
+          >
+            {showSlashSuggestions ? slashSuggestions.map((item, index) => {
               const selected = slashSuggestionIndex === index;
 
               return (
@@ -1042,96 +1048,97 @@ export default function RoomPage() {
                   <span style={styles.slashCommandDescription}>{item.label}</span>
                 </button>
               );
-            })}
+            }) : null}
           </div>
-        ) : null}
-        <div
-          aria-hidden={composerChrome.statusMode !== "inline"}
-          style={{
-            ...styles.composerInlineStatus,
-            maxHeight: composerChrome.statusMode === "inline" ? "22px" : "0px",
-            opacity: composerChrome.statusMode === "inline" ? 1 : 0,
-          }}
-        >
-          <p style={{ ...styles.composerStatus, color: composerStatusColor }}>
-            {composerChrome.statusMode === "inline" ? (composerStatus?.message ?? "") : ""}
-          </p>
-        </div>
-        <div style={styles.composerRow}>
-          <label htmlFor="room-terminal-input" style={styles.srOnly}>room command</label>
-          <span aria-hidden="true" style={styles.composerPrompt}>$</span>
-          {pollInlinePrompt ? (
-            <span aria-hidden="true" style={styles.composerPollPrefix}>
-              {pollInlinePrompt.prefix}
-            </span>
-          ) : null}
-          {showIdleCursor || showComposerHint ? (
-            <span aria-hidden="true" style={styles.composerIdleText}>
-              {showIdleCursor ? (
-                <span
-                  style={{
-                    ...styles.composerCursor,
-                    opacity: cursorVisible ? 1 : 0.18,
-                  }}
-                >
-                  |
-                </span>
-              ) : null}
-              {showComposerHint ? (
-                <span style={styles.composerHint}>
-                  {isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or / for commands"}
-                </span>
-              ) : null}
-            </span>
-          ) : null}
-          <input
-            autoCapitalize="off"
-            autoComplete="off"
-            autoCorrect="off"
-            id="room-terminal-input"
-            onChange={event => {
-              setComposerValue(event.target.value);
-              setSlashSuggestionIndex(0);
-            }}
-            onKeyDown={event => {
-              if (!showSlashSuggestions) return;
-
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setSlashSuggestionIndex(index => (index + 1) % slashSuggestions.length);
-                return;
-              }
-
-              if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setSlashSuggestionIndex(index => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
-                return;
-              }
-
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setComposerValue("");
-                setSlashSuggestionIndex(0);
-                return;
-              }
-
-              if (event.key === "Enter") {
-                event.preventDefault();
-                runSlashSuggestion(slashSuggestions[slashSuggestionIndex]?.command ?? slashSuggestions[0].command);
-              }
-            }}
-            ref={composerRef}
-            spellCheck={false}
-            disabled={isRoomBooting}
-            placeholder={isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
+          <div
+            aria-hidden={composerChrome.statusMode !== "inline"}
             style={{
-              ...styles.composerInput,
-              caretColor: showIdleCursor ? "transparent" : "var(--text)",
-              color: pollInlinePrompt ? "var(--accent)" : "var(--text)",
+              ...styles.composerInlineStatus,
+              maxHeight: composerChrome.statusMode === "inline" ? "22px" : "0px",
+              marginBottom: composerChrome.statusMode === "inline" ? "6px" : "0px",
+              opacity: composerChrome.statusMode === "inline" ? 1 : 0,
             }}
-            type={isPasswordGate ? "password" : "text"}
-            value={composerValue}
-          />
+          >
+            <p style={{ ...styles.composerStatus, color: composerStatusColor }}>
+              {composerChrome.statusMode === "inline" ? (composerStatus?.message ?? "") : ""}
+            </p>
+          </div>
+          <div style={styles.composerRow}>
+            <label htmlFor="room-terminal-input" style={styles.srOnly}>room command</label>
+            <span aria-hidden="true" style={styles.composerPrompt}>$</span>
+            {pollInlinePrompt ? (
+              <span aria-hidden="true" style={styles.composerPollPrefix}>
+                {pollInlinePrompt.prefix}
+              </span>
+            ) : null}
+            {showIdleCursor || showComposerHint ? (
+              <span aria-hidden="true" style={styles.composerIdleText}>
+                {showIdleCursor ? (
+                  <span
+                    style={{
+                      ...styles.composerCursor,
+                      opacity: cursorVisible ? 1 : 0.18,
+                    }}
+                  >
+                    |
+                  </span>
+                ) : null}
+                {showComposerHint ? (
+                  <span style={styles.composerHint}>
+                    {isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or / for commands"}
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
+            <input
+              autoCapitalize="off"
+              autoComplete="off"
+              autoCorrect="off"
+              id="room-terminal-input"
+              onChange={event => {
+                setComposerValue(event.target.value);
+                setSlashSuggestionIndex(0);
+              }}
+              onKeyDown={event => {
+                if (!showSlashSuggestions) return;
+
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setSlashSuggestionIndex(index => (index + 1) % slashSuggestions.length);
+                  return;
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSlashSuggestionIndex(index => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
+                  return;
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setComposerValue("");
+                  setSlashSuggestionIndex(0);
+                  return;
+                }
+
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  runSlashSuggestion(slashSuggestions[slashSuggestionIndex]?.command ?? slashSuggestions[0].command);
+                }
+              }}
+              ref={composerRef}
+              spellCheck={false}
+              disabled={isRoomBooting}
+              placeholder={isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
+              style={{
+                ...styles.composerInput,
+                caretColor: showIdleCursor ? "transparent" : "var(--text)",
+                color: pollInlinePrompt ? "var(--accent)" : "var(--text)",
+              }}
+              type={isPasswordGate ? "password" : "text"}
+              value={composerValue}
+            />
+          </div>
         </div>
       </form>
     </main>
@@ -1251,150 +1258,23 @@ function AvatarRoster({
   roster: RoomRoster;
   usersTitle: string;
 }) {
-  const [activeAlias, setActiveAlias] = useState<string | null>(null);
-  const [expandedAlias, setExpandedAlias] = useState<string | null>(null);
-  const closeTooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearCloseTooltipTimeout = () => {
-    if (!closeTooltipTimeoutRef.current) return;
-    clearTimeout(closeTooltipTimeoutRef.current);
-    closeTooltipTimeoutRef.current = null;
-  };
-
-  const openTooltip = (alias: string) => {
-    clearCloseTooltipTimeout();
-    setActiveAlias(alias);
-  };
-
-  const scheduleCloseTooltip = (
-    currentTarget?: HTMLElement,
-    relatedTarget?: EventTarget | null,
-  ) => {
-    if (currentTarget && relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) {
-      return;
-    }
-
-    clearCloseTooltipTimeout();
-    closeTooltipTimeoutRef.current = setTimeout(() => {
-      setActiveAlias(null);
-      closeTooltipTimeoutRef.current = null;
-    }, 360);
-  };
-
-  useEffect(() => clearCloseTooltipTimeout, []);
-
   return (
     <div aria-label={`${roster.visible.length + roster.overflow} online`} style={styles.roster}>
-      {roster.visible.map((member, index) => {
-        const active = activeAlias === member.alias;
-        const expanded = active && expandedAlias === member.alias;
-
-        return (
-          <span
-            key={member.alias}
-            onBlur={event => {
-              if (!event.currentTarget.contains(event.relatedTarget)) setActiveAlias(null);
-            }}
-            onFocus={() => openTooltip(member.alias)}
-            onMouseEnter={() => openTooltip(member.alias)}
-            onMouseLeave={event => scheduleCloseTooltip(event.currentTarget, event.relatedTarget)}
-            style={{
-              ...styles.rosterMember,
-              marginLeft: index === 0 ? 0 : "-8px",
-              zIndex: roster.visible.length - index,
-            }}
-          >
-            <span aria-label={member.alias} style={styles.rosterAvatar}>
-              {member.initials}
-            </span>
-            <span
-              aria-hidden="true"
-              onMouseEnter={() => openTooltip(member.alias)}
-              onMouseLeave={event => scheduleCloseTooltip(event.currentTarget, event.relatedTarget)}
-              style={{
-                ...styles.rosterHoverBridge,
-                pointerEvents: active ? "auto" : "none",
-              }}
-            />
-            <span
-              onMouseEnter={() => openTooltip(member.alias)}
-              onMouseLeave={event => scheduleCloseTooltip(event.currentTarget, event.relatedTarget)}
-              role="dialog"
-              style={{
-                ...styles.rosterTriviaShell,
-                opacity: active ? 1 : 0,
-                pointerEvents: active ? "auto" : "none",
-                transform: active ? "translateY(0) scale(1)" : "translateY(-2px) scale(0.98)",
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  ...styles.rosterTriviaSurface,
-                  transform: expanded ? "scaleX(1) scaleY(1)" : "scaleX(0.79) scaleY(0.31)",
-                }}
-              />
-              <span
-                style={{
-                  ...styles.rosterTriviaCompactContent,
-                  opacity: expanded ? 0 : 1,
-                  pointerEvents: expanded ? "none" : "auto",
-                  transform: expanded ? "translateY(-3px)" : "translateY(0)",
-                }}
-              >
-                <span style={styles.rosterTriviaName}>{member.alias}</span>
-                <button
-                  aria-expanded={expanded}
-                  aria-label={`Show name trivia for ${member.alias}`}
-                  onClick={event => {
-                    event.stopPropagation();
-                    setExpandedAlias(current => (current === member.alias ? null : member.alias));
-                  }}
-                  style={{
-                    ...styles.rosterTriviaButton,
-                    color: expanded ? "var(--accent)" : "var(--text-muted)",
-                    transform: expanded ? "rotate(-8deg)" : "rotate(0deg)",
-                  }}
-                  type="button"
-                >
-                  <Lightbulb aria-hidden="true" size={13} strokeWidth={2} />
-                </button>
-              </span>
-              <span
-                style={{
-                  ...styles.rosterTriviaExpandedContent,
-                  opacity: expanded ? 1 : 0,
-                  pointerEvents: expanded ? "auto" : "none",
-                  transform: expanded ? "translateY(0)" : "translateY(5px)",
-                }}
-              >
-                <span style={styles.rosterTriviaTop}>
-                  <span style={styles.rosterTriviaName}>{member.alias}</span>
-                  <button
-                    aria-expanded={expanded}
-                    aria-label={`Hide name trivia for ${member.alias}`}
-                    onClick={event => {
-                      event.stopPropagation();
-                      setExpandedAlias(current => (current === member.alias ? null : member.alias));
-                    }}
-                    style={{
-                      ...styles.rosterTriviaButton,
-                      color: "var(--accent)",
-                      transform: "rotate(-8deg)",
-                    }}
-                    type="button"
-                  >
-                    <Lightbulb aria-hidden="true" size={13} strokeWidth={2} />
-                  </button>
-                </span>
-                <span style={styles.rosterTriviaCopy}>
-                  {getRoomNameTrivia(member.alias)}
-                </span>
-              </span>
-            </span>
+      {roster.visible.map((member, index) => (
+        <span
+          key={member.alias}
+          style={{
+            ...styles.rosterMember,
+            marginLeft: index === 0 ? 0 : "-8px",
+            zIndex: roster.visible.length - index,
+          }}
+          title={member.alias}
+        >
+          <span aria-label={member.alias} style={styles.rosterAvatar}>
+            {member.initials}
           </span>
-        );
-      })}
+        </span>
+      ))}
       {roster.overflow > 0 && (
         <span
           style={{
@@ -1665,107 +1545,6 @@ const styles: Record<string, CSSProperties> = {
     padding: "0 8px",
     position: "relative",
   },
-  rosterTriviaButton: {
-    alignItems: "center",
-    background: "color-mix(in srgb, var(--accent) 7%, transparent)",
-    border: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
-    borderRadius: "999px",
-    color: "var(--text-muted)",
-    cursor: "pointer",
-    display: "inline-flex",
-    flexShrink: 0,
-    height: "32px",
-    justifyContent: "center",
-    padding: 0,
-    transition: "background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease",
-    width: "32px",
-  },
-  rosterHoverBridge: {
-    background: "transparent",
-    height: "8px",
-    position: "absolute",
-    right: "-4px",
-    top: "100%",
-    width: "180px",
-    zIndex: 9,
-  },
-  rosterTriviaShell: {
-    height: "132px",
-    position: "absolute",
-    right: "-4px",
-    top: "calc(100% + 4px)",
-    transformOrigin: "right top",
-    transition: "opacity 150ms ease-out, transform 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-    width: "224px",
-    zIndex: 10,
-  },
-  rosterTriviaSurface: {
-    background: "color-mix(in srgb, var(--bg) 94%, black)",
-    border: "1px solid color-mix(in srgb, var(--text-dim) 24%, transparent)",
-    borderRadius: "10px",
-    boxShadow: "0 12px 32px rgba(0, 0, 0, 0.32)",
-    position: "absolute",
-    right: 0,
-    top: 0,
-    transformOrigin: "right top",
-    transition: "transform 190ms cubic-bezier(0.23, 1, 0.32, 1)",
-    width: "224px",
-    height: "132px",
-    willChange: "transform",
-  },
-  rosterTriviaCompactContent: {
-    alignItems: "center",
-    color: "var(--text-muted)",
-    display: "flex",
-    gap: "10px",
-    height: "40px",
-    justifyContent: "space-between",
-    lineHeight: "16px",
-    padding: "0 8px 0 12px",
-    position: "absolute",
-    right: 0,
-    top: 0,
-    transition: "opacity 120ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-    width: "176px",
-    willChange: "opacity, transform",
-  },
-  rosterTriviaExpandedContent: {
-    color: "var(--text-muted)",
-    display: "flex",
-    flexDirection: "column",
-    height: "132px",
-    lineHeight: "16px",
-    padding: "0 10px 10px 12px",
-    position: "absolute",
-    right: 0,
-    top: 0,
-    transition: "opacity 150ms ease-out, transform 170ms cubic-bezier(0.23, 1, 0.32, 1)",
-    width: "224px",
-    willChange: "opacity, transform",
-  },
-  rosterTriviaTop: {
-    alignItems: "center",
-    display: "flex",
-    gap: "10px",
-    justifyContent: "space-between",
-    minHeight: "38px",
-  },
-  rosterTriviaName: {
-    color: "var(--text)",
-    flex: 1,
-    fontSize: "12px",
-    fontWeight: 700,
-    lineHeight: "16px",
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  rosterTriviaCopy: {
-    display: "block",
-    overflow: "hidden",
-    paddingBottom: "8px",
-  },
   rosterOverflow: {
     background: "var(--bg)",
     color: "var(--text-muted)",
@@ -1785,7 +1564,7 @@ const styles: Record<string, CSSProperties> = {
     flex: 1,
     gap: "6px",
     overflowY: "auto",
-    padding: "24px clamp(16px, 4vw, 56px)",
+    padding: "24px clamp(32px, calc(3vw + 16px), 48px)",
     position: "relative",
     zIndex: 1,
   },
@@ -1900,31 +1679,43 @@ const styles: Record<string, CSSProperties> = {
     margin: "12px 0 0 20px",
   },
   composer: {
-    borderTop: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
     display: "flex",
     flexDirection: "column",
     flexShrink: 0,
-    gap: 0,
-    minHeight: "52px",
-    padding: "10px clamp(32px, calc(3vw + 16px), 48px)",
     position: "relative",
-    transition: "min-height 180ms cubic-bezier(0.22, 1, 0.36, 1), padding-top 180ms cubic-bezier(0.22, 1, 0.36, 1), padding-bottom 180ms cubic-bezier(0.22, 1, 0.36, 1), gap 180ms cubic-bezier(0.22, 1, 0.36, 1)",
     zIndex: 1,
+  },
+  composerFrame: {
+    backdropFilter: "blur(18px) saturate(1.22)",
+    background: "linear-gradient(180deg, color-mix(in srgb, var(--bg-2) 72%, transparent) 0%, color-mix(in srgb, var(--bg) 84%, transparent) 100%)",
+    borderTop: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
+    boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent), 0 -18px 42px rgba(0, 0, 0, 0.18)",
+    boxSizing: "border-box",
+    display: "flex",
+    flexDirection: "column",
+    gap: 0,
+    justifyContent: "center",
+    minHeight: "52px",
+    overflow: "hidden",
+    padding: "10px clamp(32px, calc(3vw + 16px), 48px)",
+    transition: "min-height 150ms cubic-bezier(0.23, 1, 0.32, 1)",
+    WebkitBackdropFilter: "blur(18px) saturate(1.22)",
+    width: "100%",
   },
   composerInlineStatus: {
     overflow: "hidden",
-    transition: "max-height 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease",
+    transition: "max-height 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 140ms ease",
   },
   slashCommandMenu: {
-    bottom: "calc(100% + 10px)",
     display: "flex",
     flexDirection: "column",
     gap: "2px",
-    left: "clamp(32px, calc(3vw + 16px), 48px)",
     maxWidth: "520px",
     overflow: "hidden",
-    position: "absolute",
-    right: "clamp(32px, calc(3vw + 16px), 48px)",
+    pointerEvents: "auto",
+    transition: "max-height 150ms cubic-bezier(0.23, 1, 0.32, 1), opacity 90ms ease-out",
+    width: "min(520px, 100%)",
+    willChange: "opacity",
   },
   slashCommandItem: {
     alignItems: "center",
@@ -1965,6 +1756,7 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     display: "flex",
     gap: "8px",
+    minHeight: "26px",
     width: "100%",
   },
   composerStatus: {
@@ -2004,6 +1796,7 @@ const styles: Record<string, CSSProperties> = {
     color: "var(--text-dim)",
     fontSize: "13px",
     lineHeight: "24px",
+    marginLeft: "-3px",
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",

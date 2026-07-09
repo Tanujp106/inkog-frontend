@@ -51,5 +51,3 @@ export function mixAmbientShaderColors(
   colors: string[];
   colorBack: string;
 };
-
-export function resolveAmbientShaderLayerOpacity(progress: number): number;
