@@ -10,6 +10,7 @@ export type RoomCommand =
   | { type: "leave" }
   | { type: "exit" }
   | { type: "close" }
+  | { type: "password" }
   | { type: "help" }
   | { type: "help-question"; question: string }
   | { type: "unknown"; command: string };

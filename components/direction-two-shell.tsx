@@ -48,6 +48,7 @@ import {
 } from "@/lib/system-sound.mjs";
 import { askInkogHelp } from "@/lib/inkog-help-api";
 import { extractInkogHelpQuestion } from "@/lib/inkog-help.mjs";
+import { setStoredRoomPassword } from "@/lib/room-password-command.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
@@ -789,6 +790,7 @@ export function DirectionTwoShell() {
       }
 
       setStoredToken(data.id, data.creatorToken);
+      setStoredRoomPassword(data.id, draft.password);
       appendLines(
         line("output", `room created: ${data.id}`),
         line("output", `opening /room/${data.id}`),

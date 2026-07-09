@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { askInkogHelp } from "@/lib/inkog-help-api";
 import { extractInkogHelpQuestion } from "@/lib/inkog-help.mjs";
+import { setStoredRoomPassword } from "@/lib/room-password-command.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
@@ -54,6 +55,7 @@ export default function Home() {
         return;
       }
       setStoredToken(data.id, data.creatorToken);
+      setStoredRoomPassword(data.id, password);
       sound.play("success");
       router.push(`/room/${data.id}`);
     } catch {

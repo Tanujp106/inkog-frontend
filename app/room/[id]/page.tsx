@@ -34,6 +34,10 @@ import {
   getRoomStylePrompt,
   resolveRoomStyleSelection,
 } from "@/lib/room-style-command.mjs";
+import {
+  getStoredRoomPassword,
+  resolveRoomPasswordCommand,
+} from "@/lib/room-password-command.mjs";
 import { parseRoomCommand } from "@/lib/room-terminal.mjs";
 import type { RoomCommand } from "@/lib/room-terminal-types";
 import { askInkogHelp } from "@/lib/inkog-help-api";
@@ -66,6 +70,7 @@ interface Poll {
   options: string[];
   votesByMember: PollVote[];
   createdAt: string;
+  createdByAlias?: string;
 }
 
 interface TerminalEvent {
@@ -84,6 +89,7 @@ interface JoinRoomData {
 type Stage = "loading" | "password" | "joined" | "expired" | "error";
 type RoomRoster = { visible: { alias: string; initials: string }[]; overflow: number };
 type ComposerStatus = { tone: "muted" | "accent" | "error"; message: string };
+type PasswordReveal = { password: string; hint: string };
 type PendingComposerCommand =
   | { type: "style" }
   | { type: "poll"; step: "question" | "option"; draft: { question: string; options: string[] } }
@@ -148,6 +154,7 @@ export default function RoomPage() {
   const [cursorVisible, setCursorVisible] = useState(true);
   const [composerStatus, setComposerStatus] = useState<ComposerStatus | null>(null);
   const [pendingCommand, setPendingCommand] = useState<PendingComposerCommand>(null);
+  const [passwordReveal, setPasswordReveal] = useState<PasswordReveal | null>(null);
   const [slashSuggestionIndex, setSlashSuggestionIndex] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
@@ -575,9 +582,22 @@ export default function RoomPage() {
     }
   };
 
+  const copyRevealedPassword = async () => {
+    if (!passwordReveal) return;
+
+    try {
+      await navigator.clipboard.writeText(passwordReveal.password);
+      sound.play("success");
+      setComposerStatusMessage("password copied", "accent");
+    } catch {
+      sound.play("error");
+      setComposerStatusMessage("could not copy password", "error");
+    }
+  };
+
   const printHelp = (commandType = "help") => {
     const base = "commands: /help /commands /style /sound /poll /share /leave /exit";
-    const creator = isCreator ? " /close" : "";
+    const creator = isCreator ? " /password /close" : "";
     setComposerStatusMessage(
       commandType === "commands" ? `${base}${creator}` : `try ${base}${creator}`,
       "muted",
@@ -814,6 +834,11 @@ export default function RoomPage() {
       }
     }
 
+    if (passwordReveal && value.toLowerCase() === "c") {
+      void copyRevealedPassword();
+      return;
+    }
+
     const command = parseRoomCommand(value) as RoomCommand;
 
     if (value.toLowerCase().replace(/^\/+/, "").startsWith("sound")) {
@@ -850,6 +875,26 @@ export default function RoomPage() {
       case "share":
         void copyShareLink();
         return;
+      case "password": {
+        const result = resolveRoomPasswordCommand({
+          isCreator,
+          password: getStoredRoomPassword(roomId),
+        });
+
+        if (!result.ok) {
+          sound.play("error");
+          setComposerStatusMessage(result.message ?? "could not show room password", "error");
+          return;
+        }
+
+        sound.play("notify");
+        clearComposerStatus();
+        setPasswordReveal({
+          password: result.password ?? "",
+          hint: result.hint ?? "type c to copy",
+        });
+        return;
+      }
       case "leave":
         handleLeave();
         return;
@@ -954,7 +999,7 @@ export default function RoomPage() {
           <span style={styles.topic} title={topic}>{topic}</span>
         </div>
         <div style={styles.headerMeta}>
-          <AvatarRoster roster={roster} usersTitle={usersTitle} />
+          <AvatarRoster roster={roster} usersTitle={usersTitle} viewerAlias={alias} />
           <RoomTtlMeter meter={ttlMeter} />
         </div>
       </header>
@@ -999,6 +1044,17 @@ export default function RoomPage() {
             );
           })
         )}
+        {passwordReveal ? (
+          <RoomPasswordReveal
+            hint={passwordReveal.hint}
+            onCancel={() => {
+              sound.play("close");
+              setPasswordReveal(null);
+            }}
+            onCopy={() => void copyRevealedPassword()}
+            password={passwordReveal.password}
+          />
+        ) : null}
         <div ref={transcriptEndRef} />
       </section>
 
@@ -1100,6 +1156,14 @@ export default function RoomPage() {
                 setSlashSuggestionIndex(0);
               }}
               onKeyDown={event => {
+                if (event.key === "Escape" && passwordReveal) {
+                  event.preventDefault();
+                  setPasswordReveal(null);
+                  setComposerValue("");
+                  setSlashSuggestionIndex(0);
+                  return;
+                }
+
                 if (!showSlashSuggestions) return;
 
                 if (event.key === "ArrowDown") {
@@ -1142,6 +1206,36 @@ export default function RoomPage() {
         </div>
       </form>
     </main>
+  );
+}
+
+function RoomPasswordReveal({
+  hint,
+  onCancel,
+  onCopy,
+  password,
+}: {
+  hint: string;
+  onCancel: () => void;
+  onCopy: () => void;
+  password: string;
+}) {
+  return (
+    <div aria-label="Room password" style={styles.passwordRevealBlock}>
+      <div style={styles.passwordRevealTitle}>password</div>
+      <div style={styles.passwordRevealRow}>
+        <span style={styles.passwordRevealValue}>{password}</span>
+        <span style={styles.passwordRevealHint}>{hint}</span>
+      </div>
+      <div style={styles.passwordRevealActions}>
+        <button onClick={onCopy} style={styles.passwordRevealButton} type="button">
+          copy
+        </button>
+        <button onClick={onCancel} style={styles.passwordRevealButton} type="button">
+          cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1238,6 +1332,18 @@ function TerminalMessage({
         ? "var(--text-muted)"
         : "var(--text-dim)";
 
+  if (presentation.kind === "system") {
+    return (
+      <p style={styles.systemMessageLine}>
+        <span aria-hidden="true" style={styles.systemMessageRule} />
+        <span style={styles.systemMessageText}>
+          {presentation.prefix} {message.content}
+        </span>
+        <span aria-hidden="true" style={styles.systemMessageRule} />
+      </p>
+    );
+  }
+
   return (
     <p
       style={{
@@ -1254,27 +1360,57 @@ function TerminalMessage({
 function AvatarRoster({
   roster,
   usersTitle,
+  viewerAlias,
 }: {
   roster: RoomRoster;
   usersTitle: string;
+  viewerAlias: string;
 }) {
+  const [activeAlias, setActiveAlias] = useState<string | null>(null);
+
   return (
     <div aria-label={`${roster.visible.length + roster.overflow} online`} style={styles.roster}>
-      {roster.visible.map((member, index) => (
-        <span
-          key={member.alias}
-          style={{
-            ...styles.rosterMember,
-            marginLeft: index === 0 ? 0 : "-8px",
-            zIndex: roster.visible.length - index,
-          }}
-          title={member.alias}
-        >
-          <span aria-label={member.alias} style={styles.rosterAvatar}>
-            {member.initials}
+      {roster.visible.map((member, index) => {
+        const active = activeAlias === member.alias;
+        const label = member.alias === viewerAlias ? `${member.alias} (you)` : member.alias;
+
+        return (
+          <span
+            key={member.alias}
+            onBlur={() => setActiveAlias(null)}
+            onFocus={() => setActiveAlias(member.alias)}
+            onMouseEnter={() => setActiveAlias(member.alias)}
+            onMouseLeave={() => setActiveAlias(null)}
+            style={{
+              ...styles.rosterMember,
+              marginLeft: index === 0 ? 0 : active ? "-2px" : "-8px",
+              zIndex: active ? roster.visible.length + 1 : roster.visible.length - index,
+            }}
+            tabIndex={0}
+            title={label}
+          >
+            <span
+              aria-label={label}
+              style={{
+                ...styles.rosterAvatar,
+                ...(active ? styles.rosterAvatarExpanded : null),
+              }}
+            >
+              <span style={styles.rosterInitials}>{member.initials}</span>
+              <span
+                aria-hidden={!active}
+                style={{
+                  ...styles.rosterName,
+                  maxWidth: active ? "150px" : "0px",
+                  opacity: active ? 1 : 0,
+                }}
+              >
+                {label}
+              </span>
+            </span>
           </span>
-        </span>
-      ))}
+        );
+      })}
       {roster.overflow > 0 && (
         <span
           style={{
@@ -1358,86 +1494,76 @@ function TerminalPoll({
   const sound = useSystemSound();
   const [hoveredOption, setHoveredOption] = useState<number | null>(null);
   const meterSlots = 16;
+  const creator = poll.createdByAlias?.trim();
 
   return (
     <div style={styles.pollBlock}>
-      <div aria-hidden="true" style={styles.pollBoxRule}>
-        <span style={styles.pollBoxRuleText}>┌─ poll --active </span>
-        <span style={styles.pollBoxRuleFill} />
-        <span style={styles.pollBoxRuleText}>┐</span>
-      </div>
-      <div style={styles.pollBoxBody}>
-        <p style={styles.pollQuestion}>{poll.question}</p>
-        <div style={styles.pollOptions}>
-          {poll.options.map((option, index) => {
-            const count = votesFor(poll, index);
-            const percent = total > 0 ? count / total : 0;
-            const filledSlots = total > 0 ? Math.round(percent * meterSlots) : 0;
-            const meter = `${"█".repeat(filledSlots)}${"░".repeat(meterSlots - filledSlots)}`;
-            const selected = myVote === index;
-            const hovered = hoveredOption === index;
+      <span aria-hidden="true" style={styles.pollTitle}>poll --active{creator ? ` by ${creator}` : ""}</span>
+      <p style={styles.pollQuestion}>{poll.question}</p>
+      <div style={styles.pollOptions}>
+        {poll.options.map((option, index) => {
+          const count = votesFor(poll, index);
+          const percent = total > 0 ? count / total : 0;
+          const filledSlots = total > 0 ? Math.round(percent * meterSlots) : 0;
+          const meter = `${"█".repeat(filledSlots)}${"░".repeat(meterSlots - filledSlots)}`;
+          const selected = myVote === index;
+          const hovered = hoveredOption === index;
 
-            return (
-              <button
-                key={option}
-                onBlur={() => setHoveredOption(null)}
-                onFocus={() => setHoveredOption(index)}
-                onClick={() => onVote(poll.pollId, index)}
-                onMouseEnter={() => {
-                  setHoveredOption(index);
-                  sound.play("hover");
-                }}
-                onMouseLeave={() => setHoveredOption(null)}
+          return (
+            <button
+              key={option}
+              onBlur={() => setHoveredOption(null)}
+              onFocus={() => setHoveredOption(index)}
+              onClick={() => onVote(poll.pollId, index)}
+              onMouseEnter={() => {
+                setHoveredOption(index);
+                sound.play("hover");
+              }}
+              onMouseLeave={() => setHoveredOption(null)}
+              style={{
+                ...styles.pollOption,
+                backgroundColor: selected
+                  ? "color-mix(in srgb, var(--accent) 12%, transparent)"
+                  : hovered
+                    ? "color-mix(in srgb, var(--text) 6%, transparent)"
+                    : "color-mix(in srgb, var(--text) 3%, transparent)",
+                color: selected || hovered ? "var(--accent)" : "var(--text)",
+              }}
+              type="button"
+            >
+              <span aria-hidden="true" style={styles.pollOptionMarker}>{selected || hovered ? ">" : ""}</span>
+              <span
                 style={{
-                  ...styles.pollOption,
-                  backgroundColor: selected
-                    ? "color-mix(in srgb, var(--accent) 10%, transparent)"
-                    : hovered
-                      ? "color-mix(in srgb, var(--text) 5%, transparent)"
-                      : "transparent",
-                  color: selected || hovered ? "var(--accent)" : "var(--text)",
+                  ...styles.pollOptionIndex,
+                  color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
                 }}
-                type="button"
               >
-                <span aria-hidden="true" style={styles.pollOptionMarker}>{selected || hovered ? ">" : ""}</span>
-                <span
-                  style={{
-                    ...styles.pollOptionIndex,
-                    color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
-                  }}
-                >
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <span style={styles.pollOptionLabel}>{option}</span>
-                <span
-                  aria-hidden="true"
-                  style={{
-                    ...styles.pollOptionMeter,
-                    color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
-                    opacity: selected ? 0.86 : hovered ? 0.5 : 0.34,
-                  }}
-                >
-                  {meter}
-                </span>
-                <span
-                  style={{
-                    ...styles.pollStat,
-                    color: selected ? "var(--accent)" : hovered ? "var(--text)" : "var(--text-muted)",
-                  }}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <p style={styles.pollFooter}>:: {total} vote{total === 1 ? "" : "s"}</p>
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span style={styles.pollOptionLabel}>{option}</span>
+              <span
+                aria-hidden="true"
+                style={{
+                  ...styles.pollOptionMeter,
+                  color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
+                  opacity: selected ? 0.86 : hovered ? 0.5 : 0.34,
+                }}
+              >
+                {meter}
+              </span>
+              <span
+                style={{
+                  ...styles.pollStat,
+                  color: selected ? "var(--accent)" : hovered ? "var(--text)" : "var(--text-muted)",
+                }}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
-      <div aria-hidden="true" style={styles.pollBoxRule}>
-        <span style={styles.pollBoxRuleText}>└</span>
-        <span style={styles.pollBoxRuleFill} />
-        <span style={styles.pollBoxRuleText}>┘</span>
-      </div>
+      <p style={styles.pollFooter}>:: {total} vote{total === 1 ? "" : "s"}</p>
     </div>
   );
 }
@@ -1524,9 +1650,12 @@ const styles: Record<string, CSSProperties> = {
     whiteSpace: "nowrap",
   },
   ttlTrack: {
-    background: "rgba(255, 255, 255, 0.055)",
+    background: "linear-gradient(90deg, color-mix(in srgb, var(--text-dim) 16%, transparent), color-mix(in srgb, var(--text-dim) 7%, transparent))",
+    border: "1px solid color-mix(in srgb, var(--text-dim) 22%, transparent)",
+    boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--bg) 42%, transparent), inset 0 1px 8px rgba(0, 0, 0, 0.32)",
+    boxSizing: "border-box",
     display: "inline-flex",
-    height: "8px",
+    height: "9px",
     overflow: "hidden",
     position: "absolute",
     right: 0,
@@ -1536,10 +1665,11 @@ const styles: Record<string, CSSProperties> = {
     width: "56px",
   },
   ttlFill: {
+    boxShadow: "0 0 10px color-mix(in srgb, currentColor 26%, transparent)",
     display: "block",
     height: "100%",
     minWidth: "2px",
-    opacity: 0.78,
+    opacity: 0.86,
     transition: "width 900ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease",
   },
   ttlTime: {
@@ -1561,22 +1691,50 @@ const styles: Record<string, CSSProperties> = {
   rosterMember: {
     alignItems: "center",
     display: "inline-flex",
+    outline: "none",
     position: "relative",
+    transition: "margin-left 180ms cubic-bezier(0.23, 1, 0.32, 1), z-index 0ms linear",
   },
   rosterAvatar: {
     alignItems: "center",
-    background: "var(--bg-3)",
-    border: "1px solid var(--border-light)",
+    background: "color-mix(in srgb, var(--bg-3) 78%, transparent)",
+    border: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
     borderRadius: "999px",
+    boxSizing: "border-box",
     color: "var(--text)",
     display: "inline-flex",
     fontSize: "12px",
+    gap: "0px",
     height: "32px",
     justifyContent: "center",
     lineHeight: 1,
     minWidth: "32px",
-    padding: "0 8px",
+    overflow: "hidden",
+    padding: "0 9px",
     position: "relative",
+    transition: "max-width 190ms cubic-bezier(0.23, 1, 0.32, 1), border-color 140ms ease, background-color 140ms ease, gap 190ms cubic-bezier(0.23, 1, 0.32, 1)",
+    maxWidth: "32px",
+  },
+  rosterAvatarExpanded: {
+    background: "color-mix(in srgb, var(--bg-2) 88%, transparent)",
+    borderColor: "color-mix(in srgb, var(--text-muted) 42%, transparent)",
+    gap: "8px",
+    maxWidth: "220px",
+  },
+  rosterInitials: {
+    flexShrink: 0,
+    minWidth: "14px",
+    textAlign: "center",
+  },
+  rosterName: {
+    color: "var(--text-muted)",
+    display: "inline-block",
+    fontSize: "12px",
+    lineHeight: "16px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    transition: "max-width 190ms cubic-bezier(0.23, 1, 0.32, 1), opacity 120ms ease",
+    whiteSpace: "nowrap",
   },
   rosterOverflow: {
     background: "var(--bg)",
@@ -1624,41 +1782,99 @@ const styles: Record<string, CSSProperties> = {
     overflowWrap: "anywhere",
     whiteSpace: "pre-wrap" as const,
   },
-  pollBlock: {
-    background: "color-mix(in srgb, var(--bg-2) 42%, transparent)",
-    borderRadius: 0,
-    margin: "10px 0",
-    maxWidth: "720px",
+  passwordRevealBlock: {
+    borderLeft: "1px solid color-mix(in srgb, var(--accent) 58%, transparent)",
+    margin: "12px 0",
+    maxWidth: "620px",
+    padding: "4px 0 4px 14px",
+  },
+  passwordRevealTitle: {
+    color: "var(--text-dim)",
+    fontSize: "12px",
+    lineHeight: "20px",
+    marginBottom: "2px",
+  },
+  passwordRevealRow: {
+    alignItems: "baseline",
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "10px",
+  },
+  passwordRevealValue: {
+    color: "var(--accent)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    overflowWrap: "anywhere",
+  },
+  passwordRevealHint: {
+    color: "var(--text-dim)",
+    fontSize: "12px",
+    lineHeight: "20px",
+  },
+  passwordRevealActions: {
+    display: "flex",
+    gap: "12px",
+    marginTop: "8px",
+  },
+  passwordRevealButton: {
+    background: "transparent",
+    border: 0,
+    color: "var(--text-muted)",
+    cursor: "pointer",
+    fontFamily: ROOM_FONT_FAMILY,
+    fontSize: "12px",
+    lineHeight: "20px",
     padding: 0,
   },
-  pollBoxRule: {
+  systemMessageLine: {
     alignItems: "center",
-    color: "color-mix(in srgb, var(--text-dim) 68%, transparent)",
+    color: "color-mix(in srgb, var(--text-dim) 74%, transparent)",
     display: "flex",
-    fontSize: "14px",
+    fontSize: "12px",
+    gap: "10px",
     lineHeight: "20px",
-    overflow: "hidden",
+    margin: "3px 0",
     whiteSpace: "nowrap",
   },
-  pollBoxRuleText: {
-    flexShrink: 0,
+  systemMessageRule: {
+    borderTop: "1px solid color-mix(in srgb, var(--text-dim) 18%, transparent)",
+    flex: "0 1 36px",
+    minWidth: "18px",
   },
-  pollBoxRuleFill: {
-    borderTop: "1px solid currentColor",
-    flex: 1,
-    minWidth: "24px",
-    transform: "translateY(1px)",
+  systemMessageText: {
+    flex: "0 1 auto",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   },
-  pollBoxBody: {
-    borderLeft: "1px solid color-mix(in srgb, var(--text-dim) 40%, transparent)",
-    borderRight: "1px solid color-mix(in srgb, var(--text-dim) 40%, transparent)",
-    padding: "12px clamp(14px, 4vw, 32px) 14px",
+  pollBlock: {
+    background: "color-mix(in srgb, var(--bg-2) 34%, transparent)",
+    border: "1px solid color-mix(in srgb, var(--text-dim) 30%, transparent)",
+    borderRadius: 0,
+    boxSizing: "border-box",
+    boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--text) 1%, transparent)",
+    margin: "18px 0 12px",
+    maxWidth: "760px",
+    padding: "30px clamp(22px, 4vw, 36px) 24px",
+    position: "relative",
+    width: "100%",
+  },
+  pollTitle: {
+    background: "color-mix(in srgb, var(--bg) 92%, transparent)",
+    color: "color-mix(in srgb, var(--text-dim) 82%, transparent)",
+    fontSize: "14px",
+    left: "18px",
+    lineHeight: "20px",
+    padding: "0 10px",
+    position: "absolute",
+    top: "-11px",
+    whiteSpace: "nowrap",
   },
   pollQuestion: {
     color: "var(--text)",
     fontSize: "14px",
     lineHeight: "24px",
-    margin: "0 0 16px",
+    margin: "0 0 18px",
     overflowWrap: "anywhere",
   },
   pollOptions: {
@@ -1671,15 +1887,16 @@ const styles: Record<string, CSSProperties> = {
     backgroundColor: "transparent",
     border: 0,
     borderRadius: 0,
+    boxSizing: "border-box",
     cursor: "pointer",
     display: "grid",
-    gridTemplateColumns: "14px 32px minmax(80px, 1fr) 128px 32px",
+    gridTemplateColumns: "18px 38px minmax(0, 1fr) clamp(88px, 18vw, 132px) 30px",
     fontFamily: ROOM_FONT_FAMILY,
     fontSize: "14px",
     gap: "8px",
     lineHeight: "24px",
-    minHeight: "28px",
-    padding: "0 6px",
+    minHeight: "34px",
+    padding: "0 12px",
     textAlign: "left",
     transition: "color 0.15s ease, opacity 0.15s ease, background-color 0.15s ease",
     width: "100%",
@@ -1693,16 +1910,19 @@ const styles: Record<string, CSSProperties> = {
   pollOptionMarker: {
     color: "var(--accent)",
     flexShrink: 0,
-    width: "10px",
+    textAlign: "center",
+    width: "18px",
   },
   pollOptionIndex: {
     color: "var(--text-dim)",
     flexShrink: 0,
+    textAlign: "right",
   },
   pollOptionMeter: {
     fontSize: "12px",
     letterSpacing: "-0.02em",
     overflow: "hidden",
+    textAlign: "right",
     whiteSpace: "nowrap",
   },
   pollStat: {
@@ -1716,7 +1936,7 @@ const styles: Record<string, CSSProperties> = {
     color: "var(--text-dim)",
     fontSize: "12px",
     lineHeight: "20px",
-    margin: "16px 0 0",
+    margin: "18px 0 0",
   },
   composer: {
     display: "flex",
@@ -1727,7 +1947,7 @@ const styles: Record<string, CSSProperties> = {
   },
   composerFrame: {
     backdropFilter: "blur(18px) saturate(1.22)",
-    background: "linear-gradient(180deg, color-mix(in srgb, var(--bg-2) 72%, transparent) 0%, color-mix(in srgb, var(--bg) 84%, transparent) 100%)",
+    background: "linear-gradient(180deg, color-mix(in srgb, var(--bg) 70%, rgba(255, 255, 255, 0.035)) 0%, color-mix(in srgb, var(--bg-2) 62%, rgba(0, 0, 0, 0.32)) 100%)",
     borderTop: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
     boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent), 0 -18px 42px rgba(0, 0, 0, 0.18)",
     boxSizing: "border-box",
@@ -1737,7 +1957,7 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "center",
     minHeight: "52px",
     overflow: "hidden",
-    padding: "10px clamp(32px, calc(3vw + 16px), 48px)",
+    padding: "12px clamp(32px, calc(3vw + 16px), 48px)",
     transition: "min-height 150ms cubic-bezier(0.23, 1, 0.32, 1)",
     WebkitBackdropFilter: "blur(18px) saturate(1.22)",
     width: "100%",
@@ -1796,7 +2016,7 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     display: "flex",
     gap: "8px",
-    minHeight: "26px",
+    minHeight: "24px",
     width: "100%",
   },
   composerStatus: {
