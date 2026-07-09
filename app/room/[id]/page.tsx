@@ -1356,55 +1356,61 @@ function TerminalPoll({
   votesFor: (poll: Poll, idx: number) => number;
 }) {
   const sound = useSystemSound();
+  const meterSlots = 16;
 
   return (
     <div style={styles.pollBlock}>
-      <p style={styles.pollQuestion}>
-        <span aria-hidden="true" style={{ color: "var(--accent)" }}>{"> "}</span>
-        <span style={{ color: "var(--accent)" }}>poll --active</span>
-        <span style={styles.pollQuestionText}>{poll.question}</span>
-      </p>
-      <div style={styles.pollOptions}>
-        {poll.options.map((option, index) => {
-          const count = votesFor(poll, index);
-          const percent = total > 0 ? Math.round((count / total) * 100) : 0;
-          const selected = myVote === index;
-          const visualWidth = total > 0 ? `${Math.max(percent, selected ? 16 : 6)}%` : "0%";
+      <div aria-hidden="true" style={styles.pollBoxRule}>
+        <span style={styles.pollBoxRuleText}>┌─ poll --active </span>
+        <span style={styles.pollBoxRuleFill} />
+        <span style={styles.pollBoxRuleText}>┐</span>
+      </div>
+      <div style={styles.pollBoxBody}>
+        <p style={styles.pollQuestion}>{poll.question}</p>
+        <div style={styles.pollOptions}>
+          {poll.options.map((option, index) => {
+            const count = votesFor(poll, index);
+            const percent = total > 0 ? count / total : 0;
+            const filledSlots = total > 0 ? Math.round(percent * meterSlots) : 0;
+            const meter = `${"█".repeat(filledSlots)}${"░".repeat(meterSlots - filledSlots)}`;
+            const selected = myVote === index;
 
-          return (
-            <button
-              key={option}
-              onClick={() => onVote(poll.pollId, index)}
-              onMouseEnter={() => sound.play("hover")}
-              style={{
-                ...styles.pollOption,
-                color: selected ? "var(--accent)" : "var(--text)",
-              }}
-              type="button"
-            >
-              <span style={styles.pollOptionLine}>
-                <span style={styles.pollOptionLabel}>
-                  <span aria-hidden="true" style={styles.pollOptionMarker}>{selected ? ">" : ""}</span>
-                  <span style={styles.pollOptionIndex}>{String(index + 1).padStart(2, "0")}</span>
-                  <span>{option}</span>
-                </span>
-                <span style={styles.pollStat}>{count}</span>
-              </span>
-              <span aria-hidden="true" style={styles.pollOptionTrack}>
+            return (
+              <button
+                key={option}
+                onClick={() => onVote(poll.pollId, index)}
+                onMouseEnter={() => sound.play("hover")}
+                style={{
+                  ...styles.pollOption,
+                  color: selected ? "var(--accent)" : "var(--text)",
+                }}
+                type="button"
+              >
+                <span aria-hidden="true" style={styles.pollOptionMarker}>{selected ? ">" : ""}</span>
+                <span style={styles.pollOptionIndex}>{String(index + 1).padStart(2, "0")}</span>
+                <span style={styles.pollOptionLabel}>{option}</span>
                 <span
+                  aria-hidden="true"
                   style={{
                     ...styles.pollOptionMeter,
-                    backgroundColor: selected ? "var(--accent)" : "var(--text-dim)",
-                    opacity: selected ? 0.55 : 0.22,
-                    width: visualWidth,
+                    color: selected ? "var(--accent)" : "var(--text-dim)",
+                    opacity: selected ? 0.72 : 0.34,
                   }}
-                />
-              </span>
-            </button>
-          );
-        })}
+                >
+                  {meter}
+                </span>
+                <span style={styles.pollStat}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p style={styles.pollFooter}>:: {total} vote{total === 1 ? "" : "s"}</p>
       </div>
-      <p style={styles.pollFooter}>:: {total} vote{total === 1 ? "" : "s"}</p>
+      <div aria-hidden="true" style={styles.pollBoxRule}>
+        <span style={styles.pollBoxRuleText}>└</span>
+        <span style={styles.pollBoxRuleFill} />
+        <span style={styles.pollBoxRuleText}>┘</span>
+      </div>
     </div>
   );
 }
@@ -1592,52 +1598,66 @@ const styles: Record<string, CSSProperties> = {
     whiteSpace: "pre-wrap" as const,
   },
   pollBlock: {
-    background: "rgba(255, 255, 255, 0.018)",
+    background: "color-mix(in srgb, var(--bg-2) 42%, transparent)",
     borderRadius: 0,
     margin: "10px 0",
-    maxWidth: "620px",
-    padding: "14px 16px 12px",
+    maxWidth: "720px",
+    padding: 0,
+  },
+  pollBoxRule: {
+    alignItems: "center",
+    color: "color-mix(in srgb, var(--text-dim) 68%, transparent)",
+    display: "flex",
+    fontSize: "14px",
+    lineHeight: "20px",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+  },
+  pollBoxRuleText: {
+    flexShrink: 0,
+  },
+  pollBoxRuleFill: {
+    borderTop: "1px solid currentColor",
+    flex: 1,
+    minWidth: "24px",
+    transform: "translateY(1px)",
+  },
+  pollBoxBody: {
+    borderLeft: "1px solid color-mix(in srgb, var(--text-dim) 40%, transparent)",
+    borderRight: "1px solid color-mix(in srgb, var(--text-dim) 40%, transparent)",
+    padding: "12px clamp(14px, 4vw, 32px) 14px",
   },
   pollQuestion: {
     color: "var(--text)",
     fontSize: "14px",
     lineHeight: "24px",
-    margin: "0 0 14px",
+    margin: "0 0 16px",
     overflowWrap: "anywhere",
-  },
-  pollQuestionText: {
-    color: "var(--text)",
-    display: "block",
-    paddingLeft: "20px",
   },
   pollOptions: {
     display: "flex",
     flexDirection: "column",
-    gap: "8px",
+    gap: "4px",
   },
   pollOption: {
+    alignItems: "center",
     backgroundColor: "transparent",
     border: 0,
     borderRadius: 0,
     cursor: "pointer",
+    display: "grid",
+    gridTemplateColumns: "14px 32px minmax(80px, 1fr) 128px 32px",
     fontFamily: ROOM_FONT_FAMILY,
     fontSize: "14px",
+    gap: "8px",
     lineHeight: "24px",
-    padding: "0 0 0 20px",
+    minHeight: "28px",
+    padding: 0,
     textAlign: "left",
     transition: "color 0.15s ease, opacity 0.15s ease, background-color 0.15s ease",
     width: "100%",
   },
-  pollOptionLine: {
-    alignItems: "center",
-    display: "flex",
-    gap: "12px",
-    justifyContent: "space-between",
-    minHeight: "24px",
-  },
   pollOptionLabel: {
-    display: "inline-flex",
-    gap: "8px",
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -1652,18 +1672,11 @@ const styles: Record<string, CSSProperties> = {
     color: "var(--text-dim)",
     flexShrink: 0,
   },
-  pollOptionTrack: {
-    background: "rgba(255, 255, 255, 0.045)",
-    display: "block",
-    height: "3px",
-    margin: "3px 32px 0 30px",
-    overflow: "hidden",
-  },
   pollOptionMeter: {
-    display: "block",
-    height: "100%",
-    minWidth: "2px",
-    transition: "width 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 0.15s ease, background-color 0.15s ease",
+    fontSize: "12px",
+    letterSpacing: "-0.02em",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
   },
   pollStat: {
     color: "var(--text-muted)",
@@ -1676,7 +1689,7 @@ const styles: Record<string, CSSProperties> = {
     color: "var(--text-dim)",
     fontSize: "12px",
     lineHeight: "20px",
-    margin: "12px 0 0 20px",
+    margin: "16px 0 0",
   },
   composer: {
     display: "flex",
