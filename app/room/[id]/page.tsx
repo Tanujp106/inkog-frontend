@@ -1356,6 +1356,7 @@ function TerminalPoll({
   votesFor: (poll: Poll, idx: number) => number;
 }) {
   const sound = useSystemSound();
+  const [hoveredOption, setHoveredOption] = useState<number | null>(null);
   const meterSlots = 16;
 
   return (
@@ -1374,32 +1375,58 @@ function TerminalPoll({
             const filledSlots = total > 0 ? Math.round(percent * meterSlots) : 0;
             const meter = `${"█".repeat(filledSlots)}${"░".repeat(meterSlots - filledSlots)}`;
             const selected = myVote === index;
+            const hovered = hoveredOption === index;
 
             return (
               <button
                 key={option}
+                onBlur={() => setHoveredOption(null)}
+                onFocus={() => setHoveredOption(index)}
                 onClick={() => onVote(poll.pollId, index)}
-                onMouseEnter={() => sound.play("hover")}
+                onMouseEnter={() => {
+                  setHoveredOption(index);
+                  sound.play("hover");
+                }}
+                onMouseLeave={() => setHoveredOption(null)}
                 style={{
                   ...styles.pollOption,
-                  color: selected ? "var(--accent)" : "var(--text)",
+                  backgroundColor: selected
+                    ? "color-mix(in srgb, var(--accent) 10%, transparent)"
+                    : hovered
+                      ? "color-mix(in srgb, var(--text) 5%, transparent)"
+                      : "transparent",
+                  color: selected || hovered ? "var(--accent)" : "var(--text)",
                 }}
                 type="button"
               >
-                <span aria-hidden="true" style={styles.pollOptionMarker}>{selected ? ">" : ""}</span>
-                <span style={styles.pollOptionIndex}>{String(index + 1).padStart(2, "0")}</span>
+                <span aria-hidden="true" style={styles.pollOptionMarker}>{selected || hovered ? ">" : ""}</span>
+                <span
+                  style={{
+                    ...styles.pollOptionIndex,
+                    color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
+                  }}
+                >
+                  {String(index + 1).padStart(2, "0")}
+                </span>
                 <span style={styles.pollOptionLabel}>{option}</span>
                 <span
                   aria-hidden="true"
                   style={{
                     ...styles.pollOptionMeter,
-                    color: selected ? "var(--accent)" : "var(--text-dim)",
-                    opacity: selected ? 0.72 : 0.34,
+                    color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
+                    opacity: selected ? 0.86 : hovered ? 0.5 : 0.34,
                   }}
                 >
                   {meter}
                 </span>
-                <span style={styles.pollStat}>{count}</span>
+                <span
+                  style={{
+                    ...styles.pollStat,
+                    color: selected ? "var(--accent)" : hovered ? "var(--text)" : "var(--text-muted)",
+                  }}
+                >
+                  {count}
+                </span>
               </button>
             );
           })}
@@ -1652,7 +1679,7 @@ const styles: Record<string, CSSProperties> = {
     gap: "8px",
     lineHeight: "24px",
     minHeight: "28px",
-    padding: 0,
+    padding: "0 6px",
     textAlign: "left",
     transition: "color 0.15s ease, opacity 0.15s ease, background-color 0.15s ease",
     width: "100%",
