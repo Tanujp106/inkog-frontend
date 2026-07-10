@@ -106,7 +106,7 @@ export default function Home() {
       <header style={{ padding: "28px 40px", borderBottom: "1px solid var(--border)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: "20px", letterSpacing: "-0.04em" }}>inkog</span>
-          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--accent)", display: "inline-block" }} />
+          <span aria-hidden="true" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--accent)", display: "inline-block" }} />
         </div>
       </header>
 
@@ -140,7 +140,7 @@ export default function Home() {
                   Playground
                 </button>
               </div>
-              <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "8px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div aria-busy={helpLoading} style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "8px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
                 <label htmlFor="landing-help" style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
                   ask inkog
                 </label>
@@ -162,7 +162,7 @@ export default function Home() {
                   </button>
                 </div>
                 {helpAnswer && (
-                  <p style={{ color: "var(--text-muted)", fontFamily: "DM Mono, monospace", fontSize: "13px", lineHeight: 1.7, margin: 0 }}>
+                  <p role="status" aria-live="polite" style={{ color: "var(--text-muted)", fontFamily: "DM Mono, monospace", fontSize: "13px", lineHeight: 1.7, margin: 0 }}>
                     {helpAnswer}
                   </p>
                 )}
@@ -174,7 +174,7 @@ export default function Home() {
             <div className="animate-fadeUp" style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "12px", padding: "32px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "28px" }}>
                 <h2 style={{ fontSize: "17px", margin: 0 }}>New Room</h2>
-                <button className="btn-ghost" onClick={() => { sound.play("close"); setMode("idle"); setCreateError(""); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px" }}>✕</button>
+                <button aria-label="Close new room form" className="btn-ghost" onClick={() => { sound.play("close"); setMode("idle"); setCreateError(""); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px" }} type="button">✕</button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                 <label>
@@ -244,7 +244,7 @@ export default function Home() {
             <div className="animate-fadeUp" style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "12px", padding: "32px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "28px" }}>
                 <h2 style={{ fontSize: "17px", margin: 0 }}>Join a Room</h2>
-                <button className="btn-ghost" onClick={() => { sound.play("close"); setMode("idle"); setJoinError(""); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px" }}>✕</button>
+                <button aria-label="Close join room form" className="btn-ghost" onClick={() => { sound.play("close"); setMode("idle"); setJoinError(""); }} onMouseEnter={() => sound.play("hover")} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "12px" }} type="button">✕</button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 <label>

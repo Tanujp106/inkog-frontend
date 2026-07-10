@@ -1,0 +1,67 @@
+import type { Metadata } from "next";
+import { aboutFaqs, getAboutJsonLd } from "@/lib/site-seo.mjs";
+
+const title = "About inkog";
+const description = "How inkog supports private, anonymous, time-bound group conversations.";
+
+export const metadata: Metadata = {
+  title,
+  description,
+  alternates: {
+    canonical: "/about",
+  },
+  openGraph: {
+    title,
+    description,
+    url: "/about",
+    type: "website",
+    images: [
+      {
+        url: "/og-image.gif",
+        width: 1208,
+        height: 630,
+        alt: "Inkog pixel logo with shimmer animation",
+        type: "image/gif",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: ["/og-image.png"],
+  },
+};
+
+export default function AboutPage() {
+  return (
+    <main>
+      <article>
+        <h1>Private, anonymous chat for temporary conversations</h1>
+        <p>
+          inkog lets a group create a time-bound room, share a link, and talk under anonymous aliases instead of profiles.
+        </p>
+
+        <h2>How inkog works</h2>
+        <ol>
+          <li>Create a room and choose its duration, participant limit, and optional password.</li>
+          <li>Share the room link with the people who should join.</li>
+          <li>Chat or run a poll while the room is active.</li>
+        </ol>
+
+        <h2>Questions about inkog</h2>
+        {aboutFaqs.map(({ question, answer }) => (
+          <section key={question}>
+            <h3>{question}</h3>
+            <p>{answer}</p>
+          </section>
+        ))}
+
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(getAboutJsonLd()) }}
+        />
+      </article>
+    </main>
+  );
+}

@@ -24,6 +24,13 @@ export async function generateMetadata({ params }: Pick<RoomLayoutProps, "params
   return {
     title,
     description,
+    alternates: {
+      canonical: `/room/${encodeURIComponent(id)}`,
+    },
+    robots: {
+      index: false,
+      follow: false,
+    },
     openGraph: {
       title,
       description,

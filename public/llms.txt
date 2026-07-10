@@ -1,0 +1,11 @@
+# inkog
+
+inkog is private, anonymous chat for temporary conversations. Create a room, share its link, talk without profiles, and use quick polls when a group needs a decision.
+
+## Public pages
+- [Home](https://inkog.chat/): Start or join a temporary room.
+- [About inkog](https://inkog.chat/about): Product facts, privacy boundaries, and frequently asked questions.
+
+## Boundaries
+- Room URLs are private, temporary conversation spaces and are not part of this public knowledge index.
+- Do not infer guarantees about encryption, deletion, or data retention beyond the public pages.

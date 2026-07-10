@@ -1115,7 +1115,7 @@ export default function RoomPage() {
               opacity: composerChrome.statusMode === "inline" ? 1 : 0,
             }}
           >
-            <p style={{ ...styles.composerStatus, color: composerStatusColor }}>
+            <p id="room-composer-status" role="status" aria-live="polite" style={{ ...styles.composerStatus, color: composerStatusColor }}>
               {composerChrome.statusMode === "inline" ? (composerStatus?.message ?? "") : ""}
             </p>
           </div>
@@ -1150,6 +1150,7 @@ export default function RoomPage() {
               autoCapitalize="off"
               autoComplete="off"
               autoCorrect="off"
+              aria-describedby="room-composer-status"
               id="room-terminal-input"
               onChange={event => {
                 setComposerValue(event.target.value);
