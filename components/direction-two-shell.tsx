@@ -38,12 +38,6 @@ import {
   getDirectionTwoScrambleFrame,
 } from "@/lib/direction-two-intro.mjs";
 import {
-  directionTwoAutoScrollAnimationDurationMs,
-  getDirectionTwoAutoScrollTop,
-  getDirectionTwoScrollAnimationTop,
-  getDirectionTwoScrollReserveHeight,
-} from "@/lib/direction-two-scroll.mjs";
-import {
   formatSystemSoundStatus,
   parseSystemSoundCommand,
 } from "@/lib/system-sound.mjs";
@@ -75,13 +69,6 @@ type ParsedCreateCommand =
   | { status: "partial"; nextStep: "topic" | "expiry" | "limit" | "password-choice" | "password"; draft: CreateDraft }
   | { status: "ready"; draft: CreateDraft }
   | { status: "invalid"; message: string };
-
-type DirectionTwoScrollAnimation = {
-  frameId: number | null;
-  startScrollY: number;
-  targetScrollY: number;
-  startTime: number;
-};
 
 type SessionFlow =
   | { type: "create"; step: "topic"; draft: CreateDraft }
@@ -349,13 +336,12 @@ function commandCompletionFor(value: string, flow: SessionFlow | null) {
 export function DirectionTwoShell() {
   const router = useRouter();
   const sound = useSystemSound();
-  const mainRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const inputMirrorRef = useRef<HTMLDivElement | null>(null);
   const promptRowRef = useRef<HTMLDivElement | null>(null);
   const slashMenuRef = useRef<HTMLDivElement | null>(null);
+  const terminalOutputRef = useRef<HTMLDivElement | null>(null);
   const inputNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scrollAnimationRef = useRef<DirectionTwoScrollAnimation | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [lines, setLines] = useState<TerminalLine[]>(initialLines);
   const [flow, setFlow] = useState<SessionFlow | null>(null);
@@ -367,7 +353,6 @@ export function DirectionTwoShell() {
   const [helping, setHelping] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
   const [inputFeedbackMessage, setInputFeedbackMessage] = useState<string | null>(null);
-  const [scrollReserveHeight, setScrollReserveHeight] = useState(0);
   const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
@@ -377,7 +362,6 @@ export function DirectionTwoShell() {
   const shimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
   const slashCommandSuggestions = !flow && !inputFeedbackMessage ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
-  const shouldReserveScrollSpace = slashCommandSuggestions.length > 0 || lines.length > 0;
   const ambientPixels = useMemo(() => {
     return createDirectionTwoAmbientPixels(Math.random, directionTwoAmbientConfig);
   }, []);
@@ -404,50 +388,6 @@ export function DirectionTwoShell() {
 
   const focusInput = () => {
     requestAnimationFrame(() => inputRef.current?.focus());
-  };
-
-  const cancelDirectionTwoAutoScroll = () => {
-    const animation = scrollAnimationRef.current;
-    if (animation?.frameId !== null && animation?.frameId !== undefined) {
-      window.cancelAnimationFrame(animation.frameId);
-    }
-    scrollAnimationRef.current = null;
-  };
-
-  const animateDirectionTwoAutoScroll = (targetScrollY: number) => {
-    cancelDirectionTwoAutoScroll();
-
-    const animation: DirectionTwoScrollAnimation = {
-      frameId: null,
-      startScrollY: window.scrollY,
-      targetScrollY,
-      startTime: window.performance.now(),
-    };
-
-    const tick = (timestamp: number) => {
-      const currentAnimation = scrollAnimationRef.current;
-      if (currentAnimation !== animation) return;
-
-      const nextScrollY = getDirectionTwoScrollAnimationTop({
-        startScrollY: animation.startScrollY,
-        targetScrollY: animation.targetScrollY,
-        elapsedMs: timestamp - animation.startTime,
-        durationMs: directionTwoAutoScrollAnimationDurationMs,
-      });
-
-      window.scrollTo({ top: nextScrollY, behavior: "auto" });
-
-      if (Math.abs(nextScrollY - animation.targetScrollY) <= 0.5) {
-        window.scrollTo({ top: animation.targetScrollY, behavior: "auto" });
-        scrollAnimationRef.current = null;
-        return;
-      }
-
-      animation.frameId = window.requestAnimationFrame(tick);
-    };
-
-    scrollAnimationRef.current = animation;
-    animation.frameId = window.requestAnimationFrame(tick);
   };
 
   const syncInputMirrorScroll = () => {
@@ -513,7 +453,6 @@ export function DirectionTwoShell() {
       if (inputNudgeTimeoutRef.current) {
         clearTimeout(inputNudgeTimeoutRef.current);
       }
-      cancelDirectionTwoAutoScroll();
     };
   }, []);
 
@@ -590,53 +529,14 @@ export function DirectionTwoShell() {
   }, [prefersReducedMotion]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    const terminalOutput = terminalOutputRef.current;
+    if (!terminalOutput) return;
 
-    const syncScrollReserve = () => {
-      const promptHeight = promptRowRef.current?.offsetHeight ?? 24;
-      const slashMenuHeight = slashCommandSuggestions.length > 0 ? slashMenuRef.current?.offsetHeight ?? 0 : 0;
-      setScrollReserveHeight(
-        getDirectionTwoScrollReserveHeight({
-          anchorRatio: slashCommandSuggestions.length > 0 ? 0.8 : 0.85,
-          floatingHeight: slashMenuHeight,
-          viewportHeight: window.innerHeight,
-          promptHeight,
-        }),
-      );
-    };
-
-    syncScrollReserve();
-    window.addEventListener("resize", syncScrollReserve);
-    return () => window.removeEventListener("resize", syncScrollReserve);
-  }, [flow, inputValue, lines.length, slashCommandSuggestions.length]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!promptRowRef.current) return;
-
-    const slashMenuRect = slashCommandSuggestions.length > 0 ? slashMenuRef.current?.getBoundingClientRect() : null;
-    const slashMenuHeight = slashMenuRect?.height ?? 0;
-    const nextScrollTop = getDirectionTwoAutoScrollTop({
-      allowReverse: true,
-      anchorRatio: slashCommandSuggestions.length > 0 ? 0.8 : 0.85,
-      currentScrollY: window.scrollY,
-      floatingBottom: slashMenuRect?.bottom,
-      floatingHeight: slashMenuHeight,
-      promptTop: promptRowRef.current.getBoundingClientRect().top,
-      viewportPadding: slashCommandSuggestions.length > 0 ? 24 : 0,
-      viewportHeight: window.innerHeight,
+    terminalOutput.scrollTo({
+      top: terminalOutput.scrollHeight,
+      behavior: prefersReducedMotion ? "auto" : "smooth",
     });
-
-    if (Math.abs(nextScrollTop - window.scrollY) <= 1) return;
-
-    if (prefersReducedMotion) {
-      cancelDirectionTwoAutoScroll();
-      window.scrollTo({ top: nextScrollTop, behavior: "auto" });
-      return;
-    }
-
-    animateDirectionTwoAutoScroll(nextScrollTop);
-  }, [flow, inputValue, lines.length, prefersReducedMotion, scrollReserveHeight, slashCommandSuggestions.length]);
+  }, [lines.length, prefersReducedMotion]);
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1310,8 +1210,7 @@ export function DirectionTwoShell() {
 
   return (
     <main
-      ref={mainRef}
-      className="direction-two-pixel-cursor relative isolate min-h-screen overflow-hidden bg-[var(--background)] px-6 py-5 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
+      className="direction-two-pixel-cursor relative isolate h-[100dvh] min-h-0 overflow-hidden bg-[var(--background)] px-6 py-5 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
       onClick={focusInput}
     >
       <AmbientShaderBackground opacity={isMobileViewport ? 0.34 : 0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
@@ -1357,7 +1256,7 @@ export function DirectionTwoShell() {
 
       <section
         aria-describedby="direction-two-keyboard-shortcuts"
-        className="relative z-10 mx-auto flex min-h-[calc(100vh-40px)] w-full max-w-[1120px] flex-col sm:min-h-[calc(100vh-56px)]"
+        className="relative z-10 mx-auto flex h-full min-h-0 w-full max-w-[1120px] flex-col"
       >
         <header className="sm:hidden direction-two-mobile-landing flex flex-col gap-3 pb-2 pt-4">
           <div>
@@ -1424,11 +1323,11 @@ export function DirectionTwoShell() {
         </header>
 
         <div
-          className={`direction-two-mobile-terminal pb-6 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:pt-12 ${
+          className={`direction-two-mobile-terminal flex min-h-0 flex-1 flex-col pb-6 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:pt-12 ${
             isTerminalVisible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"
           }`}
         >
-          <div className="space-y-2" aria-label="Terminal output">
+          <div ref={terminalOutputRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto" aria-label="Terminal output">
             {lines.map(entry => (
               <TerminalLine key={entry.id} {...entry} />
             ))}
@@ -1467,7 +1366,7 @@ export function DirectionTwoShell() {
             </div>
           )}
 
-          <div className="relative w-full">
+          <div className="relative w-full shrink-0">
             <div
               ref={promptRowRef}
               className={`${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 items-center text-[14px] leading-[24px] text-[var(--foreground)]`}
@@ -1640,7 +1539,7 @@ export function DirectionTwoShell() {
             {slashCommandSuggestions.length > 0 && (
               <div
                 aria-label="Slash command suggestions"
-                className="direction-two-slash-menu absolute left-0 top-full z-20 mt-2 flex w-full max-w-[560px] flex-col gap-1 overflow-hidden text-[14px] leading-[24px]"
+                className="direction-two-slash-menu absolute bottom-full left-0 z-20 mb-2 flex w-full max-w-[560px] flex-col gap-1 overflow-hidden text-[14px] leading-[24px]"
                 ref={slashMenuRef}
                 role="listbox"
               >
@@ -1688,8 +1587,6 @@ export function DirectionTwoShell() {
               </div>
             )}
           </div>
-
-          <div aria-hidden="true" style={{ height: shouldReserveScrollSpace ? `${scrollReserveHeight}px` : "0px" }} />
         </div>
       </section>
     </main>
