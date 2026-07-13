@@ -6,7 +6,6 @@ import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
-import { TerminalComposer } from "@/components/terminal-composer";
 import {
   buildRoomGateTranscriptLines,
   buildRoomPeerColorMap,
@@ -953,7 +952,7 @@ export default function RoomPage() {
   });
   const slashSuggestions = isRoomBooting || isPasswordGate ? [] : getRoomSlashCommandSuggestions({ isCreator, query: composerValue });
   const showSlashSuggestions = slashSuggestions.length > 0 && !pendingCommand;
-  const composerExpanded = Boolean(passwordReveal) || composerChrome.expanded;
+  const composerExpanded = composerChrome.expanded;
   const showComposerHint = showIdleCursor && !showSlashSuggestions && composerChrome.statusMode === "hidden";
   const gateTranscriptLines = isRoomBooting
     ? []
@@ -1057,140 +1056,172 @@ export default function RoomPage() {
         <div ref={transcriptEndRef} />
       </section>
 
-      <TerminalComposer
-        ariaDescribedBy="room-composer-status"
-        cursorVisible={cursorVisible}
-        disabled={isRoomBooting}
-        expanded={composerExpanded}
-        hint={isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or / for commands"}
-        inputId="room-terminal-input"
-        inputLabel="room command"
-        inputPrefix={pollInlinePrompt ? (
-          <span aria-hidden="true" style={styles.composerPollPrefix}>
-            {pollInlinePrompt.prefix}
-          </span>
-        ) : null}
-        inputRef={composerRef}
-        inputStyle={{
-          caretColor: showIdleCursor ? "transparent" : "var(--text)",
-          color: pollInlinePrompt ? "var(--accent)" : "var(--text)",
+      <form
+        onSubmit={event => {
+          event.preventDefault();
+          runComposer();
         }}
-        inputType={isPasswordGate ? "password" : "text"}
-        onKeyDown={event => {
-          if (event.key === "Escape" && passwordReveal) {
-            event.preventDefault();
-            sound.play("close");
-            setPasswordReveal(null);
-            setSlashSuggestionIndex(0);
-            return;
-          }
+        style={styles.composer}
+      >
+        <div
+          style={{
+            ...styles.composerFrame,
+            minHeight: passwordReveal ? "76px" : composerExpanded ? "76px" : "56px",
+          }}
+        >
+          <div
+            aria-hidden={!showSlashSuggestions}
+            style={{
+              ...styles.slashCommandMenu,
+              maxHeight: showSlashSuggestions ? "220px" : "0px",
+              opacity: showSlashSuggestions ? 1 : 0,
+              marginBottom: showSlashSuggestions ? "6px" : "0px",
+              pointerEvents: showSlashSuggestions ? "auto" : "none",
+            }}
+          >
+            {showSlashSuggestions ? slashSuggestions.map((item, index) => {
+              const selected = slashSuggestionIndex === index;
 
-          if (
-            passwordReveal
-            && event.key.toLowerCase() === "c"
-            && !event.altKey
-            && !event.ctrlKey
-            && !event.metaKey
-          ) {
-            event.preventDefault();
-            void copyRevealedPassword();
-            return;
-          }
-
-          if (!showSlashSuggestions) return;
-
-          if (event.key === "ArrowDown") {
-            event.preventDefault();
-            setSlashSuggestionIndex(index => (index + 1) % slashSuggestions.length);
-            return;
-          }
-
-          if (event.key === "ArrowUp") {
-            event.preventDefault();
-            setSlashSuggestionIndex(index => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
-            return;
-          }
-
-          if (event.key === "Escape") {
-            event.preventDefault();
-            setComposerValue("");
-            setSlashSuggestionIndex(0);
-            return;
-          }
-
-          if (event.key === "Enter") {
-            event.preventDefault();
-            runSlashSuggestion(slashSuggestions[slashSuggestionIndex]?.command ?? slashSuggestions[0].command);
-          }
-        }}
-        onSubmit={runComposer}
-        onValueChange={value => {
-          setComposerValue(value);
-          setSlashSuggestionIndex(0);
-        }}
-        placeholder={isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
-        showHint={showComposerHint}
-        showIdleCursor={showIdleCursor}
-        topContent={(
-          <>
-            <div
-              aria-hidden={!showSlashSuggestions}
-              style={{
-                ...styles.slashCommandMenu,
-                maxHeight: showSlashSuggestions ? "220px" : "0px",
-                opacity: showSlashSuggestions ? 1 : 0,
-                marginBottom: showSlashSuggestions ? "6px" : "0px",
-                pointerEvents: showSlashSuggestions ? "auto" : "none",
-              }}
-            >
-              {showSlashSuggestions ? slashSuggestions.map((item, index) => {
-                const selected = slashSuggestionIndex === index;
-
-                return (
-                  <button
-                    key={item.command}
-                    onClick={() => runSlashSuggestion(item.command)}
-                    onMouseEnter={() => {
-                      setSlashSuggestionIndex(index);
-                      sound.play("hover");
-                    }}
-                    style={{
-                      ...styles.slashCommandItem,
-                      background: selected ? "color-mix(in srgb, var(--accent) 7%, transparent)" : "transparent",
-                      color: selected ? "var(--accent)" : "var(--text)",
-                    }}
-                    type="button"
-                  >
-                    <span aria-hidden="true" style={styles.slashCommandMarker}>{selected ? ">" : ""}</span>
-                    <span style={styles.slashCommandName}>{item.command}</span>
-                    <span style={styles.slashCommandDescription}>{item.label}</span>
-                  </button>
-                );
-              }) : null}
-            </div>
-            <div
-              aria-hidden={composerChrome.statusMode !== "inline"}
-              style={{
-                ...styles.composerInlineStatus,
-                maxHeight: composerChrome.statusMode === "inline" ? "22px" : "0px",
-                marginBottom: composerChrome.statusMode === "inline" ? "6px" : "0px",
-                opacity: composerChrome.statusMode === "inline" ? 1 : 0,
-              }}
-            >
-              <p id="room-composer-status" role="status" aria-live="polite" style={{ ...styles.composerStatus, color: composerStatusColor }}>
-                {composerChrome.statusMode === "inline" ? (composerStatus?.message ?? "") : ""}
-              </p>
-            </div>
-            {passwordReveal ? (
-              <RoomPasswordReveal
-                hint={passwordReveal.hint}
-                password={passwordReveal.password}
-              />
+              return (
+                <button
+                  key={item.command}
+                  onClick={() => runSlashSuggestion(item.command)}
+                  onMouseEnter={() => {
+                    setSlashSuggestionIndex(index);
+                    sound.play("hover");
+                  }}
+                  style={{
+                    ...styles.slashCommandItem,
+                    background: selected ? "color-mix(in srgb, var(--accent) 7%, transparent)" : "transparent",
+                    color: selected ? "var(--accent)" : "var(--text)",
+                  }}
+                  type="button"
+                >
+                  <span aria-hidden="true" style={styles.slashCommandMarker}>{selected ? ">" : ""}</span>
+                  <span style={styles.slashCommandName}>{item.command}</span>
+                  <span style={styles.slashCommandDescription}>{item.label}</span>
+                </button>
+              );
+            }) : null}
+          </div>
+          <div
+            aria-hidden={composerChrome.statusMode !== "inline"}
+            style={{
+              ...styles.composerInlineStatus,
+              maxHeight: composerChrome.statusMode === "inline" ? "22px" : "0px",
+              marginBottom: composerChrome.statusMode === "inline" ? "6px" : "0px",
+              opacity: composerChrome.statusMode === "inline" ? 1 : 0,
+            }}
+          >
+            <p id="room-composer-status" role="status" aria-live="polite" style={{ ...styles.composerStatus, color: composerStatusColor }}>
+              {composerChrome.statusMode === "inline" ? (composerStatus?.message ?? "") : ""}
+            </p>
+          </div>
+          {passwordReveal ? (
+            <RoomPasswordReveal
+              hint={passwordReveal.hint}
+              password={passwordReveal.password}
+            />
+          ) : null}
+          <div style={styles.composerRow}>
+            <label htmlFor="room-terminal-input" style={styles.srOnly}>room command</label>
+            <span aria-hidden="true" style={styles.composerPrompt}>$</span>
+            {pollInlinePrompt ? (
+              <span aria-hidden="true" style={styles.composerPollPrefix}>
+                {pollInlinePrompt.prefix}
+              </span>
             ) : null}
-          </>
-        )}
-        value={composerValue}
-      />
+            {showIdleCursor || showComposerHint ? (
+              <span aria-hidden="true" style={styles.composerIdleText}>
+                {showIdleCursor ? (
+                  <span
+                    style={{
+                      ...styles.composerCursor,
+                      opacity: cursorVisible ? 1 : 0.18,
+                    }}
+                  >
+                    |
+                  </span>
+                ) : null}
+                {showComposerHint ? (
+                  <span style={styles.composerHint}>
+                    {isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or / for commands"}
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
+            <input
+              autoCapitalize="off"
+              autoComplete="off"
+              autoCorrect="off"
+              aria-describedby="room-composer-status"
+              id="room-terminal-input"
+              onChange={event => {
+                setComposerValue(event.target.value);
+                setSlashSuggestionIndex(0);
+              }}
+              onKeyDown={event => {
+                if (event.key === "Escape" && passwordReveal) {
+                  event.preventDefault();
+                  sound.play("close");
+                  setPasswordReveal(null);
+                  setSlashSuggestionIndex(0);
+                  return;
+                }
+
+                if (
+                  passwordReveal
+                  && event.key.toLowerCase() === "c"
+                  && !event.altKey
+                  && !event.ctrlKey
+                  && !event.metaKey
+                ) {
+                  event.preventDefault();
+                  void copyRevealedPassword();
+                  return;
+                }
+
+                if (!showSlashSuggestions) return;
+
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setSlashSuggestionIndex(index => (index + 1) % slashSuggestions.length);
+                  return;
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSlashSuggestionIndex(index => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
+                  return;
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setComposerValue("");
+                  setSlashSuggestionIndex(0);
+                  return;
+                }
+
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  runSlashSuggestion(slashSuggestions[slashSuggestionIndex]?.command ?? slashSuggestions[0].command);
+                }
+              }}
+              ref={composerRef}
+              spellCheck={false}
+              disabled={isRoomBooting}
+              placeholder={isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
+              style={{
+                ...styles.composerInput,
+                caretColor: showIdleCursor ? "transparent" : "var(--text)",
+                color: pollInlinePrompt ? "var(--accent)" : "var(--text)",
+              }}
+              type={isPasswordGate ? "password" : "text"}
+              value={composerValue}
+            />
+          </div>
+        </div>
+      </form>
     </main>
   );
 }
@@ -1944,6 +1975,30 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: "20px",
     margin: "18px 0 0",
   },
+  composer: {
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    position: "relative",
+    zIndex: 1,
+  },
+  composerFrame: {
+    backdropFilter: "blur(18px) saturate(1.22)",
+    background: "linear-gradient(180deg, color-mix(in srgb, var(--bg) 70%, rgba(255, 255, 255, 0.035)) 0%, color-mix(in srgb, var(--bg-2) 62%, rgba(0, 0, 0, 0.32)) 100%)",
+    borderTop: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
+    boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent), 0 -18px 42px rgba(0, 0, 0, 0.18)",
+    boxSizing: "border-box",
+    display: "flex",
+    flexDirection: "column",
+    gap: 0,
+    justifyContent: "center",
+    minHeight: "52px",
+    overflow: "hidden",
+    padding: "12px clamp(32px, calc(3vw + 16px), 48px)",
+    transition: "min-height 150ms cubic-bezier(0.23, 1, 0.32, 1)",
+    WebkitBackdropFilter: "blur(18px) saturate(1.22)",
+    width: "100%",
+  },
   composerInlineStatus: {
     overflow: "hidden",
     transition: "max-height 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 140ms ease",
@@ -1994,11 +2049,24 @@ const styles: Record<string, CSSProperties> = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
+  composerRow: {
+    alignItems: "center",
+    display: "flex",
+    gap: "8px",
+    minHeight: "24px",
+    width: "100%",
+  },
   composerStatus: {
     fontSize: "12px",
     lineHeight: "18px",
     margin: 0,
     width: "100%",
+  },
+  composerPrompt: {
+    color: "var(--accent)",
+    flexShrink: 0,
+    fontSize: "14px",
+    lineHeight: "24px",
   },
   composerPollPrefix: {
     color: "var(--text)",
@@ -2006,6 +2074,43 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "14px",
     lineHeight: "24px",
     whiteSpace: "pre",
+  },
+  composerIdleText: {
+    alignItems: "center",
+    display: "inline-flex",
+    flexShrink: 1,
+    gap: 0,
+    minWidth: 0,
+  },
+  composerCursor: {
+    color: "var(--text-muted)",
+    flexShrink: 0,
+    fontSize: "14px",
+    lineHeight: "24px",
+    transition: "opacity 0.14s linear",
+  },
+  composerHint: {
+    color: "var(--text-dim)",
+    fontSize: "13px",
+    lineHeight: "24px",
+    marginLeft: "-3px",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  composerInput: {
+    background: "transparent",
+    border: 0,
+    boxShadow: "none",
+    color: "var(--text)",
+    flex: 1,
+    fontFamily: ROOM_FONT_FAMILY,
+    fontSize: "14px",
+    lineHeight: "24px",
+    minWidth: 0,
+    outline: "none",
+    padding: 0,
   },
   stateShell: {
     alignItems: "center",
@@ -2072,5 +2177,16 @@ const styles: Record<string, CSSProperties> = {
   commandButton: {
     borderRadius: 0,
     padding: "7px 12px",
+  },
+  srOnly: {
+    border: 0,
+    clip: "rect(0, 0, 0, 0)",
+    height: "1px",
+    margin: "-1px",
+    overflow: "hidden",
+    padding: 0,
+    position: "absolute",
+    whiteSpace: "nowrap",
+    width: "1px",
   },
 };
