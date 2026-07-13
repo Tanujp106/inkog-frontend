@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AgentationProvider } from "./agentation-provider";
+import { InterfaceKit } from "./interface-kit-provider";
 import "./globals.css";
 import { SystemSoundProvider } from "@/lib/system-sound-provider";
 import { buildInkogFaviconHref } from "@/lib/inkog-favicon.mjs";
@@ -60,6 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SystemSoundProvider>
           <ThemeFavicon />
           {children}
+          {process.env.NODE_ENV === "development" && <InterfaceKit />}
           <AgentationProvider />
         </SystemSoundProvider>
       </body>

@@ -1291,7 +1291,7 @@ export function DirectionTwoShell() {
           </div>
         </header>
 
-        <header className="hidden flex-col gap-4 pb-5 pt-8 sm:flex sm:pt-12">
+        <header className="hidden flex-col gap-4 pb-5 pt-5 sm:flex sm:pt-6">
           <div>
             <InkPatternMark
               reducedMotion={prefersReducedMotion}
@@ -1305,7 +1305,7 @@ export function DirectionTwoShell() {
             <p className="direction-two-intro-copy pt-5">
               {headlineText}
             </p>
-            <div className="space-y-6 pt-8 text-[12px] leading-[18px] text-[var(--muted-foreground)] sm:text-[13px]">
+            <div className="space-y-[20px] pt-8 text-[12px] leading-[18px] text-[var(--muted-foreground)] sm:text-[13px]">
               {introHighlights.map((item, index) => (
                 <DirectionTwoIntroRow
                   key={item.text}
@@ -1323,7 +1323,7 @@ export function DirectionTwoShell() {
         </header>
 
         <div
-          className={`direction-two-mobile-terminal flex min-h-0 flex-1 flex-col pb-6 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:pt-12 ${
+          className={`direction-two-mobile-terminal flex min-h-0 flex-1 flex-col pb-3 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:pt-12 ${
             isTerminalVisible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"
           }`}
         >
@@ -1369,12 +1369,11 @@ export function DirectionTwoShell() {
           <div className="relative w-full shrink-0">
             <div
               ref={promptRowRef}
-              className={`direction-two-terminal-frame ${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col text-[14px] leading-[24px] text-[var(--foreground)]`}
+              className={`direction-two-terminal-frame ${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col pl-[16px] pt-[16px] pb-[16px] pr-[16px] text-[14px] leading-[24px] text-[var(--foreground)]`}
               style={{
                 background: "color-mix(in srgb, var(--accent) 8%, var(--bg) 92%)",
                 border: "1px solid color-mix(in srgb, var(--border-light) 92%, var(--accent) 8%)",
                 borderRadius: 0,
-                padding: "10px 12px",
               }}
             >
               <div
@@ -1550,7 +1549,7 @@ export function DirectionTwoShell() {
                   autoCapitalize="off"
                   autoComplete="off"
                   autoCorrect="off"
-                  className="absolute inset-0 h-[24px] w-full appearance-none p-0 font-mono text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
+                  className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[4px] font-mono text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
                   disabled={creating}
                   id="terminal-command"
                   name="command"
