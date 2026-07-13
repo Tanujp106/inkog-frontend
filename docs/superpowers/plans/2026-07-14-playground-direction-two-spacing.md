@@ -25,7 +25,7 @@
 
 **Interfaces:**
 - Consumes: Existing Direction 2 shell markup and source-shape tests.
-- Produces: `pb-3`, desktop `pt-5`, and desktop highlight `space-y-4` spacing with matching assertions.
+- Produces: `pb-3`, desktop `pt-5`, and desktop highlight `space-y-[22px]` spacing with matching assertions.
 
 - [ ] **Step 1: Update the component classes**
 
@@ -33,7 +33,7 @@
 
   ```tsx
   <header className="hidden flex-col gap-4 pb-5 pt-5 sm:flex sm:pt-12">
-  <div className="space-y-4 pt-8 text-[12px] leading-[18px] text-[var(--muted-foreground)] sm:text-[13px]">
+  <div className="space-y-[22px] pt-8 text-[12px] leading-[18px] text-[var(--muted-foreground)] sm:text-[13px]">
   className={`direction-two-mobile-terminal flex min-h-0 flex-1 flex-col pb-3 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:pt-12 ${
   ```
 
@@ -49,7 +49,7 @@
 
   ```js
   assert.match(source, /hidden flex-col gap-4 pb-5 pt-5 sm:flex sm:pt-12/);
-  assert.match(source, /space-y-4 pt-8 text-\[12px\] leading-\[18px\]/);
+  assert.match(source, /space-y-\[22px\] pt-8 text-\[12px\] leading-\[18px\]/);
   ```
 
 - [ ] **Step 3: Run focused tests**
