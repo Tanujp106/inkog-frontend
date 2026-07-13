@@ -43,6 +43,7 @@ export declare const commands: string[];
 export declare const directionTwoCommandReferenceLines: string[];
 export declare const directionTwoThemes: DirectionTwoTheme[];
 export declare function completeDirectionTwoCommand(value: string): string | null;
+export declare function completeDirectionTwoCommandArgument(value: string): string | null;
 export declare function getDirectionTwoSlashCommandSuggestions(value: string): Array<{
   id: string;
   command: string;
@@ -78,7 +79,7 @@ export declare function getDirectionTwoCreateVisualSegments(value: string): Arra
 }> | null;
 export declare function isDirectionTwoCreateTimeInputValid(value: string): boolean;
 export declare function parseDirectionTwoInlineCommand(value: string): {
-  command: "create" | "help" | "join" | "style" | "sound" | "command" | "commands" | "clear";
+  command: "create" | "help" | "join" | "style" | "sound" | "clear";
   argument: string;
   usesSlash: boolean;
 } | null;

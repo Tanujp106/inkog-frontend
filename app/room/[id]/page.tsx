@@ -720,6 +720,26 @@ export default function RoomPage() {
     if (window.confirm("Close chat for everyone? This cannot be undone.")) closeRoom();
   };
 
+  const handlePasswordCommand = () => {
+    const result = resolveRoomPasswordCommand({
+      isCreator,
+      password: getStoredRoomPassword(roomId),
+    });
+
+    if (!result.ok) {
+      sound.play("error");
+      setComposerStatusMessage(result.message ?? "could not show room password", "error");
+      return;
+    }
+
+    sound.play("notify");
+    clearComposerStatus();
+    setPasswordReveal({
+      password: result.password ?? "",
+      hint: result.hint ?? "type c to copy",
+    });
+  };
+
   const runSlashSuggestion = (command: string) => {
     setSlashSuggestionIndex(0);
     setComposerValue("");
@@ -743,6 +763,11 @@ export default function RoomPage() {
 
     if (command === "/share") {
       void copyShareLink();
+      return;
+    }
+
+    if (command === "/password") {
+      handlePasswordCommand();
       return;
     }
 
@@ -876,23 +901,7 @@ export default function RoomPage() {
         void copyShareLink();
         return;
       case "password": {
-        const result = resolveRoomPasswordCommand({
-          isCreator,
-          password: getStoredRoomPassword(roomId),
-        });
-
-        if (!result.ok) {
-          sound.play("error");
-          setComposerStatusMessage(result.message ?? "could not show room password", "error");
-          return;
-        }
-
-        sound.play("notify");
-        clearComposerStatus();
-        setPasswordReveal({
-          password: result.password ?? "",
-          hint: result.hint ?? "type c to copy",
-        });
+        handlePasswordCommand();
         return;
       }
       case "leave":
@@ -1044,17 +1053,6 @@ export default function RoomPage() {
             );
           })
         )}
-        {passwordReveal ? (
-          <RoomPasswordReveal
-            hint={passwordReveal.hint}
-            onCancel={() => {
-              sound.play("close");
-              setPasswordReveal(null);
-            }}
-            onCopy={() => void copyRevealedPassword()}
-            password={passwordReveal.password}
-          />
-        ) : null}
         <div ref={transcriptEndRef} />
       </section>
 
@@ -1068,7 +1066,7 @@ export default function RoomPage() {
         <div
           style={{
             ...styles.composerFrame,
-            minHeight: composerExpanded ? "76px" : "56px",
+            minHeight: passwordReveal ? "76px" : composerExpanded ? "76px" : "56px",
           }}
         >
           <div
@@ -1119,6 +1117,12 @@ export default function RoomPage() {
               {composerChrome.statusMode === "inline" ? (composerStatus?.message ?? "") : ""}
             </p>
           </div>
+          {passwordReveal ? (
+            <RoomPasswordReveal
+              hint={passwordReveal.hint}
+              password={passwordReveal.password}
+            />
+          ) : null}
           <div style={styles.composerRow}>
             <label htmlFor="room-terminal-input" style={styles.srOnly}>room command</label>
             <span aria-hidden="true" style={styles.composerPrompt}>$</span>
@@ -1159,9 +1163,21 @@ export default function RoomPage() {
               onKeyDown={event => {
                 if (event.key === "Escape" && passwordReveal) {
                   event.preventDefault();
+                  sound.play("close");
                   setPasswordReveal(null);
-                  setComposerValue("");
                   setSlashSuggestionIndex(0);
+                  return;
+                }
+
+                if (
+                  passwordReveal
+                  && event.key.toLowerCase() === "c"
+                  && !event.altKey
+                  && !event.ctrlKey
+                  && !event.metaKey
+                ) {
+                  event.preventDefault();
+                  void copyRevealedPassword();
                   return;
                 }
 
@@ -1212,32 +1228,64 @@ export default function RoomPage() {
 
 function RoomPasswordReveal({
   hint,
-  onCancel,
-  onCopy,
   password,
 }: {
   hint: string;
-  onCancel: () => void;
-  onCopy: () => void;
   password: string;
 }) {
+  const [displayedPassword, setDisplayedPassword] = useState(() => getPasswordCipherText(password, 0));
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (mediaQuery.matches) {
+      setDisplayedPassword(password);
+      return;
+    }
+
+    const characters = Array.from(password);
+    const duration = 420;
+    const startedAt = performance.now();
+    let animationFrame = 0;
+
+    const reveal = (now: number) => {
+      const progress = Math.min((now - startedAt) / duration, 1);
+      const revealedCharacters = Math.floor(progress * (characters.length + 1));
+      setDisplayedPassword(getPasswordCipherText(password, revealedCharacters));
+
+      if (progress < 1) animationFrame = requestAnimationFrame(reveal);
+    };
+
+    animationFrame = requestAnimationFrame(reveal);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [password]);
+
   return (
-    <div aria-label="Room password" style={styles.passwordRevealBlock}>
-      <div style={styles.passwordRevealTitle}>password</div>
-      <div style={styles.passwordRevealRow}>
-        <span style={styles.passwordRevealValue}>{password}</span>
-        <span style={styles.passwordRevealHint}>{hint}</span>
-      </div>
-      <div style={styles.passwordRevealActions}>
-        <button onClick={onCopy} style={styles.passwordRevealButton} type="button">
-          copy
-        </button>
-        <button onClick={onCancel} style={styles.passwordRevealButton} type="button">
-          cancel
-        </button>
-      </div>
+    <div aria-live="polite" style={styles.passwordRevealLine}>
+      <style>{`
+        @keyframes room-password-shimmer {
+          from { background-position: 140% 0; }
+          to { background-position: -40% 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .room-password-shimmer { animation: none !important; }
+        }
+      `}</style>
+      <span style={styles.passwordRevealLabel}>password:</span>
+      <span className="room-password-shimmer" style={styles.passwordRevealValue}>
+        {displayedPassword}
+      </span>
+      <span style={styles.passwordRevealHint}>{hint}</span>
     </div>
   );
+}
+
+const PASSWORD_CIPHER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*";
+
+function getPasswordCipherText(password: string, revealedCharacters: number) {
+  return Array.from(password, (character, index) => {
+    if (character === " " || index < revealedCharacters) return character;
+    return PASSWORD_CIPHER[(index * 13 + revealedCharacters * 7) % PASSWORD_CIPHER.length];
+  }).join("");
 }
 
 function RoomGateTranscript({ lines, passwordError }: { lines: string[]; passwordError?: string }) {
@@ -1783,49 +1831,37 @@ const styles: Record<string, CSSProperties> = {
     overflowWrap: "anywhere",
     whiteSpace: "pre-wrap" as const,
   },
-  passwordRevealBlock: {
-    borderLeft: "1px solid color-mix(in srgb, var(--accent) 58%, transparent)",
-    margin: "12px 0",
-    maxWidth: "620px",
-    padding: "4px 0 4px 14px",
-  },
-  passwordRevealTitle: {
-    color: "var(--text-dim)",
-    fontSize: "12px",
-    lineHeight: "20px",
-    marginBottom: "2px",
-  },
-  passwordRevealRow: {
+  passwordRevealLine: {
     alignItems: "baseline",
     display: "flex",
+    gap: "8px",
+    minHeight: "20px",
+    paddingBottom: "4px",
+    width: "100%",
     flexWrap: "wrap",
-    gap: "10px",
+  },
+  passwordRevealLabel: {
+    color: "var(--text-dim)",
+    flexShrink: 0,
+    fontSize: "13px",
+    lineHeight: "20px",
   },
   passwordRevealValue: {
-    color: "var(--accent)",
-    fontSize: "14px",
-    lineHeight: "24px",
+    animation: "room-password-shimmer 760ms linear 360ms 1 both",
+    backgroundImage: "linear-gradient(100deg, var(--accent) 0%, var(--accent) 43%, color-mix(in srgb, var(--text) 88%, var(--accent)) 50%, var(--accent) 57%, var(--accent) 100%)",
+    backgroundPosition: "140% 0",
+    backgroundSize: "220% 100%",
+    color: "transparent",
+    fontSize: "13px",
+    lineHeight: "20px",
     overflowWrap: "anywhere",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
   },
   passwordRevealHint: {
     color: "var(--text-dim)",
     fontSize: "12px",
     lineHeight: "20px",
-  },
-  passwordRevealActions: {
-    display: "flex",
-    gap: "12px",
-    marginTop: "8px",
-  },
-  passwordRevealButton: {
-    background: "transparent",
-    border: 0,
-    color: "var(--text-muted)",
-    cursor: "pointer",
-    fontFamily: ROOM_FONT_FAMILY,
-    fontSize: "12px",
-    lineHeight: "20px",
-    padding: 0,
   },
   systemMessageLine: {
     alignItems: "center",

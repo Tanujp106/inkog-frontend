@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import {
   completeDirectionTwoCommand,
+  completeDirectionTwoCommandArgument,
   completeDirectionTwoCreateField,
   directionTwoCommandReferenceLines,
   directionTwoThemes,
@@ -154,7 +155,7 @@ const themePreviewColorById: Record<DirectionTwoTheme["id"], string> = {
   green: "#c8ff57",
   purple: "#c792ff",
 };
-const slashMenuImmediateCommands = new Set(["/clear", "/command", "/commands"]);
+const slashMenuImmediateCommands = new Set(["/clear"]);
 
 type DirectionTwoShimmerSettings = {
   durationMs: number;
@@ -1069,8 +1070,6 @@ export function DirectionTwoShell() {
 
     if (
       parsedInlineCommand?.command === "help" ||
-      parsedInlineCommand?.command === "command" ||
-      parsedInlineCommand?.command === "commands" ||
       normalized === "?"
     ) {
       printHelp(command);
@@ -1204,6 +1203,7 @@ export function DirectionTwoShell() {
     if (event.key === "Tab" && !flow) {
       event.preventDefault();
       const commandCompletion = completeDirectionTwoCommand(inputValue);
+      const commandOptionCompletion = completeDirectionTwoCommandArgument(inputValue);
       const createFieldCompletion = completeDirectionTwoCreateField(inputValue);
 
       if (commandCompletion) {
@@ -1211,6 +1211,14 @@ export function DirectionTwoShell() {
         setInputFeedbackMessage(null);
         sound.play("press");
         setKeyboardStatus(`${commandCompletion.replace(/^\/+/, "")} autocompleted.`);
+        return;
+      }
+
+      if (commandOptionCompletion) {
+        setInputValue(commandOptionCompletion);
+        setInputFeedbackMessage(null);
+        sound.play("press");
+        setKeyboardStatus("Command option autocompleted.");
         return;
       }
 
