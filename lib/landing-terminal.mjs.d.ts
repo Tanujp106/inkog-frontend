@@ -21,6 +21,11 @@ export function parseLandingCommand(value: string):
   | { type: "unknown"; command: string }
   | { type: "empty" };
 
+export function getLandingSlashCommandSuggestions(query: string): Array<{
+  command: "/create" | "/join" | "/help" | "/cancel";
+  label: string;
+}>;
+
 export function getLandingInlineTemplate(session: LandingSession):
   | { prefix: string; placeholder: string; inputType: "text" | "password" }
   | null;
