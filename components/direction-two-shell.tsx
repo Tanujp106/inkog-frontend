@@ -1369,7 +1369,7 @@ export function DirectionTwoShell() {
           <div className="relative w-full shrink-0">
             <div
               ref={promptRowRef}
-              className={`direction-two-terminal-frame ${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 items-center text-[14px] leading-[24px] text-[var(--foreground)]`}
+              className={`direction-two-terminal-frame ${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col text-[14px] leading-[24px] text-[var(--foreground)]`}
               style={{
                 background: "color-mix(in srgb, var(--bg-2) 78%, transparent)",
                 border: "1px solid color-mix(in srgb, var(--border-light) 92%, var(--accent) 8%)",
@@ -1377,6 +1377,57 @@ export function DirectionTwoShell() {
                 padding: "10px 12px",
               }}
             >
+              {slashCommandSuggestions.length > 0 && (
+                <div
+                  aria-label="Slash command suggestions"
+                  className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 border-b border-[color-mix(in_srgb,var(--border-light)_82%,transparent)] pb-2 text-[14px] leading-[24px]"
+                  ref={slashMenuRef}
+                  role="listbox"
+                >
+                  {slashCommandSuggestions.map((item, index) => {
+                    const selected = slashSuggestionIndex === index;
+
+                    return (
+                      <button
+                        aria-label={`${item.command} ${item.label}`}
+                        aria-selected={selected}
+                        className={`group flex min-h-7 w-full items-center gap-3 rounded-[3px] px-2 py-1 text-left font-mono transition-colors duration-150 ${slashCommandHoverClass} ${
+                          selected ? "bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] text-[var(--color-signal)]" : "bg-transparent text-[var(--foreground)]"
+                        }`}
+                        key={item.command}
+                        onClick={event => {
+                          event.stopPropagation();
+                          handleSlashCommandSuggestionTap(item.command);
+                        }}
+                        onMouseEnter={() => {
+                          setSlashSelectionMode("pointer");
+                          setSlashSuggestionIndex(index);
+                          sound.play("hover");
+                        }}
+                        onMouseMove={() => {
+                          setSlashSelectionMode("pointer");
+                          setSlashSuggestionIndex(index);
+                        }}
+                        role="option"
+                        type="button"
+                      >
+                        <span aria-hidden="true" className="w-3 shrink-0 text-[var(--color-signal)]">
+                          {selected ? ">" : ""}
+                        </span>
+                        <span className="shrink-0">{item.command}</span>
+                        <span
+                          className={`min-w-0 flex-1 truncate text-right transition-colors duration-150 ${slashCommandLabelHoverClass} ${
+                            selected ? "text-[var(--color-signal)]/75" : "text-[var(--color-dim)]"
+                          }`}
+                        >
+                          {item.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="direction-two-terminal-input-row flex min-w-0 items-center">
               <label className="sr-only" htmlFor="terminal-command">{activePrompt}</label>
               <span
                 className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap ${
@@ -1540,58 +1591,8 @@ export function DirectionTwoShell() {
                   value={inputValue}
                 />
               </div>
-            </div>
-
-            {slashCommandSuggestions.length > 0 && (
-              <div
-                aria-label="Slash command suggestions"
-                className="direction-two-slash-menu absolute bottom-full left-0 z-20 mb-2 flex w-full max-w-[560px] flex-col gap-1 overflow-hidden text-[14px] leading-[24px]"
-                ref={slashMenuRef}
-                role="listbox"
-              >
-                {slashCommandSuggestions.map((item, index) => {
-                  const selected = slashSuggestionIndex === index;
-
-                  return (
-                    <button
-                      aria-label={`${item.command} ${item.label}`}
-                      aria-selected={selected}
-                      className={`group flex min-h-7 w-full items-center gap-3 rounded-[3px] px-2 py-1 text-left font-mono transition-colors duration-150 ${slashCommandHoverClass} ${
-                        selected ? "bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] text-[var(--color-signal)]" : "bg-transparent text-[var(--foreground)]"
-                      }`}
-                      key={item.command}
-                      onClick={event => {
-                        event.stopPropagation();
-                        handleSlashCommandSuggestionTap(item.command);
-                      }}
-                      onMouseEnter={() => {
-                        setSlashSelectionMode("pointer");
-                        setSlashSuggestionIndex(index);
-                        sound.play("hover");
-                      }}
-                      onMouseMove={() => {
-                        setSlashSelectionMode("pointer");
-                        setSlashSuggestionIndex(index);
-                      }}
-                      role="option"
-                      type="button"
-                    >
-                      <span aria-hidden="true" className="w-3 shrink-0 text-[var(--color-signal)]">
-                        {selected ? ">" : ""}
-                      </span>
-                      <span className="shrink-0">{item.command}</span>
-                      <span
-                        className={`min-w-0 flex-1 truncate text-right transition-colors duration-150 ${slashCommandLabelHoverClass} ${
-                          selected ? "text-[var(--color-signal)]/75" : "text-[var(--color-dim)]"
-                        }`}
-                      >
-                        {item.label}
-                      </span>
-                    </button>
-                  );
-                })}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </section>
