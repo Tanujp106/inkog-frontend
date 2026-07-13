@@ -1387,7 +1387,7 @@ export function DirectionTwoShell() {
               >
                 <div
                   aria-label="Slash command suggestions"
-                  className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 border-b border-[color-mix(in_srgb,var(--accent)_18%,transparent)] pb-2 text-[14px] leading-[24px]"
+                  className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 pb-2 text-[14px] leading-[24px]"
                   ref={slashMenuRef}
                   role="listbox"
                 >
@@ -1398,7 +1398,7 @@ export function DirectionTwoShell() {
                       <button
                         aria-label={`${item.command} ${item.label}`}
                         aria-selected={selected}
-                        className={`group flex min-h-7 w-full items-center gap-3 rounded-[3px] px-2 py-1 text-left font-mono transition-colors duration-150 ${slashCommandHoverClass} ${
+                        className={`group flex min-h-7 w-full items-center gap-2 rounded-[3px] px-2 py-1 text-left font-mono transition-colors duration-150 ${slashCommandHoverClass} ${
                           selected ? "bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] text-[var(--color-signal)]" : "bg-transparent text-[var(--foreground)]"
                         }`}
                         key={item.command}
@@ -1453,7 +1453,7 @@ export function DirectionTwoShell() {
                 )}
               </span>
               <div className="relative ml-2 min-w-0 flex-1">
-                <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden text-[14px] leading-[24px]">
+                <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[14px] leading-[24px]">
                 {!inputValue && !creating && (
                   <span aria-hidden="true" className="direction-two-visual-caret mr-px h-[22px] w-[2px] shrink-0 bg-[var(--foreground)]" />
                 )}

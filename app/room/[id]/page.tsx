@@ -953,6 +953,7 @@ export default function RoomPage() {
   const slashSuggestions = isRoomBooting || isPasswordGate ? [] : getRoomSlashCommandSuggestions({ isCreator, query: composerValue });
   const showSlashSuggestions = slashSuggestions.length > 0 && !pendingCommand;
   const composerExpanded = composerChrome.expanded;
+  const composerHasTopContent = passwordReveal || composerExpanded || showSlashSuggestions;
   const showComposerHint = showIdleCursor && !showSlashSuggestions && composerChrome.statusMode === "hidden";
   const gateTranscriptLines = isRoomBooting
     ? []
@@ -1066,7 +1067,8 @@ export default function RoomPage() {
         <div
           style={{
             ...styles.composerFrame,
-            minHeight: passwordReveal ? "76px" : composerExpanded ? "76px" : "56px",
+            minHeight: composerHasTopContent ? "76px" : "48px",
+            padding: composerHasTopContent ? "10px 12px" : "0 16px",
           }}
         >
           <div
@@ -1076,6 +1078,7 @@ export default function RoomPage() {
               maxHeight: showSlashSuggestions ? "220px" : "0px",
               opacity: showSlashSuggestions ? 1 : 0,
               marginBottom: showSlashSuggestions ? "6px" : "0px",
+              paddingBottom: showSlashSuggestions ? "8px" : "0px",
               pointerEvents: showSlashSuggestions ? "auto" : "none",
             }}
           >
@@ -1994,7 +1997,6 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "center",
     minHeight: "52px",
     overflow: "hidden",
-    padding: "10px 12px",
     transition: "min-height 200ms ease-out",
     width: "100%",
   },
@@ -2003,7 +2005,6 @@ const styles: Record<string, CSSProperties> = {
     transition: "max-height 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 140ms ease",
   },
   slashCommandMenu: {
-    borderBottom: "1px solid color-mix(in srgb, var(--accent) 18%, transparent)",
     display: "flex",
     flexDirection: "column",
     gap: "2px",
@@ -2024,7 +2025,7 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     fontFamily: ROOM_FONT_FAMILY,
     fontSize: "12px",
-    gap: "10px",
+    gap: "6px",
     lineHeight: "20px",
     minHeight: "24px",
     padding: "3px 8px",
@@ -2111,7 +2112,7 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: "24px",
     minWidth: 0,
     outline: "none",
-    padding: 0,
+    padding: "0 0 0 4px",
   },
   stateShell: {
     alignItems: "center",
