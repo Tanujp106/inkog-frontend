@@ -1986,7 +1986,7 @@ const styles: Record<string, CSSProperties> = {
   composerFrame: {
     backdropFilter: "blur(18px) saturate(1.22)",
     background: "linear-gradient(180deg, color-mix(in srgb, var(--bg) 70%, rgba(255, 255, 255, 0.035)) 0%, color-mix(in srgb, var(--bg-2) 62%, rgba(0, 0, 0, 0.32)) 100%)",
-    border: "1px solid color-mix(in srgb, var(--border-light) 72%, var(--accent) 28%)",
+    border: "1px solid color-mix(in srgb, var(--border-light) 92%, var(--accent) 8%)",
     borderRadius: 0,
     boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent)",
     boxSizing: "border-box",

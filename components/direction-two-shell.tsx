@@ -1366,13 +1366,13 @@ export function DirectionTwoShell() {
             </div>
           )}
 
-          <div className="relative w-full shrink-0 px-4 pb-4 sm:px-6 sm:pb-6">
+          <div className="relative w-full shrink-0">
             <div
               ref={promptRowRef}
               className={`direction-two-terminal-frame ${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 items-center text-[14px] leading-[24px] text-[var(--foreground)]`}
               style={{
                 background: "color-mix(in srgb, var(--bg-2) 78%, transparent)",
-                border: "1px solid color-mix(in srgb, var(--border-light) 72%, var(--accent) 28%)",
+                border: "1px solid color-mix(in srgb, var(--border-light) 92%, var(--accent) 8%)",
                 borderRadius: 0,
                 padding: "10px 12px",
               }}
