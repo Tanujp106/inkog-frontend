@@ -1371,16 +1371,24 @@ export function DirectionTwoShell() {
               ref={promptRowRef}
               className={`direction-two-terminal-frame ${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col text-[14px] leading-[24px] text-[var(--foreground)]`}
               style={{
-                background: "color-mix(in srgb, var(--bg-2) 78%, transparent)",
+                background: "color-mix(in srgb, var(--accent) 8%, var(--bg) 92%)",
                 border: "1px solid color-mix(in srgb, var(--border-light) 92%, var(--accent) 8%)",
                 borderRadius: 0,
                 padding: "10px 12px",
               }}
             >
-              {slashCommandSuggestions.length > 0 && (
+              <div
+                aria-hidden={slashCommandSuggestions.length === 0}
+                className="overflow-hidden transition-[max-height,opacity] duration-200 ease-out motion-reduce:transition-none"
+                style={{
+                  maxHeight: slashCommandSuggestions.length > 0 ? "240px" : "0px",
+                  opacity: slashCommandSuggestions.length > 0 ? 1 : 0,
+                  pointerEvents: slashCommandSuggestions.length > 0 ? "auto" : "none",
+                }}
+              >
                 <div
                   aria-label="Slash command suggestions"
-                  className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 border-b border-[color-mix(in_srgb,var(--border-light)_82%,transparent)] pb-2 text-[14px] leading-[24px]"
+                  className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 border-b border-[color-mix(in_srgb,var(--accent)_18%,transparent)] pb-2 text-[14px] leading-[24px]"
                   ref={slashMenuRef}
                   role="listbox"
                 >
@@ -1426,7 +1434,7 @@ export function DirectionTwoShell() {
                     );
                   })}
                 </div>
-              )}
+              </div>
               <div className="direction-two-terminal-input-row flex min-w-0 items-center">
               <label className="sr-only" htmlFor="terminal-command">{activePrompt}</label>
               <span
