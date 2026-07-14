@@ -27,10 +27,7 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000) with your browser to see the
 
 The dev and start scripts are locked to `127.0.0.1:3000` for the frontend and `127.0.0.1:3001` for the backend. If either port is busy, the command now fails with a clear error instead of silently creating a new port or shifting to another port.
 
-Use [http://127.0.0.1:3000/playground](http://127.0.0.1:3000/playground) to compare the two supported UI directions:
-
-- Direction 1 mirrors the live homepage flow.
-- Direction 2 shows the alternate shell-based entry flow.
+The homepage is the Direction 2 shell-based entry flow.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
