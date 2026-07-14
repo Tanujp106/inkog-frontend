@@ -49,7 +49,6 @@ export function NotFoundBreakout() {
   const pointerActiveRef = useRef(false);
   const prefersReducedMotionRef = useRef(false);
   const [hud, setHud] = useState(() => pickHud(gameRef.current));
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const { play } = useSystemSound();
 
   const renderCurrentGame = useCallback(() => {
@@ -93,18 +92,25 @@ export function NotFoundBreakout() {
 
   const advanceGame = useCallback(
     (seconds: number) => {
-      const keyboard = keyboardRef.current;
-      const direction = Number(keyboard.right) - Number(keyboard.left);
       let nextState = gameRef.current;
 
-      if (direction !== 0) {
-        nextState = movePaddle(nextState, direction, seconds, keyboard.shift);
+      if (nextState.mode === "running") {
+        const keyboard = keyboardRef.current;
+        const direction = Number(keyboard.right) - Number(keyboard.left);
+
+        if (direction !== 0) {
+          nextState = movePaddle(nextState, direction, seconds, keyboard.shift);
+        }
+
+        nextState = stepBreakout(nextState, seconds);
+        setGame(nextState);
       }
 
-      nextState = stepBreakout(nextState, seconds);
-      setGame(nextState);
-
-      if (nextState.mode === "cleared" && !prefersReducedMotionRef.current) {
+      if (
+        nextState.mode === "cleared"
+        && !prefersReducedMotionRef.current
+        && confettiRef.current.length > 0
+      ) {
         confettiRef.current = stepBreakoutConfetti(
           confettiRef.current,
           seconds,
@@ -129,13 +135,22 @@ export function NotFoundBreakout() {
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const syncPreference = () => {
       prefersReducedMotionRef.current = mediaQuery.matches;
-      setPrefersReducedMotion(mediaQuery.matches);
+
+      if (mediaQuery.matches && gameRef.current.mode === "cleared") {
+        const state = gameRef.current;
+        confettiRef.current = spreadStaticConfetti(
+          createBreakoutConfetti(state.width, state.height),
+          state.height,
+        );
+      }
+
+      renderCurrentGame();
     };
 
     syncPreference();
     mediaQuery.addEventListener("change", syncPreference);
     return () => mediaQuery.removeEventListener("change", syncPreference);
-  }, []);
+  }, [renderCurrentGame]);
 
   useEffect(() => {
     const arena = arenaRef.current;
@@ -143,12 +158,11 @@ export function NotFoundBreakout() {
     if (!arena || !canvas) return;
 
     const syncArena = () => {
-      const bounds = arena.getBoundingClientRect();
-      if (bounds.width <= 0 || bounds.height <= 0) return;
+      const width = arena.clientWidth;
+      const height = arena.clientHeight;
+      if (width <= 0 || height <= 0) return;
 
       const previousState = gameRef.current;
-      const width = bounds.width;
-      const height = bounds.height;
 
       if (previousState.width !== width || previousState.height !== height) {
         if (previousState.mode === "cleared" && confettiRef.current.length > 0) {
@@ -189,11 +203,30 @@ export function NotFoundBreakout() {
   }, [renderCurrentGame, setGame]);
 
   useEffect(() => {
+    const themeObserver = new MutationObserver(renderCurrentGame);
+    themeObserver.observe(document.documentElement, {
+      attributeFilter: ["data-inkog-theme"],
+      attributes: true,
+    });
+
+    return () => themeObserver.disconnect();
+  }, [renderCurrentGame]);
+
+  useEffect(() => {
     let animationFrame = 0;
     let previousTimestamp = window.performance.now();
 
     const tick = (timestamp: number) => {
-      if (!document.hidden) {
+      const shouldAnimateFrame = !document.hidden && (
+        gameRef.current.mode === "running"
+        || (
+          gameRef.current.mode === "cleared"
+          && !prefersReducedMotionRef.current
+          && confettiRef.current.length > 0
+        )
+      );
+
+      if (shouldAnimateFrame) {
         const deltaSeconds = Math.min(Math.max((timestamp - previousTimestamp) / 1000, 0), 1 / 20);
         advanceGame(deltaSeconds);
       }
@@ -338,26 +371,39 @@ export function NotFoundBreakout() {
   }, []);
 
   return (
-    <section
-      ref={arenaRef}
-      aria-describedby={hud.mode === "cleared" ? undefined : "not-found-breakout-controls"}
-      className="not-found-breakout"
-    >
-      {!prefersReducedMotion && (
-        <AmbientShaderBackground className="not-found-breakout-ambient" opacity={0.3} style={{ zIndex: 0 }} />
-      )}
+    <section ref={arenaRef} className="not-found-breakout">
+      <AmbientShaderBackground className="not-found-breakout-ambient" opacity={0.3} style={{ zIndex: 0 }} />
+
+      <p
+        aria-live="polite"
+        className={hud.mode === "cleared" ? "sr-only" : "not-found-breakout-status"}
+        id="not-found-breakout-status"
+      >
+        {getStatusLabel(hud.mode)}
+      </p>
 
       <canvas
         ref={canvasRef}
+        aria-describedby="not-found-breakout-status not-found-breakout-controls"
+        aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight R Enter Space"
         aria-label={`Breakout game with a destructible pixel 404, a ball, a paddle, and ${hud.lives} lives remaining`}
         className="not-found-breakout-canvas"
         onPointerCancel={handlePointerUp}
         onPointerDown={handlePointerDown}
         onPointerMove={movePaddleFromPointer}
         onPointerUp={handlePointerUp}
-        role="img"
+        role="application"
         tabIndex={0}
       />
+
+      <p
+        className={hud.mode === "cleared" ? "sr-only" : "not-found-breakout-controls"}
+        id="not-found-breakout-controls"
+      >
+        {hud.mode === "cleared"
+          ? "Use restart or back to home."
+          : "← / → move · SHIFT + ← / → faster · R restart"}
+      </p>
 
       {hud.mode === "cleared" ? (
         <div className="not-found-breakout-clear-actions">
@@ -368,10 +414,6 @@ export function NotFoundBreakout() {
         </div>
       ) : (
         <>
-          <p className="not-found-breakout-status" aria-live="polite">
-            {getStatusLabel(hud.mode)}
-          </p>
-
           <p className="not-found-breakout-lives" aria-label={`${hud.lives} lives remaining`}>
             <span>lives</span>
             <span className="not-found-breakout-life-marks" aria-hidden="true">
@@ -379,10 +421,6 @@ export function NotFoundBreakout() {
                 <span data-active={life < hud.lives} key={life} />
               ))}
             </span>
-          </p>
-
-          <p className="not-found-breakout-controls" id="not-found-breakout-controls">
-            ← / → move · SHIFT + ← / → faster · R restart
           </p>
 
           <Link className="not-found-breakout-home" href="/">
@@ -400,6 +438,7 @@ function pickHud(state: BreakoutState) {
 
 function getStatusLabel(mode: BreakoutMode) {
   if (mode === "waiting") return "press any key to continue";
+  if (mode === "cleared") return "404 cleared. Restart or go back to home.";
   if (mode === "running") return "\u00a0";
   return "press any key to start";
 }
