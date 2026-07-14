@@ -32,7 +32,15 @@ export type SystemSoundName =
   | "error"
   | "close"
   | "incoming"
-  | "notify";
+  | "notify"
+  | "breakoutLaunch"
+  | "breakoutWall"
+  | "breakoutPaddle"
+  | "breakoutBrickA"
+  | "breakoutBrickB"
+  | "breakoutBrickC"
+  | "breakoutMiss"
+  | "breakoutClear";
 
 type SystemSoundStatus = "locked" | "ready" | "muted" | "unsupported";
 
