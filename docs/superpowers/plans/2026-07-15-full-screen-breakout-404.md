@@ -70,7 +70,19 @@ test("ordinary keys launch while R and modifiers stay reserved", () => {
 });
 
 test("brick hits emit and increase capped speed", () => {
-  const result = stepBreakout(makeSingleBrickCollisionState(), 1 / 60);
+  const running = launchBreakout(createInitialBreakoutState());
+  const target = running.bricks[0];
+  const collision = {
+    ...running,
+    ball: {
+      ...running.ball,
+      x: target.x + target.width / 2,
+      y: target.y + target.height + running.ball.radius - 1,
+      vx: 0,
+      vy: -260,
+    },
+  };
+  const result = stepBreakout(collision, 1 / 60);
   assert.ok(result.events.some(event => /^brick[ABC]$/.test(event)));
   assert.ok(result.speedMultiplier > 1 && result.speedMultiplier <= 1.7);
 });
@@ -88,7 +100,8 @@ Use hand-authored 9x13 patterns and stable IDs. Initialize speedMultiplier: 1 an
 
 ~~~js
 export function shouldLaunchBreakoutForKey(key) {
-  return !["r", "shift", "control", "alt", "meta"].includes(key.toLowerCase());
+  if ([" ", "Enter", "ArrowLeft", "ArrowRight"].includes(key)) return true;
+  return /^[a-z0-9]$/i.test(key) && key.toLowerCase() !== "r";
 }
 
 export function resizeBreakout(state, width, height) {
@@ -97,7 +110,19 @@ export function resizeBreakout(state, width, height) {
     ...brick,
     isActive: activeById.get(brick.id) ?? brick.isActive,
   }));
-  return { ...state, width, height, bricks, paddle: nextPaddle, ball: nextBall, events: [] };
+  const scaleX = width / state.width;
+  const scaleY = height / state.height;
+  const paddle = {
+    ...state.paddle,
+    x: Math.min(Math.max(state.paddle.x * scaleX, state.paddle.width / 2), width - state.paddle.width / 2),
+    y: height - Math.max(44, height * 0.085),
+  };
+  const ball = {
+    ...state.ball,
+    x: Math.min(Math.max(state.ball.x * scaleX, state.ball.radius), width - state.ball.radius),
+    y: Math.min(Math.max(state.ball.y * scaleY, state.ball.radius), height - state.ball.radius),
+  };
+  return { ...state, width, height, bricks, paddle, ball, events: [] };
 }
 ~~~
 
@@ -237,7 +262,8 @@ assert.match(game, /useSystemSound/);
 assert.match(game, /createBreakoutConfetti/);
 assert.match(game, />restart</i);
 assert.match(styles, /border-bottom: 1px solid/);
-assert.doesNotMatch(styles, /not-found-page[\s\S]*linear-gradient/);
+assert.doesNotMatch(styles, /linear-gradient\(rgba\(255, 255, 255, 0\.022\)/);
+assert.doesNotMatch(styles, /background-size: 20px 20px/);
 assert.doesNotMatch(styles, /\.not-found-breakout-frame/);
 assert.doesNotMatch(game, /for \(let x = 20\.5/);
 ~~~
