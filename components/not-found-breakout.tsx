@@ -5,12 +5,14 @@ import { PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useS
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import {
+  clientXToBreakoutX,
   createInitialBreakoutState,
   launchBreakout,
   movePaddle,
   resizeBreakout,
   restartBreakout,
   setPaddleFromPointer,
+  shouldHandleBreakoutPointer,
   shouldLaunchBreakoutForKey,
   stepBreakout,
 } from "@/lib/not-found-breakout.mjs";
@@ -344,9 +346,9 @@ export function NotFoundBreakout() {
 
   const movePaddleFromPointer = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
-      if (event.pointerType !== "mouse" && !pointerActiveRef.current) return;
+      if (!shouldHandleBreakoutPointer(event.pointerType, pointerActiveRef.current)) return;
       const bounds = event.currentTarget.getBoundingClientRect();
-      const gameX = ((event.clientX - bounds.left) / bounds.width) * gameRef.current.width;
+      const gameX = clientXToBreakoutX(event.clientX, bounds, gameRef.current.width);
       setGame(setPaddleFromPointer(gameRef.current, gameX));
       renderCurrentGame();
     },

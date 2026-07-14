@@ -714,10 +714,14 @@ input::placeholder, textarea::placeholder {
 .not-found-brand:focus-visible,
 .not-found-breakout-home:focus-visible,
 .not-found-breakout-clear-actions a:focus-visible,
-.not-found-breakout-clear-actions button:focus-visible,
-.not-found-breakout-canvas:focus-visible {
+.not-found-breakout-clear-actions button:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 5px;
+}
+
+.not-found-breakout-canvas:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -3px;
 }
 
 .not-found-breakout {
