@@ -5,11 +5,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
-import { AmbientShaderBackground } from "@/components/ambient-shader-background";
+import { useRouteTransition } from "@/components/route-transition-provider";
 import {
   buildRoomGateTranscriptLines,
   buildRoomPeerColorMap,
   classifyRoomMessage,
+  isRoomReadyForHandoff,
   resolveRoomStageAfterAuthenticatedJoin,
 } from "@/lib/room-chat-ui.mjs";
 import { getRoomComposerChrome, getRoomSlashCommandSuggestions } from "@/lib/room-composer-ui.mjs";
@@ -17,7 +18,8 @@ import {
   applyInkogTheme,
   inkogThemeChoices,
 } from "@/lib/inkog-theme.mjs";
-import { roomAmbientShaderOpacity, roomThemeBackground } from "@/lib/room-background.mjs";
+import { roomThemeBackground } from "@/lib/room-background.mjs";
+import { routeComposerGeometry } from "@/lib/route-transition.mjs";
 import { getRoomRoster, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
 import { getRoomCountdownNotification } from "@/lib/room-notifications.mjs";
 import {
@@ -131,6 +133,12 @@ export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const sound = useSystemSound();
+  const {
+    activeRoomId,
+    cancelRoomHandoff,
+    handoffPending,
+    reportRoomReady,
+  } = useRouteTransition();
   const roomId = params.id as string;
 
   const [stage, setStage] = useState<Stage>("loading");
@@ -156,6 +164,8 @@ export default function RoomPage() {
   const [pendingCommand, setPendingCommand] = useState<PendingComposerCommand>(null);
   const [passwordReveal, setPasswordReveal] = useState<PasswordReveal | null>(null);
   const [slashSuggestionIndex, setSlashSuggestionIndex] = useState(0);
+  const [historyHydrated, setHistoryHydrated] = useState(false);
+  const [socketJoined, setSocketJoined] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
@@ -165,6 +175,16 @@ export default function RoomPage() {
   const previousSecondsLeftRef = useRef<number | null>(null);
   const pendingPollRequestRef = useRef<ReturnType<typeof createPendingRoomPollRequest> | null>(null);
   const ttlTotalSecondsRef = useRef(0);
+
+  const focusComposer = () => {
+    requestAnimationFrame(() => {
+      const input = composerRef.current;
+      if (!input) return;
+
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  };
 
   useEffect(() => {
     soundRef.current = sound;
@@ -240,8 +260,9 @@ export default function RoomPage() {
   }, [transcript]);
 
   useEffect(() => {
-    if (stage === "joined" || stage === "password") requestAnimationFrame(() => composerRef.current?.focus());
-  }, [stage]);
+    const transitionOwnsFocus = handoffPending && activeRoomId === roomId;
+    if ((stage === "joined" || stage === "password") && !transitionOwnsFocus) focusComposer();
+  }, [activeRoomId, handoffPending, roomId, stage]);
 
   useEffect(() => {
     if (stage !== "joined") {
@@ -307,6 +328,7 @@ export default function RoomPage() {
         createdAt: new Date().toISOString(),
         isSystem: true,
       }]);
+      setSocketJoined(true);
       onReady();
     });
 
@@ -433,6 +455,7 @@ export default function RoomPage() {
     setIsCreator(joinData.isCreator);
     if (options.fromPasswordGate) setPasswordGateUnlocked(true);
     await fetchHistory(joinData.anonToken);
+    setHistoryHydrated(true);
     setStage(resolveRoomStageAfterAuthenticatedJoin());
     connectSocket(joinData.anonToken, joinData.alias, () => undefined);
   };
@@ -443,6 +466,8 @@ export default function RoomPage() {
     const run = async () => {
       setPasswordError("");
       setPasswordGateUnlocked(false);
+      setHistoryHydrated(false);
+      setSocketJoined(false);
 
       try {
         const roomRes = await fetch(`${API}/rooms/${roomId}`);
@@ -511,6 +536,26 @@ export default function RoomPage() {
   // roomId is the only stable route dependency; socket helpers close over current room state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
+
+  const roomReadyForHandoff = isRoomReadyForHandoff({
+    stage,
+    historyHydrated,
+    socketJoined,
+    passwordGate: stage === "password",
+  });
+
+  useEffect(() => {
+    if (activeRoomId !== roomId) return;
+
+    if (roomReadyForHandoff) {
+      reportRoomReady(roomId, composerRef.current);
+      return;
+    }
+
+    if (stage === "password" || stage === "expired" || stage === "error") {
+      cancelRoomHandoff(roomId);
+    }
+  }, [activeRoomId, cancelRoomHandoff, reportRoomReady, roomId, roomReadyForHandoff, stage]);
 
   const handlePasswordSubmit = async (passwordValue: string) => {
     const nextPassword = passwordValue.trim();
@@ -757,7 +802,7 @@ export default function RoomPage() {
     if (command === "/sound") {
       sound.play("press");
       setComposerValue("/sound ");
-      requestAnimationFrame(() => composerRef.current?.focus());
+      focusComposer();
       return;
     }
 
@@ -1001,7 +1046,6 @@ export default function RoomPage() {
 
   return (
     <main style={styles.roomShell} onClick={() => composerRef.current?.focus()}>
-      <AmbientShaderBackground opacity={roomAmbientShaderOpacity} style={{ mixBlendMode: "screen", zIndex: 0 }} />
       <header style={styles.roomHeader}>
         <div style={styles.headerIdentity}>
           <span style={styles.brand}>inkog</span>
@@ -1065,10 +1109,11 @@ export default function RoomPage() {
         style={styles.composer}
       >
         <div
+          data-route-composer="room"
           style={{
             ...styles.composerFrame,
-            minHeight: composerHasTopContent ? "76px" : "48px",
-            padding: composerHasTopContent ? "10px 12px" : "0 16px",
+            minHeight: composerHasTopContent ? "76px" : "58px",
+            padding: composerHasTopContent ? "10px 12px" : routeComposerGeometry.framePadding,
           }}
         >
           <div
@@ -1088,6 +1133,7 @@ export default function RoomPage() {
               return (
                 <button
                   key={item.command}
+                  onPointerDown={event => event.preventDefault()}
                   onClick={() => runSlashSuggestion(item.command)}
                   onMouseEnter={() => {
                     setSlashSuggestionIndex(index);
@@ -1327,7 +1373,6 @@ function TerminalState({
 
   return (
     <main style={styles.stateShell}>
-      <AmbientShaderBackground opacity={roomAmbientShaderOpacity} style={{ mixBlendMode: "screen", zIndex: 0 }} />
       <section style={styles.statePanel}>
         <h1 style={styles.stateTitle}>{title}</h1>
         <p style={styles.mutedLine}>{copy}</p>
@@ -1622,7 +1667,7 @@ function TerminalPoll({
 
 const styles: Record<string, CSSProperties> = {
   roomShell: {
-    backgroundColor: roomThemeBackground.baseColor,
+    backgroundColor: "transparent",
     backgroundImage: roomThemeBackground.background,
     backgroundBlendMode: roomThemeBackground.blendMode as CSSProperties["backgroundBlendMode"],
     color: "var(--text)",
@@ -1979,15 +2024,16 @@ const styles: Record<string, CSSProperties> = {
     margin: "18px 0 0",
   },
   composer: {
+    alignItems: "center",
     display: "flex",
     flexDirection: "column",
     flexShrink: 0,
-    padding: "0 clamp(16px, 3vw, 32px) 16px",
+    padding: `0 ${routeComposerGeometry.horizontalPadding} ${routeComposerGeometry.bottomPadding}`,
     position: "relative",
     zIndex: 1,
   },
   composerFrame: {
-    background: "color-mix(in srgb, var(--accent) 8%, var(--bg) 92%)",
+    background: "transparent",
     border: "1px solid color-mix(in srgb, var(--border-light) 92%, var(--accent) 8%)",
     borderRadius: 0,
     boxSizing: "border-box",
@@ -1995,7 +2041,8 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: "column",
     gap: 0,
     justifyContent: "center",
-    minHeight: "52px",
+    maxWidth: routeComposerGeometry.maxWidth,
+    minHeight: "58px",
     overflow: "hidden",
     transition: "min-height 200ms ease-out",
     width: "100%",
@@ -2054,7 +2101,7 @@ const styles: Record<string, CSSProperties> = {
   composerRow: {
     alignItems: "center",
     display: "flex",
-    gap: "10px",
+    gap: "8px",
     minHeight: "24px",
     width: "100%",
   },

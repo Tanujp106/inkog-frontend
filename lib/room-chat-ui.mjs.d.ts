@@ -23,3 +23,10 @@ export function buildRoomGateTranscriptLines(input: {
 }): string[];
 
 export function resolveRoomStageAfterAuthenticatedJoin(): "joined";
+
+export function isRoomReadyForHandoff(input: {
+  stage: "loading" | "password" | "joined" | "expired" | "error";
+  historyHydrated: boolean;
+  socketJoined: boolean;
+  passwordGate: boolean;
+}): boolean;

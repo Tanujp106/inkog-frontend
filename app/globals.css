@@ -1,6 +1,56 @@
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap');
 @import "tailwindcss";
 
+.route-transition-root {
+  --route-composer-bottom-padding: 32px;
+  background: var(--background, var(--bg));
+  isolation: isolate;
+  min-height: 100dvh;
+  position: relative;
+}
+
+@media (min-width: 640px) {
+  .route-transition-root {
+    --route-composer-bottom-padding: 52px;
+  }
+}
+
+.route-transition-layer {
+  min-height: 100dvh;
+  position: relative;
+  transition-property: opacity, transform;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 1;
+}
+
+.route-transition-destination,
+.route-transition-outgoing {
+  inset: 0;
+  position: fixed;
+}
+
+.route-transition-outgoing,
+.route-transition-destination {
+  overflow: auto;
+}
+
+.route-transition-outgoing [data-route-composer],
+.route-transition-destination [data-route-composer] {
+  visibility: hidden;
+}
+
+.route-transition-composer-snapshot {
+  pointer-events: none;
+  position: fixed;
+  z-index: 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-transition-layer {
+    transform: none !important;
+  }
+}
+
 @font-face {
   font-family: "Departure Mono";
   src: url("/fonts/DepartureMono-Regular.woff2") format("woff2");
@@ -924,4 +974,60 @@ input::placeholder, textarea::placeholder {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+@keyframes direction-two-password-reveal {
+  0% {
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
+  }
+
+  45% {
+    filter: brightness(1.22);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--color-signal) 58%, transparent);
+  }
+
+  100% {
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
+  }
+}
+
+.direction-two-password-reveal {
+  animation: direction-two-password-reveal 120ms ease-out both;
+}
+
+@keyframes direction-two-password-complete-shimmer {
+  0% {
+    background-position: 120% 0;
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
+  }
+
+  55% {
+    filter: brightness(1.12);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--color-signal) 42%, transparent);
+  }
+
+  100% {
+    background-position: -120% 0;
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
+  }
+}
+
+.direction-two-password-complete-shimmer {
+  color: transparent;
+  background-image: linear-gradient(
+    100deg,
+    var(--foreground) 34%,
+    var(--color-signal) 46%,
+    color-mix(in srgb, var(--foreground) 92%, white) 50%,
+    var(--color-signal) 54%,
+    var(--foreground) 66%
+  );
+  background-position: 120% 0;
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: direction-two-password-complete-shimmer 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }

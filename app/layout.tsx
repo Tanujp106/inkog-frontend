@@ -6,6 +6,7 @@ import { SystemSoundProvider } from "@/lib/system-sound-provider";
 import { buildInkogFaviconHref } from "@/lib/inkog-favicon.mjs";
 import { getSiteEntityJsonLd, siteUrl } from "@/lib/site-seo.mjs";
 import { ThemeFavicon } from "./theme-favicon";
+import { RouteTransitionProvider } from "@/components/route-transition-provider";
 
 export const metadata: Metadata = {
   metadataBase: siteUrl,
@@ -60,7 +61,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
         <SystemSoundProvider>
           <ThemeFavicon />
-          {children}
+          <RouteTransitionProvider>
+            {children}
+          </RouteTransitionProvider>
           {process.env.NODE_ENV === "development" && <InterfaceKit />}
           <AgentationProvider />
         </SystemSoundProvider>
