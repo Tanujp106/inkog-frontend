@@ -473,6 +473,16 @@ function drawGame(
 
   context.save();
   context.fillStyle = accent;
+  context.globalAlpha = 0.08;
+  context.shadowBlur = 0;
+  for (const brick of state.bricks) {
+    if (brick.isActive) continue;
+    context.fillRect(brick.x, brick.y, brick.width, brick.height);
+  }
+  context.restore();
+
+  context.save();
+  context.fillStyle = accent;
   context.shadowBlur = 10;
   context.shadowColor = accent;
   for (const brick of state.bricks) {
