@@ -17,6 +17,7 @@ import {
   stepBreakout,
 } from "@/lib/not-found-breakout.mjs";
 import { createBreakoutConfetti, stepBreakoutConfetti } from "@/lib/not-found-confetti.mjs";
+import { getBreakoutIdleBallOffset } from "@/lib/not-found-breakout-render.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const soundByEvent = {
@@ -50,10 +51,11 @@ export function NotFoundBreakout() {
   const keyboardRef = useRef({ left: false, right: false, shift: false });
   const pointerActiveRef = useRef(false);
   const prefersReducedMotionRef = useRef(false);
+  const idleAnimationStartedAtRef = useRef(0);
   const [hud, setHud] = useState(() => pickHud(gameRef.current));
   const { play } = useSystemSound();
 
-  const renderCurrentGame = useCallback(() => {
+  const renderCurrentGame = useCallback((idleBallOffset = 0) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -62,12 +64,22 @@ export function NotFoundBreakout() {
       gameRef.current,
       confettiRef.current,
       prefersReducedMotionRef.current,
+      idleBallOffset,
     );
   }, []);
 
   const setGame = useCallback(
     (nextState: BreakoutState) => {
       const previousMode = gameRef.current.mode;
+
+      if (
+        (nextState.mode === "idle" || nextState.mode === "waiting")
+        && nextState.mode !== previousMode
+      ) {
+        idleAnimationStartedAtRef.current = window.performance.now();
+      } else if (nextState.mode === "running" || nextState.mode === "cleared") {
+        idleAnimationStartedAtRef.current = 0;
+      }
 
       if (nextState.mode === "cleared" && previousMode !== "cleared") {
         const particles = createBreakoutConfetti(nextState.width, nextState.height);
@@ -138,6 +150,13 @@ export function NotFoundBreakout() {
     const syncPreference = () => {
       prefersReducedMotionRef.current = mediaQuery.matches;
 
+      if (
+        !mediaQuery.matches
+        && (gameRef.current.mode === "idle" || gameRef.current.mode === "waiting")
+      ) {
+        idleAnimationStartedAtRef.current = window.performance.now();
+      }
+
       if (mediaQuery.matches && gameRef.current.mode === "cleared") {
         const state = gameRef.current;
         confettiRef.current = spreadStaticConfetti(
@@ -205,7 +224,7 @@ export function NotFoundBreakout() {
   }, [renderCurrentGame, setGame]);
 
   useEffect(() => {
-    const themeObserver = new MutationObserver(renderCurrentGame);
+    const themeObserver = new MutationObserver(() => renderCurrentGame());
     themeObserver.observe(document.documentElement, {
       attributeFilter: ["data-inkog-theme"],
       attributes: true,
@@ -219,18 +238,32 @@ export function NotFoundBreakout() {
     let previousTimestamp = window.performance.now();
 
     const tick = (timestamp: number) => {
+      const mode = gameRef.current.mode;
       const shouldAnimateFrame = !document.hidden && (
-        gameRef.current.mode === "running"
+        mode === "running"
         || (
-          gameRef.current.mode === "cleared"
+          mode === "cleared"
           && !prefersReducedMotionRef.current
           && confettiRef.current.length > 0
         )
       );
+      const shouldAnimateIdle = !document.hidden
+        && !prefersReducedMotionRef.current
+        && (mode === "idle" || mode === "waiting");
 
       if (shouldAnimateFrame) {
         const deltaSeconds = Math.min(Math.max((timestamp - previousTimestamp) / 1000, 0), 1 / 20);
         advanceGame(deltaSeconds);
+      } else if (shouldAnimateIdle) {
+        if (idleAnimationStartedAtRef.current === 0) {
+          idleAnimationStartedAtRef.current = timestamp;
+        }
+        const idleBallOffset = getBreakoutIdleBallOffset(
+          timestamp - idleAnimationStartedAtRef.current,
+          mode,
+          false,
+        );
+        renderCurrentGame(idleBallOffset);
       }
       previousTimestamp = timestamp;
       animationFrame = window.requestAnimationFrame(tick);
@@ -247,7 +280,7 @@ export function NotFoundBreakout() {
       window.cancelAnimationFrame(animationFrame);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [advanceGame]);
+  }, [advanceGame, renderCurrentGame]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -457,6 +490,7 @@ function drawGame(
   state: BreakoutState,
   confetti: BreakoutConfetti,
   isStaticConfetti: boolean,
+  idleBallOffset = 0,
 ) {
   const context = canvas.getContext("2d");
   if (!context) return;
@@ -506,7 +540,7 @@ function drawGame(
     context.shadowBlur = 12;
     context.shadowColor = accent;
     context.beginPath();
-    context.arc(state.ball.x, state.ball.y, state.ball.radius, 0, Math.PI * 2);
+    context.arc(state.ball.x, state.ball.y + idleBallOffset, state.ball.radius, 0, Math.PI * 2);
     context.fill();
     context.restore();
   }

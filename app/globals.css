@@ -725,43 +725,6 @@ input::placeholder, textarea::placeholder {
   z-index: 1;
 }
 
-.not-found-header {
-  align-items: center;
-  border-bottom: 1px solid var(--border-light);
-  box-sizing: border-box;
-  display: flex;
-  flex: 0 0 auto;
-  min-height: 64px;
-  padding:
-    max(12px, env(safe-area-inset-top))
-    max(20px, env(safe-area-inset-right))
-    12px
-    max(20px, env(safe-area-inset-left));
-  position: relative;
-  width: 100%;
-  z-index: 2;
-}
-
-.not-found-brand {
-  align-items: center;
-  color: var(--text);
-  display: inline-flex;
-  font-family: Syne, sans-serif;
-  font-size: 20px;
-  font-weight: 800;
-  gap: 8px;
-  text-decoration: none;
-}
-
-.not-found-brand span {
-  background: var(--accent);
-  border-radius: 1px;
-  display: inline-block;
-  height: 6px;
-  width: 6px;
-}
-
-.not-found-brand:focus-visible,
 .not-found-breakout-home:focus-visible,
 .not-found-breakout-clear-actions a:focus-visible,
 .not-found-breakout-clear-actions button:focus-visible {
@@ -918,12 +881,6 @@ input::placeholder, textarea::placeholder {
 }
 
 @media (max-width: 560px) {
-  .not-found-header {
-    min-height: 58px;
-    padding-right: max(16px, env(safe-area-inset-right));
-    padding-left: max(16px, env(safe-area-inset-left));
-  }
-
   .not-found-breakout-status {
     font-size: 10px;
     top: 14px;
