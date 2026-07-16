@@ -141,6 +141,7 @@ export function NotFoundBreakout() {
   const handleRestart = useCallback(() => {
     keyboardRef.current = { left: false, right: false, shift: false };
     pointerActiveRef.current = false;
+    idleAnimationStartedAtRef.current = window.performance.now();
     setGame(restartBreakout(gameRef.current));
     renderCurrentGame();
   }, [renderCurrentGame, setGame]);
