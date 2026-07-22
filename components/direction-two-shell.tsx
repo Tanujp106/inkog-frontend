@@ -2,6 +2,7 @@
 
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useDialKit, type DialConfig } from "dialkit";
 
 import { useRouteTransition } from "@/components/route-transition-provider";
 import {
@@ -171,6 +172,14 @@ type DirectionTwoShimmerSettings = {
   titleHaloRadius: number;
   titleSignalOpacity: number;
   titleHaloOpacity: number;
+  easingX1: number;
+  easingY1: number;
+  easingX2: number;
+  easingY2: number;
+  titleEasingX1: number;
+  titleEasingY1: number;
+  titleEasingX2: number;
+  titleEasingY2: number;
 };
 
 const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
@@ -199,7 +208,54 @@ const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
   titleHaloRadius: 16,
   titleSignalOpacity: 58,
   titleHaloOpacity: 64,
+  easingX1: 0.34,
+  easingY1: 0.8,
+  easingX2: 0.26,
+  easingY2: 1,
+  titleEasingX1: 0.28,
+  titleEasingY1: 0.72,
+  titleEasingX2: 0.18,
+  titleEasingY2: 1,
 };
+
+const directionTwoIconDialConfig = {
+  durationMs: [1040, 200, 3000],
+  delayMaxMs: [120, 0, 600],
+  transitionMs: [360, 0, 1500],
+  burstTailMs: [120, 0, 600],
+  idleOpacity: [1, 0, 1],
+  peakOpacity: [1, 0, 1],
+  settleOpacity: [1, 0, 1],
+  idleBrightness: [1, 0.5, 2],
+  peakBrightness: [1.16, 0.5, 3],
+  settleBrightness: [1, 0.5, 2],
+  signalRadius: [4, 0, 32],
+  haloRadius: [11, 0, 48],
+  signalOpacity: [38, 0, 100],
+  haloOpacity: [46, 0, 100],
+  colorMixPercent: [38, 0, 100],
+  easingX1: [0.34, 0, 1],
+  easingY1: [0.8, 0, 1.5],
+  easingX2: [0.26, 0, 1],
+  easingY2: [1, 0, 1.5],
+} satisfies DialConfig;
+
+const directionTwoTitleDialConfig = {
+  titleDurationMs: [660, 200, 3000],
+  titleDelayMaxMs: [280, 0, 800],
+  titleBurstTailMs: [130, 0, 600],
+  titlePeakBrightness: [1.34, 0.5, 3],
+  titleSettleBrightness: [1.08, 0.5, 2],
+  titleSignalRadius: [6, 0, 40],
+  titleHaloRadius: [16, 0, 60],
+  titleSignalOpacity: [58, 0, 100],
+  titleHaloOpacity: [64, 0, 100],
+  titleColorMixPercent: [62, 0, 100],
+  titleEasingX1: [0.28, 0, 1],
+  titleEasingY1: [0.72, 0, 1.5],
+  titleEasingX2: [0.18, 0, 1],
+  titleEasingY2: [1, 0, 1.5],
+} satisfies DialConfig;
 
 function percent(value: number) {
   return `${value}%`;
@@ -221,6 +277,7 @@ function buildDirectionTwoShimmerStyle(settings: DirectionTwoShimmerSettings) {
     "--direction-two-shimmer-halo-opacity": percent(settings.haloOpacity),
     "--direction-two-shimmer-color-mix": percent(settings.colorMixPercent),
     "--direction-two-shimmer-foreground-mix": percent(100 - settings.colorMixPercent),
+    "--direction-two-shimmer-easing": `cubic-bezier(${settings.easingX1}, ${settings.easingY1}, ${settings.easingX2}, ${settings.easingY2})`,
     "--direction-two-title-shimmer-duration": `${settings.titleDurationMs}ms`,
     "--direction-two-title-shimmer-color-mix": percent(settings.titleColorMixPercent),
     "--direction-two-title-shimmer-foreground-mix": percent(100 - settings.titleColorMixPercent),
@@ -230,6 +287,7 @@ function buildDirectionTwoShimmerStyle(settings: DirectionTwoShimmerSettings) {
     "--direction-two-title-shimmer-halo-radius": `${settings.titleHaloRadius}px`,
     "--direction-two-title-shimmer-signal-opacity": percent(settings.titleSignalOpacity),
     "--direction-two-title-shimmer-halo-opacity": percent(settings.titleHaloOpacity),
+    "--direction-two-title-shimmer-easing": `cubic-bezier(${settings.titleEasingX1}, ${settings.titleEasingY1}, ${settings.titleEasingX2}, ${settings.titleEasingY2})`,
   } as CSSProperties;
 }
 
@@ -365,7 +423,13 @@ export function DirectionTwoShell() {
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isInputNudging, setIsInputNudging] = useState(false);
   const [hasMarkIntroPlayed, setHasMarkIntroPlayed] = useState(false);
-  const shimmerSettings = defaultDirectionTwoShimmerSettings;
+  const iconDial = useDialKit("Icons animation", directionTwoIconDialConfig);
+  const titleDial = useDialKit("INKOG title animation", directionTwoTitleDialConfig);
+  const shimmerSettings: DirectionTwoShimmerSettings = {
+    ...defaultDirectionTwoShimmerSettings,
+    ...iconDial,
+    ...titleDial,
+  };
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
   const slashCommandSuggestions = !flow && !inputFeedbackMessage ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const ambientPixels = useMemo(() => {
@@ -1357,7 +1421,7 @@ export function DirectionTwoShell() {
                   key={item.text}
                   pattern={item.icon}
                   reducedMotion={prefersReducedMotion}
-                  rowClassName="flex items-center gap-3"
+                  rowClassName="flex items-center gap-5"
                   shimmerSettings={shimmerSettings}
                   shimmerStyle={shimmerStyle}
                   size="mobile"
@@ -1448,12 +1512,14 @@ export function DirectionTwoShell() {
             <div
               data-route-composer="landing"
               ref={promptRowRef}
-              className={`direction-two-terminal-frame ${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
+              className={`direction-two-terminal-frame ${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col gap-0 pl-[12px] pr-[12px] text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
               style={{
                 background: "transparent",
-                border: "1px solid color-mix(in srgb, var(--border-light) 92%, var(--accent) 8%)",
+                border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--background) 76%)",
                 borderRadius: 0,
                 padding: "var(--route-composer-frame-padding)",
+                paddingLeft: "12px",
+                paddingRight: "12px",
               }}
             >
               <div
@@ -1478,7 +1544,7 @@ export function DirectionTwoShell() {
                       <button
                         aria-label={`${item.command} ${item.label}`}
                         aria-selected={selected}
-                        className={`group flex min-h-7 w-full items-center gap-2 rounded-[3px] px-2 py-1 text-left font-mono transition-colors duration-150 ${slashCommandHoverClass} ${
+                        className={`group flex min-h-7 w-full items-center gap-[9px] rounded-[3px] pl-[12px] pr-[12px] py-1 text-left font-mono transition-colors duration-150 ${slashCommandHoverClass} ${
                           selected ? "bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] text-[var(--color-signal)]" : "bg-transparent text-[var(--foreground)]"
                         }`}
                         key={item.command}
@@ -1515,16 +1581,16 @@ export function DirectionTwoShell() {
                   })}
                 </div>
               </div>
-              <div className="direction-two-terminal-input-row flex min-w-0 items-center">
+              <div className="direction-two-terminal-input-row flex min-w-0 items-center gap-0 pl-[0px]">
               <label className="sr-only" htmlFor="terminal-command">{activePrompt}</label>
               <span
-                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap ${
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm ${
                   activePromptPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
                 }`}
                 aria-hidden="true"
               >
                 {activePrompt === "$" ? (
-                  <span className="text-[var(--color-signal)]">$</span>
+                  <span className="pl-[12px] text-sm text-[var(--color-signal)]">$</span>
                 ) : (
                   <>
                     <span>{">"}</span>
@@ -1652,7 +1718,7 @@ export function DirectionTwoShell() {
                   autoCapitalize="off"
                   autoComplete="off"
                   autoCorrect="off"
-                  className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[4px] font-mono text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
+                  className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[0px] font-mono text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
                   disabled={creating || passwordRevealIndex !== null}
                   id="terminal-command"
                   name="command"
