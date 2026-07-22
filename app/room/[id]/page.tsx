@@ -148,7 +148,7 @@ export default function RoomPage() {
   const [onlineCount, setOnlineCount] = useState(0);
   const [roomUsers, setRoomUsers] = useState<string[]>([]);
   const [alias, setAlias] = useState("");
-  const [activeThemeId, setActiveThemeId] = useState("green");
+  const [activeThemeId, setActiveThemeId] = useState("crimson");
   const [isCreator, setIsCreator] = useState(false);
   const anonTokenRef = useRef<string>("");
 
@@ -193,8 +193,9 @@ export default function RoomPage() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const currentThemeId = document.documentElement.getAttribute("data-inkog-theme");
-    if (inkogThemeChoices.some(theme => theme.id === currentThemeId)) {
-      setActiveThemeId(currentThemeId ?? "green");
+    const normalizedThemeId = currentThemeId === "green" ? "crimson" : currentThemeId;
+    if (inkogThemeChoices.some(theme => theme.id === normalizedThemeId)) {
+      setActiveThemeId(normalizedThemeId ?? "crimson");
     }
   }, []);
 

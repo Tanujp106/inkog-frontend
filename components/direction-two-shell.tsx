@@ -140,7 +140,7 @@ const introHighlights = [
 const themePreviewColorById: Record<DirectionTwoTheme["id"], string> = {
   orange: "#ffb15c",
   blue: "#7cc7ff",
-  green: "#c8ff57",
+  crimson: "#e63956",
   purple: "#c792ff",
 };
 const slashMenuImmediateCommands = new Set(["/clear"]);
@@ -359,7 +359,7 @@ export function DirectionTwoShell() {
   const [inputFeedbackMessage, setInputFeedbackMessage] = useState<string | null>(null);
   const [passwordRevealIndex, setPasswordRevealIndex] = useState<number | null>(null);
   const [passwordFinalShimmer, setPasswordFinalShimmer] = useState(false);
-  const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
+  const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("crimson");
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
@@ -525,7 +525,8 @@ export function DirectionTwoShell() {
     if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") return;
 
     const storedTheme = window.localStorage.getItem(themeStorageKey);
-    const savedTheme = directionTwoThemes.find(theme => theme.id === storedTheme);
+    const normalizedTheme = storedTheme === "green" ? "crimson" : storedTheme;
+    const savedTheme = directionTwoThemes.find(theme => theme.id === normalizedTheme);
     if (!savedTheme) return;
 
     setActiveThemeId(savedTheme.id);
@@ -1624,7 +1625,7 @@ export function DirectionTwoShell() {
                         {styleGhostChoices.map(choice => {
                           const color =
                             choice.id === "surprise"
-                              ? `conic-gradient(from 45deg, ${themePreviewColorById.orange}, ${themePreviewColorById.blue}, ${themePreviewColorById.green}, ${themePreviewColorById.purple}, ${themePreviewColorById.orange})`
+                              ? `conic-gradient(from 45deg, ${themePreviewColorById.orange}, ${themePreviewColorById.blue}, ${themePreviewColorById.crimson}, ${themePreviewColorById.purple}, ${themePreviewColorById.orange})`
                               : themePreviewColorById[choice.id];
 
                           return (

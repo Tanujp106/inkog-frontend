@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: buildInkogFaviconHref("green"),
+        url: buildInkogFaviconHref("crimson"),
         type: "image/svg+xml",
       },
     ],
@@ -56,7 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var theme=window.localStorage.getItem("inkog-theme");if(theme){document.documentElement.setAttribute("data-inkog-theme",theme);}}catch(_){}`,
+            __html: `try{var theme=window.localStorage.getItem("inkog-theme");if(theme==="green"){theme="crimson";}if(theme){document.documentElement.setAttribute("data-inkog-theme",theme);}}catch(_){}`,
           }}
         />
         <SystemSoundProvider>
