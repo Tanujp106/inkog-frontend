@@ -1617,7 +1617,7 @@ export function DirectionTwoShell() {
                   autoComplete="off"
                   autoCorrect="off"
                   className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[0px] font-mono text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
-                  disabled={creating || passwordRevealIndex !== null}
+                  disabled={creating}
                   id="terminal-command"
                   name="command"
                   onBeforeInput={event => {
