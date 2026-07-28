@@ -1,6 +1,7 @@
 "use client";
 
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useDialKit, type DialConfig } from "dialkit";
 import { useRouter } from "next/navigation";
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
@@ -156,9 +157,6 @@ type DirectionTwoShimmerSettings = {
   delayMaxMs: number;
   transitionMs: number;
   burstTailMs: number;
-  titleDurationMs: number;
-  titleDelayMaxMs: number;
-  titleBurstTailMs: number;
   idleOpacity: number;
   peakOpacity: number;
   settleOpacity: number;
@@ -170,21 +168,10 @@ type DirectionTwoShimmerSettings = {
   signalOpacity: number;
   haloOpacity: number;
   colorMixPercent: number;
-  titleColorMixPercent: number;
-  titlePeakBrightness: number;
-  titleSettleBrightness: number;
-  titleSignalRadius: number;
-  titleHaloRadius: number;
-  titleSignalOpacity: number;
-  titleHaloOpacity: number;
   easingX1: number;
   easingY1: number;
   easingX2: number;
   easingY2: number;
-  titleEasingX1: number;
-  titleEasingY1: number;
-  titleEasingX2: number;
-  titleEasingY2: number;
 };
 
 const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
@@ -192,9 +179,6 @@ const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
   delayMaxMs: 350,
   transitionMs: 880,
   burstTailMs: 420,
-  titleDurationMs: 380,
-  titleDelayMaxMs: 400,
-  titleBurstTailMs: 420,
   idleOpacity: 1,
   peakOpacity: 1,
   settleOpacity: 1,
@@ -206,22 +190,35 @@ const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
   signalOpacity: 38,
   haloOpacity: 46,
   colorMixPercent: 38,
-  titleColorMixPercent: 46,
-  titlePeakBrightness: 1.9,
-  titleSettleBrightness: 0.7,
-  titleSignalRadius: 21,
-  titleHaloRadius: 14,
-  titleSignalOpacity: 41,
-  titleHaloOpacity: 46,
   easingX1: 0.34,
   easingY1: 0.8,
   easingX2: 0.26,
   easingY2: 1,
-  titleEasingX1: 0.4,
-  titleEasingY1: 1,
-  titleEasingX2: 0.39,
-  titleEasingY2: 1,
 };
+
+const directionTwoTitleDialConfig = {
+  formation: {
+    durationMs: [directionTwoTitleMotionDefaults.formationDurationMs, 120, 900, 10],
+    spreadMs: [directionTwoTitleMotionDefaults.formationSpreadMs, 120, 1200, 10],
+    peakBrightness: [directionTwoTitleMotionDefaults.formationPeakBrightness, 1, 2.5, 0.05],
+  },
+  shimmer: {
+    durationMs: [directionTwoTitleMotionDefaults.shimmerDurationMs, 240, 1600, 10],
+    spreadMs: [directionTwoTitleMotionDefaults.shimmerSpreadMs, 120, 1400, 10],
+    amplitudeMs: [directionTwoTitleMotionDefaults.shimmerAmplitudeMs, 0, 240, 2],
+    frequency: [directionTwoTitleMotionDefaults.shimmerFrequency, 0.25, 3, 0.05],
+    colorMixPercent: [directionTwoTitleMotionDefaults.shimmerColorMixPercent, 0, 100, 1],
+    peakBrightness: [directionTwoTitleMotionDefaults.shimmerPeakBrightness, 1, 3, 0.05],
+    glowRadius: [directionTwoTitleMotionDefaults.shimmerGlowRadius, 0, 32, 1],
+    glowOpacity: [directionTwoTitleMotionDefaults.shimmerGlowOpacity, 0, 100, 1],
+  },
+  magnet: {
+    radius: [directionTwoTitleMotionDefaults.magnetRadius, 24, 180, 2],
+    strength: [directionTwoTitleMotionDefaults.magnetStrength, 0.1, 2, 0.05],
+    maxDisplacement: [directionTwoTitleMotionDefaults.magnetMaxDisplacement, 0, 16, 0.5],
+    returnDurationMs: [directionTwoTitleMotionDefaults.magnetSpringMs, 60, 500, 10],
+  },
+} satisfies DialConfig;
 
 function percent(value: number) {
   return `${value}%`;
@@ -244,16 +241,6 @@ function buildDirectionTwoShimmerStyle(settings: DirectionTwoShimmerSettings) {
     "--direction-two-shimmer-color-mix": percent(settings.colorMixPercent),
     "--direction-two-shimmer-foreground-mix": percent(100 - settings.colorMixPercent),
     "--direction-two-shimmer-easing": `cubic-bezier(${settings.easingX1}, ${settings.easingY1}, ${settings.easingX2}, ${settings.easingY2})`,
-    "--direction-two-title-shimmer-duration": `${settings.titleDurationMs}ms`,
-    "--direction-two-title-shimmer-color-mix": percent(settings.titleColorMixPercent),
-    "--direction-two-title-shimmer-foreground-mix": percent(100 - settings.titleColorMixPercent),
-    "--direction-two-title-shimmer-peak-brightness": settings.titlePeakBrightness,
-    "--direction-two-title-shimmer-settle-brightness": settings.titleSettleBrightness,
-    "--direction-two-title-shimmer-signal-radius": `${settings.titleSignalRadius}px`,
-    "--direction-two-title-shimmer-halo-radius": `${settings.titleHaloRadius}px`,
-    "--direction-two-title-shimmer-signal-opacity": percent(settings.titleSignalOpacity),
-    "--direction-two-title-shimmer-halo-opacity": percent(settings.titleHaloOpacity),
-    "--direction-two-title-shimmer-easing": `cubic-bezier(${settings.titleEasingX1}, ${settings.titleEasingY1}, ${settings.titleEasingX2}, ${settings.titleEasingY2})`,
   } as CSSProperties;
 }
 
@@ -392,6 +379,28 @@ export function DirectionTwoShell() {
   const [composerReserveHeight, setComposerReserveHeight] = useState(0);
   const shimmerSettings: DirectionTwoShimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
+  const titleMotionDials = useDialKit(
+    "INKOG title motion",
+    directionTwoTitleDialConfig,
+    { id: "inkog-title-motion" },
+  );
+  const titleMotionSettings: typeof directionTwoTitleMotionDefaults = {
+    formationDurationMs: titleMotionDials.formation.durationMs,
+    formationSpreadMs: titleMotionDials.formation.spreadMs,
+    formationPeakBrightness: titleMotionDials.formation.peakBrightness,
+    shimmerDurationMs: titleMotionDials.shimmer.durationMs,
+    shimmerSpreadMs: titleMotionDials.shimmer.spreadMs,
+    shimmerAmplitudeMs: titleMotionDials.shimmer.amplitudeMs,
+    shimmerFrequency: titleMotionDials.shimmer.frequency,
+    shimmerColorMixPercent: titleMotionDials.shimmer.colorMixPercent,
+    shimmerPeakBrightness: titleMotionDials.shimmer.peakBrightness,
+    shimmerGlowRadius: titleMotionDials.shimmer.glowRadius,
+    shimmerGlowOpacity: titleMotionDials.shimmer.glowOpacity,
+    magnetRadius: titleMotionDials.magnet.radius,
+    magnetStrength: titleMotionDials.magnet.strength,
+    magnetMaxDisplacement: titleMotionDials.magnet.maxDisplacement,
+    magnetSpringMs: titleMotionDials.magnet.returnDurationMs,
+  };
   const slashCommandSuggestions = !flow && !inputFeedbackMessage ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
   const isLandingForegroundHidden =
@@ -1327,6 +1336,7 @@ export function DirectionTwoShell() {
             <InkPatternMark
               reducedMotion={prefersReducedMotion}
               size="mobile"
+              titleMotionSettings={titleMotionSettings}
               word={directionTwoMarkWords[0]}
             />
           </div>
@@ -1361,6 +1371,7 @@ export function DirectionTwoShell() {
           <div>
             <InkPatternMark
               reducedMotion={prefersReducedMotion}
+              titleMotionSettings={titleMotionSettings}
               word={directionTwoMarkWords[0]}
             />
           </div>
@@ -1711,12 +1722,13 @@ function InkPatternMark({
   word,
   reducedMotion,
   size = "desktop",
+  titleMotionSettings,
 }: {
   word: string;
   reducedMotion: boolean;
   size?: "desktop" | "mobile";
+  titleMotionSettings: typeof directionTwoTitleMotionDefaults;
 }) {
-  const titleMotionSettings = directionTwoTitleMotionDefaults;
   const markRef = useRef<HTMLDivElement | null>(null);
   const magnetFrameRef = useRef<number | null>(null);
   const latestPointerRef = useRef<{ x: number; y: number } | null>(null);
