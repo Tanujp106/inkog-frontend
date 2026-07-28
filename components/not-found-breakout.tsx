@@ -17,6 +17,13 @@ import {
   stepBreakout,
 } from "@/lib/not-found-breakout.mjs";
 import { createBreakoutConfetti, stepBreakoutConfetti } from "@/lib/not-found-confetti.mjs";
+import {
+  createImpactFeedbackState,
+  getImpactTransform,
+  stepImpactFeedback,
+  triggerImpactFeedback,
+} from "@/lib/not-found-feedback.mjs";
+import { getBreakoutIdleBallOffset } from "@/lib/not-found-breakout-render.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const soundByEvent = {
@@ -34,6 +41,12 @@ type BreakoutState = ReturnType<typeof createInitialBreakoutState>;
 type BreakoutMode = BreakoutState["mode"];
 type BreakoutEvent = keyof typeof soundByEvent;
 type BreakoutConfetti = ReturnType<typeof createBreakoutConfetti>;
+type BreakoutImpactParticle = {
+  x: number;
+  y: number;
+  radius: number;
+  life: number;
+};
 
 declare global {
   interface Window {
@@ -45,15 +58,18 @@ declare global {
 export function NotFoundBreakout() {
   const arenaRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const gameStageRef = useRef<HTMLDivElement | null>(null);
   const confettiRef = useRef<BreakoutConfetti>([]);
+  const feedbackRef = useRef(createImpactFeedbackState());
   const gameRef = useRef<BreakoutState>(createInitialBreakoutState());
   const keyboardRef = useRef({ left: false, right: false, shift: false });
   const pointerActiveRef = useRef(false);
   const prefersReducedMotionRef = useRef(false);
+  const idleAnimationStartedAtRef = useRef(0);
   const [hud, setHud] = useState(() => pickHud(gameRef.current));
   const { play } = useSystemSound();
 
-  const renderCurrentGame = useCallback(() => {
+  const renderCurrentGame = useCallback((idleBallOffset = 0) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -62,12 +78,42 @@ export function NotFoundBreakout() {
       gameRef.current,
       confettiRef.current,
       prefersReducedMotionRef.current,
+      feedbackRef.current.particles,
+      idleBallOffset,
     );
   }, []);
+
+  const applyImpactTransform = useCallback(() => {
+    const gameStage = gameStageRef.current;
+    if (!gameStage) return;
+
+    gameStage.style.transform = getImpactTransform(feedbackRef.current);
+  }, []);
+
+  const advanceImpactFeedback = useCallback(
+    (seconds: number) => {
+      feedbackRef.current = stepImpactFeedback(
+        feedbackRef.current,
+        seconds,
+        prefersReducedMotionRef.current,
+      );
+      applyImpactTransform();
+    },
+    [applyImpactTransform],
+  );
 
   const setGame = useCallback(
     (nextState: BreakoutState) => {
       const previousMode = gameRef.current.mode;
+
+      if (
+        (nextState.mode === "idle" || nextState.mode === "waiting")
+        && nextState.mode !== previousMode
+      ) {
+        idleAnimationStartedAtRef.current = window.performance.now();
+      } else if (nextState.mode === "running" || nextState.mode === "cleared") {
+        idleAnimationStartedAtRef.current = 0;
+      }
 
       if (nextState.mode === "cleared" && previousMode !== "cleared") {
         const particles = createBreakoutConfetti(nextState.width, nextState.height);
@@ -81,6 +127,12 @@ export function NotFoundBreakout() {
       for (const event of nextState.events) {
         const sound = soundByEvent[event as BreakoutEvent];
         if (sound) play(sound);
+      }
+
+      if (!prefersReducedMotionRef.current) {
+        for (const impact of nextState.impactEvents) {
+          feedbackRef.current = triggerImpactFeedback(feedbackRef.current, impact);
+        }
       }
 
       gameRef.current = nextState;
@@ -121,22 +173,37 @@ export function NotFoundBreakout() {
         );
       }
 
+      advanceImpactFeedback(seconds);
       renderCurrentGame();
     },
-    [renderCurrentGame, setGame],
+    [advanceImpactFeedback, renderCurrentGame, setGame],
   );
 
   const handleRestart = useCallback(() => {
     keyboardRef.current = { left: false, right: false, shift: false };
     pointerActiveRef.current = false;
+    idleAnimationStartedAtRef.current = window.performance.now();
+    feedbackRef.current = createImpactFeedbackState({
+      reducedMotion: prefersReducedMotionRef.current,
+    });
+    applyImpactTransform();
     setGame(restartBreakout(gameRef.current));
     renderCurrentGame();
-  }, [renderCurrentGame, setGame]);
+  }, [applyImpactTransform, renderCurrentGame, setGame]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const syncPreference = () => {
       prefersReducedMotionRef.current = mediaQuery.matches;
+      feedbackRef.current = createImpactFeedbackState({ reducedMotion: mediaQuery.matches });
+      applyImpactTransform();
+
+      if (
+        !mediaQuery.matches
+        && (gameRef.current.mode === "idle" || gameRef.current.mode === "waiting")
+      ) {
+        idleAnimationStartedAtRef.current = window.performance.now();
+      }
 
       if (mediaQuery.matches && gameRef.current.mode === "cleared") {
         const state = gameRef.current;
@@ -152,7 +219,7 @@ export function NotFoundBreakout() {
     syncPreference();
     mediaQuery.addEventListener("change", syncPreference);
     return () => mediaQuery.removeEventListener("change", syncPreference);
-  }, [renderCurrentGame]);
+  }, [applyImpactTransform, renderCurrentGame]);
 
   useEffect(() => {
     const arena = arenaRef.current;
@@ -205,7 +272,7 @@ export function NotFoundBreakout() {
   }, [renderCurrentGame, setGame]);
 
   useEffect(() => {
-    const themeObserver = new MutationObserver(renderCurrentGame);
+    const themeObserver = new MutationObserver(() => renderCurrentGame());
     themeObserver.observe(document.documentElement, {
       attributeFilter: ["data-inkog-theme"],
       attributes: true,
@@ -219,18 +286,33 @@ export function NotFoundBreakout() {
     let previousTimestamp = window.performance.now();
 
     const tick = (timestamp: number) => {
+      const deltaSeconds = Math.min(Math.max((timestamp - previousTimestamp) / 1000, 0), 1 / 20);
+      const mode = gameRef.current.mode;
       const shouldAnimateFrame = !document.hidden && (
-        gameRef.current.mode === "running"
+        mode === "running"
         || (
-          gameRef.current.mode === "cleared"
+          mode === "cleared"
           && !prefersReducedMotionRef.current
           && confettiRef.current.length > 0
         )
       );
+      const shouldAnimateIdle = !document.hidden
+        && !prefersReducedMotionRef.current
+        && (mode === "idle" || mode === "waiting");
 
       if (shouldAnimateFrame) {
-        const deltaSeconds = Math.min(Math.max((timestamp - previousTimestamp) / 1000, 0), 1 / 20);
         advanceGame(deltaSeconds);
+      } else if (shouldAnimateIdle) {
+        advanceImpactFeedback(deltaSeconds);
+        if (idleAnimationStartedAtRef.current === 0) {
+          idleAnimationStartedAtRef.current = timestamp;
+        }
+        const idleBallOffset = getBreakoutIdleBallOffset(
+          timestamp - idleAnimationStartedAtRef.current,
+          mode,
+          false,
+        );
+        renderCurrentGame(idleBallOffset);
       }
       previousTimestamp = timestamp;
       animationFrame = window.requestAnimationFrame(tick);
@@ -238,6 +320,12 @@ export function NotFoundBreakout() {
 
     const handleVisibilityChange = () => {
       previousTimestamp = window.performance.now();
+      if (document.hidden) {
+        feedbackRef.current = createImpactFeedbackState({
+          reducedMotion: prefersReducedMotionRef.current,
+        });
+        applyImpactTransform();
+      }
     };
 
     animationFrame = window.requestAnimationFrame(tick);
@@ -247,7 +335,7 @@ export function NotFoundBreakout() {
       window.cancelAnimationFrame(animationFrame);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [advanceGame]);
+  }, [advanceGame, advanceImpactFeedback, applyImpactTransform, renderCurrentGame]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -376,60 +464,62 @@ export function NotFoundBreakout() {
     <section ref={arenaRef} className="not-found-breakout">
       <AmbientShaderBackground className="not-found-breakout-ambient" opacity={0.3} style={{ zIndex: 0 }} />
 
-      <p
-        aria-live="polite"
-        className={hud.mode === "cleared" ? "sr-only" : "not-found-breakout-status"}
-        id="not-found-breakout-status"
-      >
-        {getStatusLabel(hud.mode)}
-      </p>
+      <div ref={gameStageRef} className="not-found-breakout-stage">
+        <p
+          aria-live="polite"
+          className={hud.mode === "cleared" ? "sr-only" : "not-found-breakout-status"}
+          id="not-found-breakout-status"
+        >
+          {getStatusLabel(hud.mode)}
+        </p>
 
-      <canvas
-        ref={canvasRef}
-        aria-describedby="not-found-breakout-status not-found-breakout-controls"
-        aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight R Enter Space"
-        aria-label={`Breakout game with a destructible pixel 404, a ball, a paddle, and ${hud.lives} lives remaining`}
-        className="not-found-breakout-canvas"
-        onPointerCancel={handlePointerUp}
-        onPointerDown={handlePointerDown}
-        onPointerMove={movePaddleFromPointer}
-        onPointerUp={handlePointerUp}
-        role="application"
-        tabIndex={0}
-      />
+        <canvas
+          ref={canvasRef}
+          aria-describedby="not-found-breakout-status not-found-breakout-controls"
+          aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight R Enter Space"
+          aria-label={`Breakout game with a destructible pixel 404, a ball, a paddle, and ${hud.lives} lives remaining`}
+          className="not-found-breakout-canvas"
+          onPointerCancel={handlePointerUp}
+          onPointerDown={handlePointerDown}
+          onPointerMove={movePaddleFromPointer}
+          onPointerUp={handlePointerUp}
+          role="application"
+          tabIndex={0}
+        />
 
-      <p
-        className={hud.mode === "cleared" ? "sr-only" : "not-found-breakout-controls"}
-        id="not-found-breakout-controls"
-      >
-        {hud.mode === "cleared"
-          ? "Use restart or back to home."
-          : "← / → move · SHIFT + ← / → faster · R restart"}
-      </p>
+        <p
+          className={hud.mode === "cleared" ? "sr-only" : "not-found-breakout-controls"}
+          id="not-found-breakout-controls"
+        >
+          {hud.mode === "cleared"
+            ? "Use restart or back to home."
+            : "← / → move · SHIFT + ← / → faster · R restart"}
+        </p>
 
-      {hud.mode === "cleared" ? (
-        <div className="not-found-breakout-clear-actions">
-          <button type="button" onClick={handleRestart}>
-            restart
-          </button>
-          <Link href="/">back to home</Link>
-        </div>
-      ) : (
-        <>
-          <p className="not-found-breakout-lives" aria-label={`${hud.lives} lives remaining`}>
-            <span>lives</span>
-            <span className="not-found-breakout-life-marks" aria-hidden="true">
-              {Array.from({ length: 3 }, (_, life) => (
-                <span data-active={life < hud.lives} key={life} />
-              ))}
-            </span>
-          </p>
+        {hud.mode === "cleared" ? (
+          <div className="not-found-breakout-clear-actions">
+            <button type="button" onClick={handleRestart}>
+              restart
+            </button>
+            <Link href="/">back to home</Link>
+          </div>
+        ) : (
+          <>
+            <p className="not-found-breakout-lives" aria-label={`${hud.lives} lives remaining`}>
+              <span>lives</span>
+              <span className="not-found-breakout-life-marks" aria-hidden="true">
+                {Array.from({ length: 3 }, (_, life) => (
+                  <span data-active={life < hud.lives} key={life} />
+                ))}
+              </span>
+            </p>
 
-          <Link className="not-found-breakout-home" href="/">
-            back to home
-          </Link>
-        </>
-      )}
+            <Link className="not-found-breakout-home" href="/">
+              back to home
+            </Link>
+          </>
+        )}
+      </div>
     </section>
   );
 }
@@ -457,6 +547,8 @@ function drawGame(
   state: BreakoutState,
   confetti: BreakoutConfetti,
   isStaticConfetti: boolean,
+  impactParticles: BreakoutImpactParticle[],
+  idleBallOffset = 0,
 ) {
   const context = canvas.getContext("2d");
   if (!context) return;
@@ -467,9 +559,19 @@ function drawGame(
   const border = theme.getPropertyValue("--color-border").trim() || "#2a2a32";
   const text = theme.getPropertyValue("--color-text").trim() || "#e8e8f0";
   const muted = theme.getPropertyValue("--color-dim").trim() || "#8f8f9e";
-  const accent = theme.getPropertyValue("--color-signal").trim() || "#c8ff57";
+  const accent = theme.getPropertyValue("--color-signal").trim() || "#e63956";
 
   context.clearRect(0, 0, state.width, state.height);
+
+  context.save();
+  context.fillStyle = accent;
+  context.globalAlpha = 0.08;
+  context.shadowBlur = 0;
+  for (const brick of state.bricks) {
+    if (brick.isActive) continue;
+    context.fillRect(brick.x, brick.y, brick.width, brick.height);
+  }
+  context.restore();
 
   context.save();
   context.fillStyle = accent;
@@ -496,7 +598,7 @@ function drawGame(
     context.shadowBlur = 12;
     context.shadowColor = accent;
     context.beginPath();
-    context.arc(state.ball.x, state.ball.y, state.ball.radius, 0, Math.PI * 2);
+    context.arc(state.ball.x, state.ball.y + idleBallOffset, state.ball.radius, 0, Math.PI * 2);
     context.fill();
     context.restore();
   }
@@ -513,6 +615,16 @@ function drawGame(
       context.fillRect(-particle.size / 2, -particle.size / 2, particle.size, particle.size);
       context.restore();
     }
+  }
+
+  for (const particle of impactParticles) {
+    context.save();
+    context.fillStyle = accent;
+    context.globalAlpha = Math.min(0.9, particle.life / 0.22);
+    context.beginPath();
+    context.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
   }
 }
 

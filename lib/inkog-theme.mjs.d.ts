@@ -1,5 +1,5 @@
 export type InkogThemeChoice = {
-  id: "orange" | "blue" | "green" | "purple";
+  id: "orange" | "blue" | "crimson" | "purple";
   label: string;
   selection: "1" | "2" | "3" | "4";
 };

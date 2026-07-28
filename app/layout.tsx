@@ -9,6 +9,7 @@ import { SystemSoundProvider } from "@/lib/system-sound-provider";
 import { buildInkogFaviconHref } from "@/lib/inkog-favicon.mjs";
 import { getSiteEntityJsonLd, siteUrl } from "@/lib/site-seo.mjs";
 import { ThemeFavicon } from "./theme-favicon";
+import { RouteTransitionProvider } from "@/components/route-transition-provider";
 
 export const metadata: Metadata = {
   metadataBase: siteUrl,
@@ -20,7 +21,7 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: buildInkogFaviconHref("green"),
+        url: buildInkogFaviconHref("crimson"),
         type: "image/svg+xml",
       },
     ],
@@ -58,7 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var theme=window.localStorage.getItem("inkog-theme");if(theme){document.documentElement.setAttribute("data-inkog-theme",theme);}}catch(_){}`,
+            __html: `try{var theme=window.localStorage.getItem("inkog-theme");if(theme==="green"){theme="crimson";}if(theme){document.documentElement.setAttribute("data-inkog-theme",theme);}}catch(_){}`,
           }}
         />
         <SystemSoundProvider>
@@ -67,6 +68,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {process.env.NODE_ENV === "development" && <InterfaceKit />}
           {process.env.NODE_ENV === "development" && <DialRoot />}
           <AgentationProvider />
+          <DialRoot />
         </SystemSoundProvider>
       </body>
     </html>

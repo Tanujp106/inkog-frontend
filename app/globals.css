@@ -1,6 +1,56 @@
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap');
 @import "tailwindcss";
 
+.route-transition-root {
+  --route-composer-bottom-padding: 32px;
+  background: var(--background, var(--bg));
+  isolation: isolate;
+  min-height: 100dvh;
+  position: relative;
+}
+
+@media (min-width: 640px) {
+  .route-transition-root {
+    --route-composer-bottom-padding: 52px;
+  }
+}
+
+.route-transition-layer {
+  min-height: 100dvh;
+  position: relative;
+  transition-property: opacity, transform;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 1;
+}
+
+.route-transition-destination,
+.route-transition-outgoing {
+  inset: 0;
+  position: fixed;
+}
+
+.route-transition-outgoing,
+.route-transition-destination {
+  overflow: auto;
+}
+
+.route-transition-outgoing [data-route-composer],
+.route-transition-destination [data-route-composer] {
+  visibility: hidden;
+}
+
+.route-transition-composer-snapshot {
+  pointer-events: none;
+  position: fixed;
+  z-index: 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-transition-layer {
+    transform: none !important;
+  }
+}
+
 @font-face {
   font-family: "Departure Mono";
   src: url("/fonts/DepartureMono-Regular.woff2") format("woff2");
@@ -21,9 +71,9 @@
   --color-dim: #8f8f9e;
   --color-action: #f2f2f0;
   --color-action-ink: #080809;
-  --color-signal: #c8ff57;
-  --color-signal-dim: #a8d940;
-  --color-signal-glow: rgba(200, 255, 87, 0.16);
+  --color-signal: #e63956;
+  --color-signal-dim: #bd2f47;
+  --color-signal-glow: rgba(230, 57, 86, 0.18);
   --color-danger: #ff5757;
   --color-info: #57a8ff;
   --color-private: #a857ff;
@@ -84,11 +134,11 @@
   --direction-two-cursor-square: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAAFklEQVR4nGOoOf7/PymYYVTDqAbsGADA29SgIUo3XgAAAABJRU5ErkJggg==");
 }
 
-:root[data-inkog-theme="green"] {
-  --color-signal: #c8ff57;
-  --color-signal-dim: #a8d940;
-  --color-signal-glow: rgba(200, 255, 87, 0.16);
-  --direction-two-cursor-square: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAAFklEQVR4nGM48T/8PymYYVTDqAbsGAD9IsBg75RAggAAAABJRU5ErkJggg==");
+:root[data-inkog-theme="crimson"] {
+  --color-signal: #e63956;
+  --color-signal-dim: #bd2f47;
+  --color-signal-glow: rgba(230, 57, 86, 0.18);
+  --direction-two-cursor-square: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Crect width='12' height='12' fill='%23e63956'/%3E%3C/svg%3E");
 }
 
 :root[data-inkog-theme="purple"] {
@@ -291,7 +341,7 @@ body::before {
     background-color: var(--foreground);
     opacity: var(--direction-two-shimmer-idle-opacity, 1);
     filter: brightness(var(--direction-two-shimmer-idle-brightness, 1));
-    box-shadow: 0 0 0 rgba(200, 255, 87, 0);
+    box-shadow: 0 0 0 rgba(230, 57, 86, 0);
   }
   50% {
     background-color: color-mix(in srgb, var(--foreground) var(--direction-two-shimmer-foreground-mix, 62%), var(--color-signal) var(--direction-two-shimmer-color-mix, 38%));
@@ -305,7 +355,7 @@ body::before {
     background-color: var(--foreground);
     opacity: var(--direction-two-shimmer-settle-opacity, 1);
     filter: brightness(var(--direction-two-shimmer-settle-brightness, 1));
-    box-shadow: 0 0 0 rgba(200, 255, 87, 0);
+    box-shadow: 0 0 0 rgba(230, 57, 86, 0);
   }
 }
 @keyframes direction-two-input-stagger {
@@ -405,7 +455,7 @@ body::before {
   will-change: opacity, transform, filter;
 }
 .direction-two-highlight-pixel-active {
-  box-shadow: 0 0 0 rgba(200, 255, 87, 0);
+  box-shadow: 0 0 0 rgba(230, 57, 86, 0);
 }
 .direction-two-intro-row:hover .direction-two-highlight-icon {
   filter: drop-shadow(0 0 6px var(--color-signal-glow));
@@ -568,43 +618,6 @@ input::placeholder, textarea::placeholder {
   z-index: 1;
 }
 
-.not-found-header {
-  align-items: center;
-  border-bottom: 1px solid var(--border-light);
-  box-sizing: border-box;
-  display: flex;
-  flex: 0 0 auto;
-  min-height: 64px;
-  padding:
-    max(12px, env(safe-area-inset-top))
-    max(20px, env(safe-area-inset-right))
-    12px
-    max(20px, env(safe-area-inset-left));
-  position: relative;
-  width: 100%;
-  z-index: 2;
-}
-
-.not-found-brand {
-  align-items: center;
-  color: var(--text);
-  display: inline-flex;
-  font-family: Syne, sans-serif;
-  font-size: 20px;
-  font-weight: 800;
-  gap: 8px;
-  text-decoration: none;
-}
-
-.not-found-brand span {
-  background: var(--accent);
-  border-radius: 1px;
-  display: inline-block;
-  height: 6px;
-  width: 6px;
-}
-
-.not-found-brand:focus-visible,
 .not-found-breakout-home:focus-visible,
 .not-found-breakout-clear-actions a:focus-visible,
 .not-found-breakout-clear-actions button:focus-visible {
@@ -630,6 +643,15 @@ input::placeholder, textarea::placeholder {
 .not-found-breakout-ambient {
   inset: 0 !important;
   position: fixed !important;
+}
+
+.not-found-breakout-stage {
+  inset: 0;
+  position: absolute;
+  transform: translate3d(0px, 0px, 0) rotate(0deg);
+  transform-origin: center;
+  will-change: transform;
+  z-index: 1;
 }
 
 .not-found-breakout-status {
@@ -761,12 +783,6 @@ input::placeholder, textarea::placeholder {
 }
 
 @media (max-width: 560px) {
-  .not-found-header {
-    min-height: 58px;
-    padding-right: max(16px, env(safe-area-inset-right));
-    padding-left: max(16px, env(safe-area-inset-left));
-  }
-
   .not-found-breakout-status {
     font-size: 10px;
     top: 14px;
@@ -817,4 +833,60 @@ input::placeholder, textarea::placeholder {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+@keyframes direction-two-password-reveal {
+  0% {
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
+  }
+
+  45% {
+    filter: brightness(1.22);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--color-signal) 58%, transparent);
+  }
+
+  100% {
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
+  }
+}
+
+.direction-two-password-reveal {
+  animation: direction-two-password-reveal 120ms ease-out both;
+}
+
+@keyframes direction-two-password-complete-shimmer {
+  0% {
+    background-position: 120% 0;
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
+  }
+
+  55% {
+    filter: brightness(1.12);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--color-signal) 42%, transparent);
+  }
+
+  100% {
+    background-position: -120% 0;
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
+  }
+}
+
+.direction-two-password-complete-shimmer {
+  color: transparent;
+  background-image: linear-gradient(
+    100deg,
+    var(--foreground) 34%,
+    var(--color-signal) 46%,
+    color-mix(in srgb, var(--foreground) 92%, white) 50%,
+    var(--color-signal) 54%,
+    var(--foreground) 66%
+  );
+  background-position: 120% 0;
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: direction-two-password-complete-shimmer 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }

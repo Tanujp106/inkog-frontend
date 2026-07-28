@@ -3,6 +3,7 @@
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useDialKit, type DialConfig } from "dialkit";
 import { useRouter } from "next/navigation";
+import { useDialKit, type DialConfig } from "dialkit";
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import { useRouteHandoff } from "@/components/route-handoff-provider";
@@ -18,6 +19,7 @@ import {
   getDirectionTwoInlineFeedbackMessage,
   getDirectionTwoInlineGhostText,
   getDirectionTwoCreatePromptPresentation,
+  getDirectionTwoPasswordMask,
   getDirectionTwoSlashCommandSuggestions,
   getDirectionTwoCreateTimeArrowValue,
   getDirectionTwoCreateVisualSegments,
@@ -147,7 +149,7 @@ const introHighlights = [
 const themePreviewColorById: Record<DirectionTwoTheme["id"], string> = {
   orange: "#ffb15c",
   blue: "#7cc7ff",
-  green: "#c8ff57",
+  crimson: "#e63956",
   purple: "#c792ff",
 };
 const slashMenuImmediateCommands = new Set(["/clear"]);
@@ -288,7 +290,7 @@ function promptFor(flow: SessionFlow | null) {
     case "topic":
       return "room name";
     case "expiry":
-      return "total time";
+      return "total minutes";
     case "limit":
       return "maximum participants";
     case "password-choice":
@@ -309,7 +311,7 @@ function placeholderFor(flow: SessionFlow | null) {
     case "topic":
       return "what should we call the room?";
     case "expiry":
-      return "what should be total time?";
+      return "how many minutes should the room stay open?";
     case "limit":
       return "maximum participants?";
     case "password-choice":
@@ -360,6 +362,9 @@ export function DirectionTwoShell() {
   const composerRef = useRef<HTMLDivElement | null>(null);
   const slashMenuRef = useRef<HTMLDivElement | null>(null);
   const inputNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const passwordRevealTimerRef = useRef<number | null>(null);
+  const passwordFinalShimmerTimerRef = useRef<number | null>(null);
+  const passwordSubmissionRef = useRef("");
   const [inputValue, setInputValue] = useState("");
   const [lines, setLines] = useState<TerminalLine[]>(initialLines);
   const [flow, setFlow] = useState<SessionFlow | null>(null);
@@ -371,7 +376,9 @@ export function DirectionTwoShell() {
   const [helping, setHelping] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
   const [inputFeedbackMessage, setInputFeedbackMessage] = useState<string | null>(null);
-  const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
+  const [passwordRevealIndex, setPasswordRevealIndex] = useState<number | null>(null);
+  const [passwordFinalShimmer, setPasswordFinalShimmer] = useState(false);
+  const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("crimson");
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
@@ -430,7 +437,13 @@ export function DirectionTwoShell() {
   };
 
   const focusInput = () => {
-    requestAnimationFrame(() => inputRef.current?.focus());
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
   };
 
   const syncInputMirrorScroll = () => {
@@ -496,6 +509,12 @@ export function DirectionTwoShell() {
       if (inputNudgeTimeoutRef.current) {
         clearTimeout(inputNudgeTimeoutRef.current);
       }
+      if (passwordRevealTimerRef.current) {
+        clearInterval(passwordRevealTimerRef.current);
+      }
+      if (passwordFinalShimmerTimerRef.current) {
+        clearTimeout(passwordFinalShimmerTimerRef.current);
+      }
     };
   }, []);
 
@@ -537,7 +556,8 @@ export function DirectionTwoShell() {
     if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") return;
 
     const storedTheme = window.localStorage.getItem(themeStorageKey);
-    const savedTheme = directionTwoThemes.find(theme => theme.id === storedTheme);
+    const normalizedTheme = storedTheme === "green" ? "crimson" : storedTheme;
+    const savedTheme = directionTwoThemes.find(theme => theme.id === normalizedTheme);
     if (!savedTheme) return;
 
     setActiveThemeId(savedTheme.id);
@@ -619,7 +639,13 @@ export function DirectionTwoShell() {
       }
 
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableTarget) return;
-      if (event.key.length === 1) focusInput();
+      if (event.key.length !== 1) return;
+
+      event.preventDefault();
+      setInputFeedbackMessage(null);
+      setHistoryIndex(null);
+      setInputValue(current => `${current}${event.key}`);
+      focusInput();
     };
 
     document.addEventListener("keydown", handleDocumentKeyDown);
@@ -773,6 +799,43 @@ export function DirectionTwoShell() {
     }
   };
 
+  const revealPassword = (password: string, onComplete: () => void) => {
+    if (passwordRevealTimerRef.current) {
+      clearInterval(passwordRevealTimerRef.current);
+    }
+    if (passwordFinalShimmerTimerRef.current) {
+      clearTimeout(passwordFinalShimmerTimerRef.current);
+    }
+
+    passwordSubmissionRef.current = password;
+    setPasswordFinalShimmer(false);
+    setPasswordRevealIndex(0);
+
+    const frameDuration = Math.max(40, Math.round(500 / password.length));
+    let revealIndex = 0;
+    passwordRevealTimerRef.current = window.setInterval(() => {
+      revealIndex += 1;
+
+      if (revealIndex < password.length) {
+        setPasswordRevealIndex(revealIndex);
+        return;
+      }
+
+      if (passwordRevealTimerRef.current) {
+        clearInterval(passwordRevealTimerRef.current);
+        passwordRevealTimerRef.current = null;
+      }
+      setPasswordFinalShimmer(true);
+      passwordFinalShimmerTimerRef.current = window.setTimeout(() => {
+        passwordFinalShimmerTimerRef.current = null;
+        passwordSubmissionRef.current = "";
+        setPasswordFinalShimmer(false);
+        setPasswordRevealIndex(null);
+        onComplete();
+      }, 180);
+    }, frameDuration);
+  };
+
   const applyInlineCreateCommand = (command: string, parsed: Exclude<ParsedCreateCommand, { status: "not-create" }>) => {
     if (parsed.status === "invalid") {
       rejectInputInline(command, parsed.message);
@@ -787,13 +850,24 @@ export function DirectionTwoShell() {
       return;
     }
 
-    appendLines(
-      line("input", command),
-      line("output", `creating "${parsed.draft.topic}" for ${parsed.draft.expiry}m, ${parsed.draft.roomLimit} members`),
-      line("output", parsed.draft.password ? "password: on" : "password: off"),
-    );
-    sound.play("press");
-    void createRoom(parsed.draft, { confirmInput: null });
+    const createRoomFromInlineCommand = () => {
+      setInputValue("");
+      appendLines(
+        line("input", command),
+        line("output", `creating "${parsed.draft.topic}" for ${parsed.draft.expiry}m, ${parsed.draft.roomLimit} members`),
+        line("output", parsed.draft.password ? "password: on" : "password: off"),
+      );
+      sound.play("press");
+      void createRoom(parsed.draft, { confirmInput: null });
+    };
+
+    if (parsed.draft.password) {
+      setInputValue(command);
+      revealPassword(parsed.draft.password, createRoomFromInlineCommand);
+      return;
+    }
+
+    createRoomFromInlineCommand();
   };
 
   const answerCreatePrompt = (flowState: Extract<SessionFlow, { type: "create" }>, rawAnswer: string) => {
@@ -809,7 +883,7 @@ export function DirectionTwoShell() {
       appendLines(line("input", answer), line("output", "topic saved"));
       sound.play("success");
       setFlow({ type: "create", step: "expiry", draft: { ...flowState.draft, topic: answer } });
-      setKeyboardStatus("What should be total time?");
+      setKeyboardStatus("How many minutes should the room stay open?");
       return;
     }
 
@@ -852,10 +926,13 @@ export function DirectionTwoShell() {
     }
 
     if (flowState.step === "password") {
-      appendLines(line("input", "********"), line("output", "password stored locally until room creation"));
-      sound.play("success");
-      setFlow({ type: "create", step: "confirm", draft: { ...flowState.draft, password: answer } });
-      setKeyboardStatus("Tap Enter to create.");
+      revealPassword(answer, () => {
+        appendLines(line("input", "********"), line("output", "password stored locally until room creation"));
+        sound.play("success");
+        setFlow({ type: "create", step: "confirm", draft: { ...flowState.draft, password: answer } });
+        setKeyboardStatus("Tap Enter to create.");
+        focusInput();
+      });
       return;
     }
 
@@ -1052,7 +1129,7 @@ export function DirectionTwoShell() {
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (creating) return;
+    if (creating || passwordRevealIndex !== null) return;
 
     const createEditingStep = !flow ? getDirectionTwoCreateEditingStep(event.currentTarget.value) : null;
 
@@ -1229,15 +1306,21 @@ export function DirectionTwoShell() {
       : null;
   const ghostTapCompletion = resolveDirectionTwoGhostTapCompletion(inputValue, Boolean(flow));
   const inlineHint = inputFeedbackMessage ?? createFieldHint;
-  const visualInputText = inputValue || (creating ? "creating room..." : placeholderFor(flow));
-  const visualCreateSegments = inputValue ? getDirectionTwoCreateVisualSegments(inputValue) : null;
+  const isGuidedPasswordEntry = flow?.type === "create" && flow.step === "password";
+  const passwordDisplayValue = passwordRevealIndex === null ? inputValue : passwordSubmissionRef.current;
+  const visualInputText = isGuidedPasswordEntry
+    ? getDirectionTwoPasswordMask(passwordDisplayValue, passwordRevealIndex ?? passwordDisplayValue.length - 1)
+    : inputValue || (creating ? "creating room..." : placeholderFor(flow));
+  const visualCreateSegments = !isGuidedPasswordEntry && inputValue
+    ? getDirectionTwoCreateVisualSegments(inputValue, passwordRevealIndex ?? undefined)
+    : null;
+  const hasVisibleInput = Boolean(inputValue) || passwordRevealIndex !== null;
   const slashCommandHoverClass = slashSelectionMode === "pointer"
     ? "hover:bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] hover:text-[var(--color-signal)]"
     : "";
   const slashCommandLabelHoverClass = slashSelectionMode === "pointer"
     ? "group-hover:text-[var(--color-signal)]/75"
     : "";
-
   const handleGhostSuggestionTap = (event: PointerEvent<HTMLElement>) => {
     if (!ghostTapCompletion) return;
 
@@ -1281,7 +1364,6 @@ export function DirectionTwoShell() {
       data-route-handoff-phase={routeHandoffState.phase}
       onClick={focusInput}
     >
-      <AmbientShaderBackground opacity={isMobileViewport ? 0.34 : 0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-0 h-screen overflow-hidden">
         <div className="direction-two-ambient-glow absolute inset-0" style={ambientAtmosphereStyle} />
         {ambientPixels.map(pixel => (
@@ -1489,6 +1571,7 @@ export function DirectionTwoShell() {
                           selected ? "bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] text-[var(--color-signal)]" : "bg-transparent text-[var(--foreground)]"
                         }`}
                         key={item.command}
+                        onPointerDown={event => event.preventDefault()}
                         onClick={event => {
                           event.stopPropagation();
                           handleSlashCommandSuggestionTap(item.command);
@@ -1541,14 +1624,36 @@ export function DirectionTwoShell() {
               </span>
               <div className="relative ml-2 min-w-0 flex-1">
                 <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[14px] leading-[24px]">
-                {!inputValue && !creating && (
-                  <span aria-hidden="true" className="direction-two-visual-caret mr-px h-[22px] w-[2px] shrink-0 bg-[var(--foreground)]" />
+                {!hasVisibleInput && !creating && (
+                  <span aria-hidden="true" className="direction-two-visual-caret mr-px h-[22px] w-[3px] shrink-0 bg-[var(--foreground)]" />
                 )}
-                {inputValue && visualCreateSegments ? (
+                {isGuidedPasswordEntry && passwordDisplayValue ? (
+                  <span
+                    aria-hidden="true"
+                    className={
+                      passwordFinalShimmer
+                        ? "direction-two-password-complete-shimmer shrink-0 whitespace-pre"
+                        : passwordRevealIndex !== null
+                          ? "direction-two-password-reveal shrink-0 whitespace-pre text-[var(--foreground)]"
+                          : "shrink-0 whitespace-pre text-[var(--foreground)]"
+                    }
+                    key={`password-mask-${passwordRevealIndex ?? "typing"}`}
+                  >
+                    {visualInputText}
+                  </span>
+                ) : inputValue && visualCreateSegments ? (
                   <span className="shrink-0 whitespace-pre" aria-hidden="true">
                     {visualCreateSegments.map((segment, index) => (
                       <span
-                        className={segment.tone === "topic" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"}
+                        className={
+                          segment.tone === "topic"
+                            ? "text-[var(--color-signal)]"
+                            : segment.tone === "password" && passwordFinalShimmer
+                              ? "direction-two-password-complete-shimmer"
+                              : segment.tone === "password" && passwordRevealIndex !== null
+                                ? "direction-two-password-reveal text-[var(--foreground)]"
+                              : "text-[var(--foreground)]"
+                        }
                         data-create-segment-tone={segment.tone}
                         key={`${segment.tone}-${index}`}
                       >
@@ -1566,8 +1671,8 @@ export function DirectionTwoShell() {
                     {visualInputText}
                   </span>
                 )}
-                {inputValue && !creating && (
-                  <span aria-hidden="true" className="direction-two-visual-caret ml-px h-[22px] w-[2px] shrink-0 bg-[var(--foreground)]" />
+                {hasVisibleInput && !creating && passwordRevealIndex === null && (
+                  <span aria-hidden="true" className="direction-two-visual-caret ml-px h-[22px] w-[3px] shrink-0 bg-[var(--foreground)]" />
                 )}
                 {visibleGhostCompletionText && (
                   <button
@@ -1609,7 +1714,7 @@ export function DirectionTwoShell() {
                         {styleGhostChoices.map(choice => {
                           const color =
                             choice.id === "surprise"
-                              ? `conic-gradient(from 45deg, ${themePreviewColorById.orange}, ${themePreviewColorById.blue}, ${themePreviewColorById.green}, ${themePreviewColorById.purple}, ${themePreviewColorById.orange})`
+                              ? `conic-gradient(from 45deg, ${themePreviewColorById.orange}, ${themePreviewColorById.blue}, ${themePreviewColorById.crimson}, ${themePreviewColorById.purple}, ${themePreviewColorById.orange})`
                               : themePreviewColorById[choice.id];
 
                           return (
