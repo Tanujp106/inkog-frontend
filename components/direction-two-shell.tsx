@@ -213,6 +213,10 @@ const directionTwoTitleDialConfig = {
     glowRadius: [directionTwoTitleMotionDefaults.shimmerGlowRadius, 0, 32, 1],
     glowOpacity: [directionTwoTitleMotionDefaults.shimmerGlowOpacity, 0, 100, 1],
   },
+  hoverShimmer: {
+    durationMs: [directionTwoTitleMotionDefaults.hoverShimmerDurationMs, 600, 1800, 10],
+    spreadMs: [directionTwoTitleMotionDefaults.hoverShimmerSpreadMs, 0, 240, 2],
+  },
   magnet: {
     radius: [directionTwoTitleMotionDefaults.magnetRadius, 24, 180, 2],
     strength: [directionTwoTitleMotionDefaults.magnetStrength, 0.1, 2, 0.05],
@@ -402,6 +406,8 @@ export function DirectionTwoShell() {
     shimmerPeakBrightness: titleMotionDials.shimmer.peakBrightness,
     shimmerGlowRadius: titleMotionDials.shimmer.glowRadius,
     shimmerGlowOpacity: titleMotionDials.shimmer.glowOpacity,
+    hoverShimmerDurationMs: titleMotionDials.hoverShimmer.durationMs,
+    hoverShimmerSpreadMs: titleMotionDials.hoverShimmer.spreadMs,
     magnetRadius: titleMotionDials.magnet.radius,
     magnetStrength: titleMotionDials.magnet.strength,
     magnetMaxDisplacement: titleMotionDials.magnet.maxDisplacement,
@@ -1949,7 +1955,7 @@ function InkPatternMark({
     "--direction-two-title-shimmer-peak-brightness": titleMotionSettings.shimmerPeakBrightness,
     "--direction-two-title-shimmer-glow-radius": `${titleMotionSettings.shimmerGlowRadius}px`,
     "--direction-two-title-shimmer-glow-opacity": percent(titleMotionSettings.shimmerGlowOpacity),
-    "--direction-two-title-hover-shimmer-duration": `${directionTwoMarkMotion.hoverShimmerMs}ms`,
+    "--direction-two-title-hover-shimmer-duration": `${titleMotionSettings.hoverShimmerDurationMs}ms`,
     "--direction-two-title-magnet-return-duration": `${titleMotionSettings.magnetSpringMs}ms`,
   } as CSSProperties;
 
@@ -2063,7 +2069,7 @@ function PixelPatternGrid({
                   "--mark-formation-delay": `${formationDelay}ms`,
                   "--mark-shimmer-delay": `${shimmerDelay}ms`,
                   "--mark-hover-delay": `${Math.round(
-                    (shimmerColumn / Math.max(1, shimmerColumnCount - 1)) * directionTwoMarkMotion.markHoverMaxDelayMs,
+                    (shimmerColumn / Math.max(1, shimmerColumnCount - 1)) * titleMotionSettings.hoverShimmerSpreadMs,
                   )}ms`,
                 } as CSSProperties
               }
