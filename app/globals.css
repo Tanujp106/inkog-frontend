@@ -375,6 +375,10 @@ body::before {
     0
   );
 }
+.direction-two-mark[data-mark-phase="interactive"][data-mark-magnet-active="true"] .direction-two-mark-pixel-active {
+  transition-duration: 48ms;
+  transition-timing-function: linear;
+}
 .direction-two-mark-pixel-idle {
   background: var(--color-border);
   opacity: 0.06;

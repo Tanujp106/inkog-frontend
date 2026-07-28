@@ -1892,6 +1892,7 @@ function InkPatternMark({
 
   function resetMarkMagnetism() {
     latestPointerRef.current = null;
+    markRef.current?.removeAttribute("data-mark-magnet-active");
     if (magnetFrameRef.current !== null) {
       window.cancelAnimationFrame(magnetFrameRef.current);
       magnetFrameRef.current = null;
@@ -1925,8 +1926,9 @@ function InkPatternMark({
   }
 
   function handleMarkPointerMove(event: PointerEvent<HTMLDivElement>) {
-    if (event.pointerType !== "mouse" || phase !== "interactive" || reducedMotion) return;
+    if (event.pointerType === "touch" || phase !== "interactive" || reducedMotion) return;
 
+    markRef.current?.setAttribute("data-mark-magnet-active", "true");
     latestPointerRef.current = { x: event.clientX, y: event.clientY };
     if (magnetFrameRef.current === null) {
       magnetFrameRef.current = window.requestAnimationFrame(applyMarkMagnetism);
@@ -1953,7 +1955,7 @@ function InkPatternMark({
   return (
     <div
       aria-label={word}
-      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-hidden ${markScaleClass}`}
+      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-visible ${markScaleClass}`}
       data-mark-phase={phase}
       onPointerLeave={resetMarkMagnetism}
       onPointerMove={handleMarkPointerMove}
