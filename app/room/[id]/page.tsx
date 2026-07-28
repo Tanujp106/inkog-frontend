@@ -19,8 +19,7 @@ import {
   applyInkogTheme,
   inkogThemeChoices,
 } from "@/lib/inkog-theme.mjs";
-import { roomThemeBackground } from "@/lib/room-background.mjs";
-import { routeComposerGeometry } from "@/lib/route-transition.mjs";
+import { roomAmbientShaderOpacity, roomThemeBackground } from "@/lib/room-background.mjs";
 import { getRoomRoster, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
 import { getRoomCountdownNotification } from "@/lib/room-notifications.mjs";
 import {
@@ -134,12 +133,6 @@ export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const sound = useSystemSound();
-  const {
-    activeRoomId,
-    cancelRoomHandoff,
-    handoffPending,
-    reportRoomReady,
-  } = useRouteTransition();
   const roomId = params.id as string;
   const {
     cancelRoomHandoff,
@@ -173,8 +166,6 @@ export default function RoomPage() {
   const [pendingCommand, setPendingCommand] = useState<PendingComposerCommand>(null);
   const [passwordReveal, setPasswordReveal] = useState<PasswordReveal | null>(null);
   const [slashSuggestionIndex, setSlashSuggestionIndex] = useState(0);
-  const [historyHydrated, setHistoryHydrated] = useState(false);
-  const [socketJoined, setSocketJoined] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
@@ -340,7 +331,6 @@ export default function RoomPage() {
         createdAt: new Date().toISOString(),
         isSystem: true,
       }]);
-      setSocketJoined(true);
       onReady();
     });
 
@@ -467,7 +457,6 @@ export default function RoomPage() {
     setIsCreator(joinData.isCreator);
     if (options.fromPasswordGate) setPasswordGateUnlocked(true);
     await fetchHistory(joinData.anonToken);
-    setHistoryHydrated(true);
     setStage(resolveRoomStageAfterAuthenticatedJoin());
     connectSocket(joinData.anonToken, joinData.alias, () => setIsRealtimeReady(true));
   };
@@ -489,8 +478,6 @@ export default function RoomPage() {
     const run = async () => {
       setPasswordError("");
       setPasswordGateUnlocked(false);
-      setHistoryHydrated(false);
-      setSocketJoined(false);
 
       try {
         const roomRes = await fetch(`${API}/rooms/${roomId}`);
@@ -559,26 +546,6 @@ export default function RoomPage() {
   // roomId is the only stable route dependency; socket helpers close over current room state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
-
-  const roomReadyForHandoff = isRoomReadyForHandoff({
-    stage,
-    historyHydrated,
-    socketJoined,
-    passwordGate: stage === "password",
-  });
-
-  useEffect(() => {
-    if (activeRoomId !== roomId) return;
-
-    if (roomReadyForHandoff) {
-      reportRoomReady(roomId, composerRef.current);
-      return;
-    }
-
-    if (stage === "password" || stage === "expired" || stage === "error") {
-      cancelRoomHandoff(roomId);
-    }
-  }, [activeRoomId, cancelRoomHandoff, reportRoomReady, roomId, roomReadyForHandoff, stage]);
 
   const handlePasswordSubmit = async (passwordValue: string) => {
     const nextPassword = passwordValue.trim();
@@ -2071,7 +2038,6 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: "column",
     gap: 0,
     justifyContent: "center",
-    maxWidth: routeComposerGeometry.maxWidth,
     minHeight: "58px",
     overflow: "hidden",
     transition: "min-height 200ms ease-out",

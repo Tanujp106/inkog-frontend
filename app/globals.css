@@ -1,56 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap');
 @import "tailwindcss";
 
-.route-transition-root {
-  --route-composer-bottom-padding: 32px;
-  background: var(--background, var(--bg));
-  isolation: isolate;
-  min-height: 100dvh;
-  position: relative;
-}
-
-@media (min-width: 640px) {
-  .route-transition-root {
-    --route-composer-bottom-padding: 52px;
-  }
-}
-
-.route-transition-layer {
-  min-height: 100dvh;
-  position: relative;
-  transition-property: opacity, transform;
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-  z-index: 1;
-}
-
-.route-transition-destination,
-.route-transition-outgoing {
-  inset: 0;
-  position: fixed;
-}
-
-.route-transition-outgoing,
-.route-transition-destination {
-  overflow: auto;
-}
-
-.route-transition-outgoing [data-route-composer],
-.route-transition-destination [data-route-composer] {
-  visibility: hidden;
-}
-
-.route-transition-composer-snapshot {
-  pointer-events: none;
-  position: fixed;
-  z-index: 3;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .route-transition-layer {
-    transform: none !important;
-  }
-}
-
 @font-face {
   font-family: "Departure Mono";
   src: url("/fonts/DepartureMono-Regular.woff2") format("woff2");

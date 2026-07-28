@@ -3,7 +3,6 @@
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useDialKit, type DialConfig } from "dialkit";
 import { useRouter } from "next/navigation";
-import { useDialKit, type DialConfig } from "dialkit";
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import { useRouteHandoff } from "@/components/route-handoff-provider";
@@ -501,8 +500,9 @@ export function DirectionTwoShell() {
   };
 
   useEffect(() => {
+    if (!isTerminalVisible) return;
     focusInput();
-  }, []);
+  }, [isTerminalVisible]);
 
   useEffect(() => {
     return () => {
