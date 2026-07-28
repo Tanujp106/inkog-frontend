@@ -35,9 +35,12 @@ import {
   directionTwoAmbientConfig,
   createDirectionTwoAmbientRandom,
   createDirectionTwoAmbientPixels,
+  directionTwoTitleMotionDefaults,
   directionTwoMarkMotion,
   directionTwoMarkWords,
+  getDirectionTwoFormationDelay,
   getDirectionTwoScrambleFrame,
+  getDirectionTwoSineShimmerDelay,
 } from "@/lib/direction-two-intro.mjs";
 import {
   formatSystemSoundStatus,
@@ -52,6 +55,7 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
 const roomIdPattern = /([a-z0-9]{6})$/i;
 const themeStorageKey = "inkog-theme";
 type DirectionTwoTheme = (typeof directionTwoThemes)[number];
+type DirectionTwoTitlePhase = "forming" | "shimmering" | "interactive";
 
 type TerminalLine = {
   id: string;
@@ -384,7 +388,6 @@ export function DirectionTwoShell() {
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isInputNudging, setIsInputNudging] = useState(false);
-  const [hasMarkIntroPlayed, setHasMarkIntroPlayed] = useState(false);
   const [composerReserveHeight, setComposerReserveHeight] = useState(0);
   const shimmerSettings: DirectionTwoShimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
@@ -485,19 +488,6 @@ export function DirectionTwoShell() {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (prefersReducedMotion) {
-      setHasMarkIntroPlayed(true);
-      return;
-    }
-
-    const introTimer = window.setTimeout(() => {
-      setHasMarkIntroPlayed(true);
-    }, directionTwoMarkMotion.introShimmerMs + 1000);
-
-    return () => window.clearTimeout(introTimer);
-  }, [prefersReducedMotion]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1335,9 +1325,6 @@ export function DirectionTwoShell() {
           <div>
             <InkPatternMark
               reducedMotion={prefersReducedMotion}
-              shimmerSettings={shimmerSettings}
-              shimmerStyle={shimmerStyle}
-              showIntro={!hasMarkIntroPlayed && !prefersReducedMotion}
               size="mobile"
               word={directionTwoMarkWords[0]}
             />
@@ -1373,9 +1360,6 @@ export function DirectionTwoShell() {
           <div>
             <InkPatternMark
               reducedMotion={prefersReducedMotion}
-              shimmerSettings={shimmerSettings}
-              shimmerStyle={shimmerStyle}
-              showIntro={!hasMarkIntroPlayed && !prefersReducedMotion}
               word={directionTwoMarkWords[0]}
             />
           </div>
@@ -1725,81 +1709,71 @@ function PromptPixelGlyph({ pattern }: { pattern: string[] }) {
 function InkPatternMark({
   word,
   reducedMotion,
-  shimmerSettings,
-  shimmerStyle,
-  showIntro,
   size = "desktop",
 }: {
   word: string;
   reducedMotion: boolean;
-  shimmerSettings: DirectionTwoShimmerSettings;
-  shimmerStyle: CSSProperties;
-  showIntro: boolean;
   size?: "desktop" | "mobile";
 }) {
-  const [isMarkShimmering, setIsMarkShimmering] = useState(false);
-  const shimmerFrameRef = useRef<number | null>(null);
-  const shimmerTimeoutRef = useRef<number | null>(null);
+  const titleMotionSettings = directionTwoTitleMotionDefaults;
+  const [phase, setPhase] = useState<DirectionTwoTitlePhase>(
+    reducedMotion ? "interactive" : "forming",
+  );
   const markScaleClass =
     size === "mobile"
       ? "[--cell:clamp(3.2px,0.84vw,3.6px)] [--gap:1px] [--letter-gap:4px]"
       : "[--cell:clamp(4.4px,0.62vw,7.8px)] [--gap:clamp(1px,0.14vw,2.2px)] [--letter-gap:clamp(5.5px,0.5vw,10px)]";
 
   useEffect(() => {
+    if (reducedMotion) {
+      setPhase("interactive");
+      return;
+    }
+
+    setPhase("forming");
+    const formationTimer = window.setTimeout(() => {
+      setPhase("shimmering");
+    }, titleMotionSettings.formationDurationMs + titleMotionSettings.formationSpreadMs);
+    const interactiveTimer = window.setTimeout(() => {
+      setPhase("interactive");
+    }, (
+      titleMotionSettings.formationDurationMs
+      + titleMotionSettings.formationSpreadMs
+      + titleMotionSettings.shimmerDurationMs
+      + titleMotionSettings.shimmerSpreadMs
+      + titleMotionSettings.shimmerAmplitudeMs
+    ));
+
     return () => {
-      if (shimmerFrameRef.current !== null) {
-        window.cancelAnimationFrame(shimmerFrameRef.current);
-      }
-      if (shimmerTimeoutRef.current !== null) {
-        window.clearTimeout(shimmerTimeoutRef.current);
-      }
+      window.clearTimeout(formationTimer);
+      window.clearTimeout(interactiveTimer);
     };
-  }, []);
+  }, [reducedMotion]);
 
-  function triggerMarkShimmer() {
-    if (reducedMotion || typeof window === "undefined") return;
-    if (showIntro) return;
-    if (shimmerFrameRef.current !== null) {
-      window.cancelAnimationFrame(shimmerFrameRef.current);
-    }
-    if (shimmerTimeoutRef.current !== null) {
-      window.clearTimeout(shimmerTimeoutRef.current);
-    }
-
-    setIsMarkShimmering(false);
-    shimmerFrameRef.current = window.requestAnimationFrame(() => {
-      shimmerFrameRef.current = null;
-      setIsMarkShimmering(true);
-      shimmerTimeoutRef.current = window.setTimeout(() => {
-        shimmerTimeoutRef.current = null;
-        setIsMarkShimmering(false);
-      }, Math.max(
-        shimmerSettings.durationMs + shimmerSettings.delayMaxMs + shimmerSettings.burstTailMs,
-        shimmerSettings.titleDurationMs + shimmerSettings.titleDelayMaxMs + shimmerSettings.titleBurstTailMs,
-      ));
-    });
-  }
+  const titleMotionStyle = {
+    "--direction-two-title-formation-duration": `${titleMotionSettings.formationDurationMs}ms`,
+    "--direction-two-title-formation-brightness": titleMotionSettings.formationPeakBrightness,
+    "--direction-two-title-shimmer-duration": `${titleMotionSettings.shimmerDurationMs}ms`,
+    "--direction-two-title-shimmer-color-mix": percent(titleMotionSettings.shimmerColorMixPercent),
+    "--direction-two-title-shimmer-foreground-mix": percent(100 - titleMotionSettings.shimmerColorMixPercent),
+    "--direction-two-title-shimmer-peak-brightness": titleMotionSettings.shimmerPeakBrightness,
+    "--direction-two-title-shimmer-glow-radius": `${titleMotionSettings.shimmerGlowRadius}px`,
+    "--direction-two-title-shimmer-glow-opacity": percent(titleMotionSettings.shimmerGlowOpacity),
+    "--direction-two-title-magnet-return-duration": `${titleMotionSettings.magnetSpringMs}ms`,
+  } as CSSProperties;
 
   return (
     <div
       aria-label={word}
-      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-hidden ${isMarkShimmering ? "direction-two-mark-shimmering" : ""} ${markScaleClass}`}
-      onPointerEnter={triggerMarkShimmer}
+      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-hidden ${markScaleClass}`}
+      data-mark-phase={phase}
       role="img"
-      style={
-        {
-          ...shimmerStyle,
-          "--mark-intro-shimmer-duration": `${directionTwoMarkMotion.introShimmerMs}ms`,
-          "--mark-intro-shimmer-count": directionTwoMarkMotion.introShimmerIterationCount,
-          "--mark-hover-shimmer-duration": `${shimmerSettings.durationMs}ms`,
-          "--mark-hover-shimmer-count": directionTwoMarkMotion.hoverShimmerIterationCount,
-        } as CSSProperties
-      }
+      style={titleMotionStyle}
     >
       <InkPatternMarkLayer
-        className={`${showIntro ? "direction-two-mark-layer-entering" : ""} direction-two-mark-word`}
+        className="direction-two-mark-word"
         key={word}
-        shimmerDelayMaxMs={shimmerSettings.titleDelayMaxMs}
+        titleMotionSettings={titleMotionSettings}
         word={word}
       />
     </div>
@@ -1809,11 +1783,11 @@ function InkPatternMark({
 function InkPatternMarkLayer({
   word,
   className = "",
-  shimmerDelayMaxMs,
+  titleMotionSettings,
 }: {
   word: string;
   className?: string;
-  shimmerDelayMaxMs: number;
+  titleMotionSettings: typeof directionTwoTitleMotionDefaults;
 }) {
   const patterns: string[][] = buildDirectionTwoMarkPattern(word);
   const density = 2;
@@ -1830,7 +1804,7 @@ function InkPatternMarkLayer({
           key={letterIndex}
           letterIndex={letterIndex}
           pattern={letter}
-          shimmerDelayMaxMs={shimmerDelayMaxMs}
+          titleMotionSettings={titleMotionSettings}
           shimmerColumnCount={shimmerColumnCount}
         />
       ))}
@@ -1842,13 +1816,13 @@ function PixelPatternGrid({
   density = 1,
   pattern,
   letterIndex,
-  shimmerDelayMaxMs = directionTwoMarkMotion.markHoverMaxDelayMs,
+  titleMotionSettings,
   shimmerColumnCount,
 }: {
   density?: number;
   pattern: string[];
   letterIndex: number;
-  shimmerDelayMaxMs?: number;
+  titleMotionSettings: typeof directionTwoTitleMotionDefaults;
   shimmerColumnCount: number;
 }) {
   const densePattern = density > 1 ? createDensePixelPattern(pattern, density) : pattern;
@@ -1868,9 +1842,19 @@ function PixelPatternGrid({
         [...row].map((cell, columnIndex) => {
           const active = cell === "1";
           const shimmerColumn = letterIndex * (columnCount + 2) + columnIndex;
-          const resolveDelay = Math.min(shimmerColumn * 14 + rowIndex * 5, 520);
-          const shimmerDelay = Math.round(
-            (shimmerColumn / Math.max(shimmerColumnCount - 1, 1)) * shimmerDelayMaxMs,
+          const formationDelay = getDirectionTwoFormationDelay(
+            shimmerColumn,
+            shimmerColumnCount,
+            titleMotionSettings.formationSpreadMs,
+          );
+          const shimmerDelay = getDirectionTwoSineShimmerDelay(
+            shimmerColumn,
+            rowIndex,
+            shimmerColumnCount,
+            rowCount,
+            titleMotionSettings.shimmerSpreadMs,
+            titleMotionSettings.shimmerAmplitudeMs,
+            titleMotionSettings.shimmerFrequency,
           );
 
           return (
@@ -1881,7 +1865,7 @@ function PixelPatternGrid({
               key={`${rowIndex}-${columnIndex}`}
               style={
                 {
-                  "--mark-pixel-delay": `${resolveDelay}ms`,
+                  "--mark-formation-delay": `${formationDelay}ms`,
                   "--mark-shimmer-delay": `${shimmerDelay}ms`,
                 } as CSSProperties
               }
