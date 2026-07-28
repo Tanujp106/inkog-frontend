@@ -345,6 +345,8 @@ body::before {
   background: var(--foreground);
   opacity: 1;
   box-shadow: 0 0 0 rgba(200, 255, 87, 0);
+  transition: transform var(--direction-two-title-magnet-return-duration, 180ms) var(--ease-out-strong);
+  will-change: transform;
 }
 .direction-two-mark[data-mark-phase="forming"] .direction-two-mark-pixel-active {
   animation:
@@ -353,6 +355,7 @@ body::before {
     var(--ease-out-strong)
     var(--mark-formation-delay, 0ms)
     both;
+  transform: none;
 }
 .direction-two-mark[data-mark-phase="shimmering"] .direction-two-mark-pixel-active {
   animation:
@@ -362,7 +365,15 @@ body::before {
     var(--mark-shimmer-delay, 0ms)
     1
     both;
+  transform: none;
   will-change: background-color, filter;
+}
+.direction-two-mark[data-mark-phase="interactive"] .direction-two-mark-pixel-active {
+  transform: translate3d(
+    var(--mark-magnet-x, 0px),
+    var(--mark-magnet-y, 0px),
+    0
+  );
 }
 .direction-two-mark-pixel-idle {
   background: var(--color-border);
@@ -410,9 +421,14 @@ body::before {
   .direction-two-highlight-icon,
   .direction-two-highlight-pixel-active,
   .direction-two-highlight-pixel-idle,
+  .direction-two-mark-pixel-active,
   .direction-two-input-nudge {
     animation: none;
     transition: none;
+  }
+
+  .direction-two-mark[data-mark-phase="interactive"] .direction-two-mark-pixel-active {
+    transform: none;
   }
 
   .direction-two-intro-row:hover .direction-two-highlight-pixel-active {

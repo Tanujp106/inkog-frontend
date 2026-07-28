@@ -39,6 +39,7 @@ import {
   directionTwoMarkMotion,
   directionTwoMarkWords,
   getDirectionTwoFormationDelay,
+  getDirectionTwoMagnetOffset,
   getDirectionTwoScrambleFrame,
   getDirectionTwoSineShimmerDelay,
 } from "@/lib/direction-two-intro.mjs";
@@ -1716,6 +1717,9 @@ function InkPatternMark({
   size?: "desktop" | "mobile";
 }) {
   const titleMotionSettings = directionTwoTitleMotionDefaults;
+  const markRef = useRef<HTMLDivElement | null>(null);
+  const magnetFrameRef = useRef<number | null>(null);
+  const latestPointerRef = useRef<{ x: number; y: number } | null>(null);
   const [phase, setPhase] = useState<DirectionTwoTitlePhase>(
     reducedMotion ? "interactive" : "forming",
   );
@@ -1750,6 +1754,68 @@ function InkPatternMark({
     };
   }, [reducedMotion]);
 
+  useEffect(() => {
+    if (phase !== "interactive" || reducedMotion) {
+      resetMarkMagnetism();
+    }
+
+    return () => {
+      if (magnetFrameRef.current !== null) {
+        window.cancelAnimationFrame(magnetFrameRef.current);
+        magnetFrameRef.current = null;
+      }
+    };
+  }, [phase, reducedMotion]);
+
+  function getActiveMarkPixels() {
+    return Array.from(
+      markRef.current?.querySelectorAll<HTMLElement>(".direction-two-mark-pixel-active") ?? [],
+    );
+  }
+
+  function resetMarkMagnetism() {
+    latestPointerRef.current = null;
+    if (magnetFrameRef.current !== null) {
+      window.cancelAnimationFrame(magnetFrameRef.current);
+      magnetFrameRef.current = null;
+    }
+
+    for (const pixel of getActiveMarkPixels()) {
+      pixel.style.setProperty("--mark-magnet-x", "0px");
+      pixel.style.setProperty("--mark-magnet-y", "0px");
+    }
+  }
+
+  function applyMarkMagnetism() {
+    magnetFrameRef.current = null;
+    const pointer = latestPointerRef.current;
+    if (!pointer || phase !== "interactive" || reducedMotion) return;
+
+    for (const pixel of getActiveMarkPixels()) {
+      const rect = pixel.getBoundingClientRect();
+      const offset = getDirectionTwoMagnetOffset(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+        pointer.x,
+        pointer.y,
+        titleMotionSettings.magnetRadius,
+        titleMotionSettings.magnetStrength,
+        titleMotionSettings.magnetMaxDisplacement,
+      );
+      pixel.style.setProperty("--mark-magnet-x", `${offset.x}px`);
+      pixel.style.setProperty("--mark-magnet-y", `${offset.y}px`);
+    }
+  }
+
+  function handleMarkPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== "mouse" || phase !== "interactive" || reducedMotion) return;
+
+    latestPointerRef.current = { x: event.clientX, y: event.clientY };
+    if (magnetFrameRef.current === null) {
+      magnetFrameRef.current = window.requestAnimationFrame(applyMarkMagnetism);
+    }
+  }
+
   const titleMotionStyle = {
     "--direction-two-title-formation-duration": `${titleMotionSettings.formationDurationMs}ms`,
     "--direction-two-title-formation-brightness": titleMotionSettings.formationPeakBrightness,
@@ -1767,6 +1833,9 @@ function InkPatternMark({
       aria-label={word}
       className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-hidden ${markScaleClass}`}
       data-mark-phase={phase}
+      onPointerLeave={resetMarkMagnetism}
+      onPointerMove={handleMarkPointerMove}
+      ref={markRef}
       role="img"
       style={titleMotionStyle}
     >
