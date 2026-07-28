@@ -23,3 +23,7 @@ export function buildRoomGateTranscriptLines(input: {
 }): string[];
 
 export function resolveRoomStageAfterAuthenticatedJoin(): "joined";
+export function isRoomComposerInteractive(
+  stage: "loading" | "password" | "joined" | "expired" | "error",
+  isRealtimeReady: boolean,
+): boolean;

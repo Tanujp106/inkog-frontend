@@ -44,6 +44,7 @@ export declare const directionTwoAmbientConfig: {
 export declare function getDirectionTwoScrambleFrame(target: string, progress: number): string;
 export declare function buildDirectionTwoPixelWord(word: string): string[][];
 export declare function buildDirectionTwoMarkPattern(word: string): string[][];
+export declare function createDirectionTwoAmbientRandom(seed?: number): () => number;
 export declare function createDirectionTwoAmbientPixels(
   random?: () => number,
   options?: {

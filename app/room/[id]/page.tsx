@@ -6,10 +6,12 @@ import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
+import { useRouteHandoff } from "@/components/route-handoff-provider";
 import {
   buildRoomGateTranscriptLines,
   buildRoomPeerColorMap,
   classifyRoomMessage,
+  isRoomComposerInteractive,
   resolveRoomStageAfterAuthenticatedJoin,
 } from "@/lib/room-chat-ui.mjs";
 import { getRoomComposerChrome, getRoomSlashCommandSuggestions } from "@/lib/room-composer-ui.mjs";
@@ -132,6 +134,13 @@ export default function RoomPage() {
   const router = useRouter();
   const sound = useSystemSound();
   const roomId = params.id as string;
+  const {
+    cancelRoomHandoff,
+    composerStyle,
+    getRoomForegroundStyle,
+    markRoomReady,
+    state: routeHandoffState,
+  } = useRouteHandoff();
 
   const [stage, setStage] = useState<Stage>("loading");
   const [errorMsg, setErrorMsg] = useState("");
@@ -151,6 +160,7 @@ export default function RoomPage() {
   const [terminalEvents, setTerminalEvents] = useState<TerminalEvent[]>([]);
   const [composerValue, setComposerValue] = useState("");
   const [socketError, setSocketError] = useState("");
+  const [isRealtimeReady, setIsRealtimeReady] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
   const [composerStatus, setComposerStatus] = useState<ComposerStatus | null>(null);
   const [pendingCommand, setPendingCommand] = useState<PendingComposerCommand>(null);
@@ -240,8 +250,10 @@ export default function RoomPage() {
   }, [transcript]);
 
   useEffect(() => {
-    if (stage === "joined" || stage === "password") requestAnimationFrame(() => composerRef.current?.focus());
-  }, [stage]);
+    if (isRoomComposerInteractive(stage, isRealtimeReady)) {
+      requestAnimationFrame(() => composerRef.current?.focus());
+    }
+  }, [isRealtimeReady, stage]);
 
   useEffect(() => {
     if (stage !== "joined") {
@@ -278,6 +290,7 @@ export default function RoomPage() {
   }, []);
 
   const connectSocket = (token: string, myAlias: string, onReady: () => void) => {
+    setIsRealtimeReady(false);
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
@@ -434,8 +447,19 @@ export default function RoomPage() {
     if (options.fromPasswordGate) setPasswordGateUnlocked(true);
     await fetchHistory(joinData.anonToken);
     setStage(resolveRoomStageAfterAuthenticatedJoin());
-    connectSocket(joinData.anonToken, joinData.alias, () => undefined);
+    connectSocket(joinData.anonToken, joinData.alias, () => setIsRealtimeReady(true));
   };
+
+  useEffect(() => {
+    if (stage === "joined" && isRealtimeReady) {
+      markRoomReady(roomId);
+      return;
+    }
+
+    if (stage === "password" || stage === "expired" || stage === "error") {
+      cancelRoomHandoff();
+    }
+  }, [cancelRoomHandoff, isRealtimeReady, markRoomReady, roomId, stage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -792,13 +816,11 @@ export default function RoomPage() {
   };
 
   const runComposer = () => {
+    if (!isRoomComposerInteractive(stage, isRealtimeReady)) return;
+
     const rawValue = composerValue;
     const value = rawValue.trim();
     setComposerValue("");
-
-    if (stage === "loading") {
-      return;
-    }
 
     if (stage === "password") {
       setPendingCommand(null);
@@ -969,6 +991,10 @@ export default function RoomPage() {
       : composerStatus?.tone === "accent"
         ? "var(--accent)"
         : "var(--text-muted)";
+  const roomForegroundStyle =
+    stage === "password" || stage === "expired" || stage === "error"
+      ? undefined
+      : getRoomForegroundStyle(roomId);
 
   useEffect(() => {
     setSlashSuggestionIndex(index => {
@@ -1000,9 +1026,13 @@ export default function RoomPage() {
   }
 
   return (
-    <main style={styles.roomShell} onClick={() => composerRef.current?.focus()}>
+    <main
+      data-route-handoff-phase={routeHandoffState.phase}
+      style={styles.roomShell}
+      onClick={() => composerRef.current?.focus()}
+    >
       <AmbientShaderBackground opacity={roomAmbientShaderOpacity} style={{ mixBlendMode: "screen", zIndex: 0 }} />
-      <header style={styles.roomHeader}>
+      <header style={{ ...styles.roomHeader, ...roomForegroundStyle }}>
         <div style={styles.headerIdentity}>
           <span style={styles.brand}>inkog</span>
           <span style={styles.headerDivider}>/</span>
@@ -1014,9 +1044,9 @@ export default function RoomPage() {
         </div>
       </header>
 
-      {socketError && <div style={styles.errorToast}>error: {socketError}</div>}
+      {socketError && <div style={{ ...styles.errorToast, ...roomForegroundStyle }}>error: {socketError}</div>}
 
-      <section aria-label="Room terminal transcript" style={styles.transcript}>
+      <section aria-label="Room terminal transcript" style={{ ...styles.transcript, ...roomForegroundStyle }}>
         {gateTranscriptLines.length > 0 ? (
           <RoomGateTranscript lines={gateTranscriptLines} passwordError={isPasswordGate ? passwordError : ""} />
         ) : null}
@@ -1062,12 +1092,12 @@ export default function RoomPage() {
           event.preventDefault();
           runComposer();
         }}
-        style={styles.composer}
+        style={{ ...styles.composer, ...composerStyle }}
       >
         <div
           style={{
             ...styles.composerFrame,
-            minHeight: composerHasTopContent ? "76px" : "48px",
+            minHeight: composerHasTopContent ? "76px" : "58px",
             padding: composerHasTopContent ? "10px 12px" : "0 16px",
           }}
         >
@@ -1212,8 +1242,8 @@ export default function RoomPage() {
               }}
               ref={composerRef}
               spellCheck={false}
-              disabled={isRoomBooting}
-              placeholder={isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
+              disabled={!isRoomComposerInteractive(stage, isRealtimeReady)}
+              placeholder={!isRoomComposerInteractive(stage, isRealtimeReady) ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
               style={{
                 ...styles.composerInput,
                 caretColor: showIdleCursor ? "transparent" : "var(--text)",
@@ -1982,7 +2012,7 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     flexShrink: 0,
-    padding: "0 clamp(16px, 3vw, 32px) 16px",
+    padding: 0,
     position: "relative",
     zIndex: 1,
   },

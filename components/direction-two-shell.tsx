@@ -2,9 +2,9 @@
 
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useDialKit, type DialConfig } from "dialkit";
 
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
+import { useRouteHandoff } from "@/components/route-handoff-provider";
 import {
   completeDirectionTwoCommand,
   completeDirectionTwoCommandArgument,
@@ -33,6 +33,7 @@ import {
   buildDirectionTwoMarkPattern,
   directionTwoAmbientAtmosphere,
   directionTwoAmbientConfig,
+  createDirectionTwoAmbientRandom,
   createDirectionTwoAmbientPixels,
   directionTwoMarkMotion,
   directionTwoMarkWords,
@@ -182,79 +183,40 @@ type DirectionTwoShimmerSettings = {
 };
 
 const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
-  durationMs: 1040,
-  delayMaxMs: 120,
-  transitionMs: 360,
-  burstTailMs: 120,
-  titleDurationMs: 660,
-  titleDelayMaxMs: 280,
-  titleBurstTailMs: 130,
+  durationMs: 380,
+  delayMaxMs: 350,
+  transitionMs: 880,
+  burstTailMs: 420,
+  titleDurationMs: 380,
+  titleDelayMaxMs: 400,
+  titleBurstTailMs: 420,
   idleOpacity: 1,
   peakOpacity: 1,
   settleOpacity: 1,
   idleBrightness: 1,
   peakBrightness: 1.16,
   settleBrightness: 1,
-  signalRadius: 4,
+  signalRadius: 21,
   haloRadius: 11,
   signalOpacity: 38,
   haloOpacity: 46,
   colorMixPercent: 38,
-  titleColorMixPercent: 62,
-  titlePeakBrightness: 1.34,
-  titleSettleBrightness: 1.08,
-  titleSignalRadius: 6,
-  titleHaloRadius: 16,
-  titleSignalOpacity: 58,
-  titleHaloOpacity: 64,
+  titleColorMixPercent: 46,
+  titlePeakBrightness: 1.9,
+  titleSettleBrightness: 0.7,
+  titleSignalRadius: 21,
+  titleHaloRadius: 14,
+  titleSignalOpacity: 41,
+  titleHaloOpacity: 46,
   easingX1: 0.34,
   easingY1: 0.8,
   easingX2: 0.26,
   easingY2: 1,
-  titleEasingX1: 0.28,
-  titleEasingY1: 0.72,
-  titleEasingX2: 0.18,
+  titleEasingX1: 0.4,
+  titleEasingY1: 1,
+  titleEasingX2: 0.39,
   titleEasingY2: 1,
 };
-
-const directionTwoIconDialConfig = {
-  durationMs: [1040, 200, 3000],
-  delayMaxMs: [120, 0, 600],
-  transitionMs: [360, 0, 1500],
-  burstTailMs: [120, 0, 600],
-  idleOpacity: [1, 0, 1],
-  peakOpacity: [1, 0, 1],
-  settleOpacity: [1, 0, 1],
-  idleBrightness: [1, 0.5, 2],
-  peakBrightness: [1.16, 0.5, 3],
-  settleBrightness: [1, 0.5, 2],
-  signalRadius: [4, 0, 32],
-  haloRadius: [11, 0, 48],
-  signalOpacity: [38, 0, 100],
-  haloOpacity: [46, 0, 100],
-  colorMixPercent: [38, 0, 100],
-  easingX1: [0.34, 0, 1],
-  easingY1: [0.8, 0, 1.5],
-  easingX2: [0.26, 0, 1],
-  easingY2: [1, 0, 1.5],
-} satisfies DialConfig;
-
-const directionTwoTitleDialConfig = {
-  titleDurationMs: [660, 200, 3000],
-  titleDelayMaxMs: [280, 0, 800],
-  titleBurstTailMs: [130, 0, 600],
-  titlePeakBrightness: [1.34, 0.5, 3],
-  titleSettleBrightness: [1.08, 0.5, 2],
-  titleSignalRadius: [6, 0, 40],
-  titleHaloRadius: [16, 0, 60],
-  titleSignalOpacity: [58, 0, 100],
-  titleHaloOpacity: [64, 0, 100],
-  titleColorMixPercent: [62, 0, 100],
-  titleEasingX1: [0.28, 0, 1],
-  titleEasingY1: [0.72, 0, 1.5],
-  titleEasingX2: [0.18, 0, 1],
-  titleEasingY2: [1, 0, 1.5],
-} satisfies DialConfig;
 
 function percent(value: number) {
   return `${value}%`;
@@ -394,11 +356,17 @@ function commandCompletionFor(value: string, flow: SessionFlow | null) {
 export function DirectionTwoShell() {
   const router = useRouter();
   const sound = useSystemSound();
+  const {
+    beginRoomHandoff,
+    composerStyle,
+    landingForegroundStyle,
+    state: routeHandoffState,
+  } = useRouteHandoff();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const inputMirrorRef = useRef<HTMLDivElement | null>(null);
-  const promptRowRef = useRef<HTMLDivElement | null>(null);
-  const slashMenuRef = useRef<HTMLDivElement | null>(null);
   const terminalOutputRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  const slashMenuRef = useRef<HTMLDivElement | null>(null);
   const inputNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [lines, setLines] = useState<TerminalLine[]>(initialLines);
@@ -417,17 +385,15 @@ export function DirectionTwoShell() {
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isInputNudging, setIsInputNudging] = useState(false);
   const [hasMarkIntroPlayed, setHasMarkIntroPlayed] = useState(false);
-  const iconDial = useDialKit("Icons animation", directionTwoIconDialConfig);
-  const titleDial = useDialKit("INKOG title animation", directionTwoTitleDialConfig);
-  const shimmerSettings: DirectionTwoShimmerSettings = {
-    ...defaultDirectionTwoShimmerSettings,
-    ...iconDial,
-    ...titleDial,
-  };
+  const [composerReserveHeight, setComposerReserveHeight] = useState(0);
+  const shimmerSettings: DirectionTwoShimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
   const slashCommandSuggestions = !flow && !inputFeedbackMessage ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
+  const isSlashMenuOpen = slashCommandSuggestions.length > 0;
+  const isLandingForegroundHidden =
+    routeHandoffState.phase === "leaving" || routeHandoffState.phase === "pending";
   const ambientPixels = useMemo(() => {
-    return createDirectionTwoAmbientPixels(Math.random, directionTwoAmbientConfig);
+    return createDirectionTwoAmbientPixels(createDirectionTwoAmbientRandom(), directionTwoAmbientConfig);
   }, []);
   const ambientAtmosphereStyle = {
     background: directionTwoAmbientAtmosphere.background,
@@ -579,6 +545,22 @@ export function DirectionTwoShell() {
   }, []);
 
   useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer || typeof ResizeObserver === "undefined") return;
+
+    const syncComposerReserve = () => {
+      if (isSlashMenuOpen) return;
+      setComposerReserveHeight(Math.ceil(composer.getBoundingClientRect().height) + 12);
+    };
+
+    syncComposerReserve();
+    const observer = new ResizeObserver(syncComposerReserve);
+    observer.observe(composer);
+
+    return () => observer.disconnect();
+  }, [isSlashMenuOpen]);
+
+  useEffect(() => {
     setIsTerminalVisible(prefersReducedMotion);
 
     if (prefersReducedMotion) return;
@@ -593,14 +575,33 @@ export function DirectionTwoShell() {
   }, [prefersReducedMotion]);
 
   useEffect(() => {
-    const terminalOutput = terminalOutputRef.current;
-    if (!terminalOutput) return;
+    if (typeof window === "undefined") return;
 
-    terminalOutput.scrollTo({
-      top: terminalOutput.scrollHeight,
-      behavior: prefersReducedMotion ? "auto" : "smooth",
-    });
-  }, [lines.length, prefersReducedMotion]);
+    let frame = 0;
+    let remainingPasses = 5;
+
+    const keepLatestLineAboveComposer = () => {
+      const output = terminalOutputRef.current;
+      const composer = composerRef.current;
+      const latestLine = output?.lastElementChild;
+      if (!latestLine || !composer) return;
+
+      const requiredGap = 12;
+      const overlap = latestLine.getBoundingClientRect().bottom - composer.getBoundingClientRect().top + requiredGap;
+      if (overlap > 0) {
+        window.scrollBy({ top: overlap, behavior: "auto" });
+      }
+
+      remainingPasses -= 1;
+      if (remainingPasses > 0) {
+        frame = window.requestAnimationFrame(keepLatestLineAboveComposer);
+      }
+    };
+
+    frame = window.requestAnimationFrame(keepLatestLineAboveComposer);
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [composerReserveHeight, lines.length, prefersReducedMotion]);
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -711,7 +712,7 @@ export function DirectionTwoShell() {
     commitThemeSelection(theme, inputText, rawAnswer.trim() === "5" ? "surprise" : "manual");
   };
 
-  const openRoom = (rawRoomId: string, command = `join ${rawRoomId}`) => {
+  const openRoom = async (rawRoomId: string, command = `join ${rawRoomId}`) => {
     const id = cleanRoomId(rawRoomId);
 
     if (!id) {
@@ -721,6 +722,7 @@ export function DirectionTwoShell() {
 
     appendLines(line("input", command), line("output", `opening room: ${id}`));
     sound.play("success");
+    await beginRoomHandoff(id);
     router.push(`/room/${id}`);
   };
 
@@ -761,6 +763,7 @@ export function DirectionTwoShell() {
         line("output", `opening /room/${data.id}`),
       );
       sound.play("success");
+      await beginRoomHandoff(data.id);
       router.push(`/room/${data.id}`);
     } catch {
       rejectInputInline("", "Could not reach room server.");
@@ -1274,7 +1277,8 @@ export function DirectionTwoShell() {
 
   return (
     <main
-      className="direction-two-pixel-cursor relative isolate h-[100dvh] min-h-0 overflow-hidden bg-[var(--background)] px-6 py-5 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
+      className="direction-two-pixel-cursor relative isolate min-h-[100dvh] overflow-visible bg-[var(--background)] px-6 py-5 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
+      data-route-handoff-phase={routeHandoffState.phase}
       onClick={focusInput}
     >
       <AmbientShaderBackground opacity={isMobileViewport ? 0.34 : 0.43} style={{ mixBlendMode: "screen", zIndex: 0 }} />
@@ -1320,9 +1324,14 @@ export function DirectionTwoShell() {
 
       <section
         aria-describedby="direction-two-keyboard-shortcuts"
-        className="relative z-10 mx-auto flex h-full min-h-0 w-full max-w-[1120px] flex-col"
+        className="relative z-10 mx-auto flex min-h-[calc(100dvh-2.5rem)] w-full max-w-[1120px] flex-col sm:min-h-[calc(100dvh-5rem)]"
       >
-        <header className="sm:hidden direction-two-mobile-landing flex flex-col gap-3 pb-2 pt-4">
+        <header
+          aria-hidden={isLandingForegroundHidden || undefined}
+          className="sm:hidden direction-two-mobile-landing flex flex-col gap-3 pb-2 pt-4"
+          inert={isLandingForegroundHidden || undefined}
+          style={landingForegroundStyle}
+        >
           <div>
             <InkPatternMark
               reducedMotion={prefersReducedMotion}
@@ -1355,7 +1364,12 @@ export function DirectionTwoShell() {
           </div>
         </header>
 
-        <header className="hidden flex-col gap-4 pb-5 pt-5 sm:flex sm:pt-6">
+        <header
+          aria-hidden={isLandingForegroundHidden || undefined}
+          className="hidden flex-col gap-4 pb-5 pt-5 sm:flex sm:pt-6"
+          inert={isLandingForegroundHidden || undefined}
+          style={landingForegroundStyle}
+        >
           <div>
             <InkPatternMark
               reducedMotion={prefersReducedMotion}
@@ -1387,15 +1401,19 @@ export function DirectionTwoShell() {
         </header>
 
         <div
+          aria-hidden={isLandingForegroundHidden || undefined}
           className={`direction-two-mobile-terminal flex min-h-0 flex-1 flex-col pb-3 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:pt-12 ${
             isTerminalVisible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"
           }`}
+          inert={isLandingForegroundHidden || undefined}
+          style={landingForegroundStyle}
         >
-          <div ref={terminalOutputRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto" aria-label="Terminal output">
+          <div ref={terminalOutputRef} className="flex min-h-0 flex-1 flex-col gap-2" aria-label="Terminal output">
             {lines.map(entry => (
               <TerminalLine key={entry.id} {...entry} />
             ))}
           </div>
+          <div aria-hidden="true" className="shrink-0" style={{ height: lines.length > 0 ? `${composerReserveHeight}px` : 0 }} />
 
           {flow?.type === "style" && (
             <div className="mt-4 flex flex-wrap items-center gap-3" role="group" aria-label="Theme choices">
@@ -1429,18 +1447,24 @@ export function DirectionTwoShell() {
               </button>
             </div>
           )}
+        </div>
 
-          <div className="relative w-full shrink-0">
+        <div
+          ref={composerRef}
+          className="direction-two-floating-composer"
+          style={composerStyle}
+        >
             <div
-              ref={promptRowRef}
-              className={`direction-two-terminal-frame ${lines.length > 0 ? "mt-2 " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col gap-0 pl-[12px] pr-[12px] text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
+              className={`direction-two-terminal-frame ${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col gap-0 pl-[12px] pr-[12px] text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
               style={{
-                background: "transparent",
+                background: "var(--color-panel)",
                 border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--background) 76%)",
                 borderRadius: 0,
                 padding: "var(--route-composer-frame-padding)",
                 paddingLeft: "12px",
                 paddingRight: "12px",
+                paddingTop: "16px",
+                paddingBottom: "16px",
               }}
             >
               <div
@@ -1504,13 +1528,13 @@ export function DirectionTwoShell() {
               <div className="direction-two-terminal-input-row flex min-w-0 items-center gap-0 pl-[0px]">
               <label className="sr-only" htmlFor="terminal-command">{activePrompt}</label>
               <span
-                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm ${
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-base ${
                   activePromptPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
                 }`}
                 aria-hidden="true"
               >
                 {activePrompt === "$" ? (
-                  <span className="pl-[12px] text-sm text-[var(--color-signal)]">$</span>
+                  <span className="pl-[12px] text-base text-[var(--color-signal)]">$</span>
                 ) : (
                   <>
                     <span>{">"}</span>
@@ -1617,7 +1641,7 @@ export function DirectionTwoShell() {
                   autoComplete="off"
                   autoCorrect="off"
                   className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[0px] font-mono text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
-                  disabled={creating}
+                  disabled={creating || isLandingForegroundHidden}
                   id="terminal-command"
                   name="command"
                   onBeforeInput={event => {
@@ -1667,7 +1691,6 @@ export function DirectionTwoShell() {
               </div>
               </div>
             </div>
-          </div>
         </div>
       </section>
     </main>
@@ -1735,6 +1758,7 @@ function InkPatternMark({
 
   function triggerMarkShimmer() {
     if (reducedMotion || typeof window === "undefined") return;
+    if (showIntro) return;
     if (shimmerFrameRef.current !== null) {
       window.cancelAnimationFrame(shimmerFrameRef.current);
     }
@@ -1792,16 +1816,22 @@ function InkPatternMarkLayer({
   shimmerDelayMaxMs: number;
 }) {
   const patterns: string[][] = buildDirectionTwoMarkPattern(word);
+  const density = 2;
+  const shimmerColumnCount = patterns.reduce(
+    (total, pattern) => total + (pattern[0]?.length ?? 0) * density,
+    0,
+  ) + Math.max(patterns.length - 1, 0) * 2;
 
   return (
     <div className={`direction-two-mark-layer flex w-fit origin-left items-start gap-[var(--letter-gap)] ${className}`}>
       {patterns.map((letter, letterIndex) => (
         <PixelPatternGrid
-          density={2}
+          density={density}
           key={letterIndex}
           letterIndex={letterIndex}
           pattern={letter}
           shimmerDelayMaxMs={shimmerDelayMaxMs}
+          shimmerColumnCount={shimmerColumnCount}
         />
       ))}
     </div>
@@ -1813,11 +1843,13 @@ function PixelPatternGrid({
   pattern,
   letterIndex,
   shimmerDelayMaxMs = directionTwoMarkMotion.markHoverMaxDelayMs,
+  shimmerColumnCount,
 }: {
   density?: number;
   pattern: string[];
   letterIndex: number;
   shimmerDelayMaxMs?: number;
+  shimmerColumnCount: number;
 }) {
   const densePattern = density > 1 ? createDensePixelPattern(pattern, density) : pattern;
   const columnCount = densePattern[0]?.length ?? 0;
@@ -1837,9 +1869,8 @@ function PixelPatternGrid({
           const active = cell === "1";
           const shimmerColumn = letterIndex * (columnCount + 2) + columnIndex;
           const resolveDelay = Math.min(shimmerColumn * 14 + rowIndex * 5, 520);
-          const shimmerDelay = Math.min(
-            shimmerColumn * 10 + rowIndex * 5,
-            shimmerDelayMaxMs,
+          const shimmerDelay = Math.round(
+            (shimmerColumn / Math.max(shimmerColumnCount - 1, 1)) * shimmerDelayMaxMs,
           );
 
           return (
