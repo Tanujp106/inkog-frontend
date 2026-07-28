@@ -1828,6 +1828,11 @@ function InkPatternMark({
     }
   }
 
+  function handleMarkPointerOut(event: PointerEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    resetMarkMagnetism();
+  }
+
   const titleMotionStyle = {
     "--direction-two-title-formation-duration": `${titleMotionSettings.formationDurationMs}ms`,
     "--direction-two-title-formation-brightness": titleMotionSettings.formationPeakBrightness,
@@ -1847,6 +1852,7 @@ function InkPatternMark({
       data-mark-phase={phase}
       onPointerLeave={resetMarkMagnetism}
       onPointerMove={handleMarkPointerMove}
+      onPointerOut={handleMarkPointerOut}
       ref={markRef}
       role="img"
       style={titleMotionStyle}
