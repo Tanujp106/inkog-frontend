@@ -213,9 +213,11 @@ const directionTwoTitleDialConfig = {
     glowRadius: [directionTwoTitleMotionDefaults.shimmerGlowRadius, 0, 32, 1],
     glowOpacity: [directionTwoTitleMotionDefaults.shimmerGlowOpacity, 0, 100, 1],
   },
-  hoverShimmer: {
-    durationMs: [directionTwoTitleMotionDefaults.hoverShimmerDurationMs, 600, 1800, 10],
-    spreadMs: [directionTwoTitleMotionDefaults.hoverShimmerSpreadMs, 0, 240, 2],
+  hoverHighlight: {
+    brightness: [directionTwoTitleMotionDefaults.hoverHighlightBrightness, 1, 2.5, 0.05],
+    colorMixPercent: [directionTwoTitleMotionDefaults.hoverHighlightColorMixPercent, 0, 100, 1],
+    glowRadius: [directionTwoTitleMotionDefaults.hoverHighlightGlowRadius, 0, 32, 1],
+    glowOpacity: [directionTwoTitleMotionDefaults.hoverHighlightGlowOpacity, 0, 100, 1],
   },
   magnet: {
     radius: [directionTwoTitleMotionDefaults.magnetRadius, 24, 180, 2],
@@ -406,8 +408,10 @@ export function DirectionTwoShell() {
     shimmerPeakBrightness: titleMotionDials.shimmer.peakBrightness,
     shimmerGlowRadius: titleMotionDials.shimmer.glowRadius,
     shimmerGlowOpacity: titleMotionDials.shimmer.glowOpacity,
-    hoverShimmerDurationMs: titleMotionDials.hoverShimmer.durationMs,
-    hoverShimmerSpreadMs: titleMotionDials.hoverShimmer.spreadMs,
+    hoverHighlightBrightness: titleMotionDials.hoverHighlight.brightness,
+    hoverHighlightColorMixPercent: titleMotionDials.hoverHighlight.colorMixPercent,
+    hoverHighlightGlowRadius: titleMotionDials.hoverHighlight.glowRadius,
+    hoverHighlightGlowOpacity: titleMotionDials.hoverHighlight.glowOpacity,
     magnetRadius: titleMotionDials.magnet.radius,
     magnetStrength: titleMotionDials.magnet.strength,
     magnetMaxDisplacement: titleMotionDials.magnet.maxDisplacement,
@@ -1907,6 +1911,7 @@ function InkPatternMark({
     for (const pixel of getActiveMarkPixels()) {
       pixel.style.setProperty("--mark-magnet-x", "0px");
       pixel.style.setProperty("--mark-magnet-y", "0px");
+      pixel.removeAttribute("data-mark-magnet-highlight");
     }
   }
 
@@ -1928,6 +1933,11 @@ function InkPatternMark({
       );
       pixel.style.setProperty("--mark-magnet-x", `${offset.x}px`);
       pixel.style.setProperty("--mark-magnet-y", `${offset.y}px`);
+      if (offset.x !== 0 || offset.y !== 0) {
+        pixel.setAttribute("data-mark-magnet-highlight", "true");
+      } else {
+        pixel.removeAttribute("data-mark-magnet-highlight");
+      }
     }
   }
 
@@ -1955,7 +1965,11 @@ function InkPatternMark({
     "--direction-two-title-shimmer-peak-brightness": titleMotionSettings.shimmerPeakBrightness,
     "--direction-two-title-shimmer-glow-radius": `${titleMotionSettings.shimmerGlowRadius}px`,
     "--direction-two-title-shimmer-glow-opacity": percent(titleMotionSettings.shimmerGlowOpacity),
-    "--direction-two-title-hover-shimmer-duration": `${titleMotionSettings.hoverShimmerDurationMs}ms`,
+    "--direction-two-title-hover-highlight-brightness": titleMotionSettings.hoverHighlightBrightness,
+    "--direction-two-title-hover-highlight-color-mix": percent(titleMotionSettings.hoverHighlightColorMixPercent),
+    "--direction-two-title-hover-highlight-foreground-mix": percent(100 - titleMotionSettings.hoverHighlightColorMixPercent),
+    "--direction-two-title-hover-highlight-glow-radius": `${titleMotionSettings.hoverHighlightGlowRadius}px`,
+    "--direction-two-title-hover-highlight-glow-opacity": percent(titleMotionSettings.hoverHighlightGlowOpacity),
     "--direction-two-title-magnet-return-duration": `${titleMotionSettings.magnetSpringMs}ms`,
   } as CSSProperties;
 
@@ -2068,9 +2082,6 @@ function PixelPatternGrid({
                 {
                   "--mark-formation-delay": `${formationDelay}ms`,
                   "--mark-shimmer-delay": `${shimmerDelay}ms`,
-                  "--mark-hover-delay": `${Math.round(
-                    (shimmerColumn / Math.max(1, shimmerColumnCount - 1)) * titleMotionSettings.hoverShimmerSpreadMs,
-                  )}ms`,
                 } as CSSProperties
               }
             />
