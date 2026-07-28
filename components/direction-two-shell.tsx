@@ -1949,6 +1949,7 @@ function InkPatternMark({
     "--direction-two-title-shimmer-peak-brightness": titleMotionSettings.shimmerPeakBrightness,
     "--direction-two-title-shimmer-glow-radius": `${titleMotionSettings.shimmerGlowRadius}px`,
     "--direction-two-title-shimmer-glow-opacity": percent(titleMotionSettings.shimmerGlowOpacity),
+    "--direction-two-title-hover-shimmer-duration": `${directionTwoMarkMotion.hoverShimmerMs}ms`,
     "--direction-two-title-magnet-return-duration": `${titleMotionSettings.magnetSpringMs}ms`,
   } as CSSProperties;
 
@@ -2061,6 +2062,9 @@ function PixelPatternGrid({
                 {
                   "--mark-formation-delay": `${formationDelay}ms`,
                   "--mark-shimmer-delay": `${shimmerDelay}ms`,
+                  "--mark-hover-delay": `${Math.round(
+                    (shimmerColumn / Math.max(1, shimmerColumnCount - 1)) * directionTwoMarkMotion.markHoverMaxDelayMs,
+                  )}ms`,
                 } as CSSProperties
               }
             />
