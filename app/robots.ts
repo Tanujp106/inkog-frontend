@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { toSiteUrl } from "@/lib/site-seo.mjs";
+import { siteUrl, toSiteUrl } from "@/lib/site-seo.mjs";
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -35,6 +35,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/api/"],
       },
     ],
-    sitemap: toSiteUrl("/sitemap.xml"),
+    ...(siteUrl ? { sitemap: toSiteUrl("/sitemap.xml") } : {}),
   };
 }

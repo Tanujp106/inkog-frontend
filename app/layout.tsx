@@ -11,7 +11,7 @@ import { getSiteEntityJsonLd, siteUrl } from "@/lib/site-seo.mjs";
 import { ThemeFavicon } from "./theme-favicon";
 
 export const metadata: Metadata = {
-  metadataBase: siteUrl,
+  ...(siteUrl ? { metadataBase: siteUrl } : {}),
   title: "inkog | Private Anonymous Chat",
   description: "Create a time-bound room for anonymous group chat, optional passwords, and quick polls. No profiles required.",
   alternates: {

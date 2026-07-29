@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `https://inkog.chat` discoverable and understandable to search and AI answer engines without exposing temporary room content or creating a second designed product surface.
+**Goal:** Make the finalized production domain discoverable and understandable to search and AI answer engines without exposing temporary room content or creating a second designed product surface.
 
 **Architecture:** Keep the existing homepage as the only designed entry experience. Add one plain, unlinked, server-rendered `/about` reference page, plus Next.js metadata routes for crawl discovery. Put the canonical site URL and public-route inventory in a small pure helper so metadata, schema, sitemap, and tests cannot drift apart.
 
@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Canonical production URL: `https://inkog.chat`; production `NEXT_PUBLIC_SITE_URL` must equal this URL.
+- Canonical production URL: configure `NEXT_PUBLIC_SITE_URL` once the production domain is finalized.
 - Indexable URLs are only `/` and `/about`; `/about` is unlinked from the homepage and has no route-specific visual design.
 - Every `/room/[id]` remains shareable with its current Open Graph image but emits `noindex, nofollow` and is excluded from the sitemap.
 - Public pages allow traditional and AI search/training crawlers. `robots.txt` must disallow `/api/`, but must not disallow `/room/`; compliant crawlers need to fetch room pages to see their noindex directive.
@@ -57,10 +57,10 @@ import {
   toSiteUrl,
 } from "./site-seo.mjs";
 
-test("uses inkog.chat and only the approved public URLs", () => {
-  assert.equal(siteUrl.toString(), "https://inkog.chat/");
+test("uses the configured production URL and only the approved public URLs", () => {
+  assert.equal(siteUrl.toString(), "https://example.test/");
   assert.deepEqual(indexablePathnames, ["/", "/about"]);
-  assert.equal(toSiteUrl("/about"), "https://inkog.chat/about");
+  assert.equal(toSiteUrl("/about"), "https://example.test/about");
 });
 
 test("builds factual site and application schema", () => {
@@ -80,7 +80,9 @@ Expected: failure because `site-seo.mjs` does not exist.
 - [ ] **Step 3: Implement the single source of truth.**
 
 ```js
-export const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://inkog.chat");
+export const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
+  ? new URL(process.env.NEXT_PUBLIC_SITE_URL)
+  : undefined;
 export const indexablePathnames = Object.freeze(["/", "/about"]);
 export const aboutFaqs = Object.freeze([
   { question: "Does inkog require an account?", answer: "No. inkog is built for anonymous participation without profiles." },
@@ -217,8 +219,8 @@ Do not add `Disallow: /room/`: room metadata supplies noindex. Do not include dy
 inkog is private, anonymous chat for temporary conversations. Create a room, share its link, talk without profiles, and use quick polls when a group needs a decision.
 
 ## Public pages
-- [Home](https://inkog.chat/): Start or join a temporary room.
-- [About inkog](https://inkog.chat/about): Product facts, privacy boundaries, and frequently asked questions.
+- [Home](/): Start or join a temporary room.
+- [About inkog](/about): Product facts, privacy boundaries, and frequently asked questions.
 
 ## Boundaries
 - Room URLs are private, temporary conversation spaces and are not part of this public knowledge index.
@@ -247,8 +249,8 @@ git commit -m "feat: add inkog crawl and AI discovery files"
 - Modify: `inkog-frontend/lib/site-seo.test.mjs`
 
 **Interfaces:**
-- Root metadata describes the homepage and establishes `https://inkog.chat/` as canonical.
-- `/about` overrides its canonical URL with `https://inkog.chat/about`.
+- Root metadata describes the homepage and establishes the configured production domain as canonical.
+- `/about` overrides its canonical URL with the configured production domain plus `/about`.
 - Room metadata preserves the existing dynamic social preview and adds `robots: { index: false, follow: false }`.
 
 - [ ] **Step 1: Write checks for the about schema and room privacy directive.**
@@ -398,7 +400,7 @@ git commit -m "feat: improve inkog accessibility semantics"
 ### Task 5: Verify the live public contract and complete launch setup
 
 **Files:**
-- Modify: deployment environment configuration outside the repository: set `NEXT_PUBLIC_SITE_URL=https://inkog.chat`
+- Modify: deployment environment configuration outside the repository: set `NEXT_PUBLIC_SITE_URL` to the finalized production URL.
 
 **Interfaces:**
 - Deployed routes: `/`, `/about`, `/robots.txt`, `/sitemap.xml`, and `/llms.txt`.
@@ -429,7 +431,7 @@ In the browser accessibility tree, confirm named close buttons, a labelled landi
 
 - [ ] **Step 4: Validate the deployed domain.**
 
-After deployment, verify `https://inkog.chat/robots.txt`, `/sitemap.xml`, `/llms.txt`, and `/about`; validate JSON-LD with the [Schema.org Validator](https://validator.schema.org/); verify the domain in Google Search Console and Bing Webmaster Tools; submit `https://inkog.chat/sitemap.xml` to both.
+After the production domain is finalized and configured, verify its `/robots.txt`, `/sitemap.xml`, `/llms.txt`, and `/about`; validate JSON-LD with the [Schema.org Validator](https://validator.schema.org/); verify the domain in Google Search Console and Bing Webmaster Tools; submit its `/sitemap.xml` to both.
 
 - [ ] **Step 5: Confirm the final change scope.**
 

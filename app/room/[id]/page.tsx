@@ -50,7 +50,10 @@ import {
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const API = "https://inkog-backend.onrender.com/api";
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://127.0.0.1:3001";
+const SOCKET_URL =
+  process.env.NODE_ENV === "development"
+    ? "http://127.0.0.1:3001"
+    : "https://inkog-backend.onrender.com";
 const ROOM_FONT_FAMILY = '"Departure Mono", monospace';
 
 interface Message {
