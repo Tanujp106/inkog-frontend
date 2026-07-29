@@ -49,7 +49,7 @@ import {
 } from "@/lib/system-sound.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
+const API = "https://inkog-backend.onrender.com/api";
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://127.0.0.1:3001";
 const ROOM_FONT_FAMILY = '"Departure Mono", monospace';
 

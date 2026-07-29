@@ -54,7 +54,7 @@ import { extractInkogHelpQuestion } from "@/lib/inkog-help.mjs";
 import { setStoredRoomPassword } from "@/lib/room-password-command.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api";
+const API = "https://inkog-backend.onrender.com/api";
 const roomIdPattern = /([a-z0-9]{6})$/i;
 const themeStorageKey = "inkog-theme";
 type DirectionTwoTheme = (typeof directionTwoThemes)[number];
