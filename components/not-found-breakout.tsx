@@ -559,7 +559,7 @@ function drawGame(
   const border = theme.getPropertyValue("--color-border").trim() || "#2a2a32";
   const text = theme.getPropertyValue("--color-text").trim() || "#e8e8f0";
   const muted = theme.getPropertyValue("--color-dim").trim() || "#8f8f9e";
-  const accent = theme.getPropertyValue("--color-signal").trim() || "#e63956";
+  const accent = theme.getPropertyValue("--color-signal").trim() || "#2f7d50";
 
   context.clearRect(0, 0, state.width, state.height);
 

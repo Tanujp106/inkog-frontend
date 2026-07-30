@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
-import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import { useRouteHandoff } from "@/components/route-handoff-provider";
 import {
   buildRoomGateTranscriptLines,
@@ -19,7 +18,7 @@ import {
   applyInkogTheme,
   inkogThemeChoices,
 } from "@/lib/inkog-theme.mjs";
-import { roomAmbientShaderOpacity, roomThemeBackground } from "@/lib/room-background.mjs";
+import { roomThemeBackground } from "@/lib/room-background.mjs";
 import { getRoomRoster, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
 import { getRoomCountdownNotification } from "@/lib/room-notifications.mjs";
 import {
@@ -42,6 +41,7 @@ import {
 } from "@/lib/room-password-command.mjs";
 import { parseRoomCommand } from "@/lib/room-terminal.mjs";
 import type { RoomCommand } from "@/lib/room-terminal-types";
+import { getInkogApiBaseUrl } from "@/lib/api-config.mjs";
 import { askInkogHelp } from "@/lib/inkog-help-api";
 import {
   formatSystemSoundStatus,
@@ -49,7 +49,7 @@ import {
 } from "@/lib/system-sound.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
-const API = "https://inkog-backend.onrender.com/api";
+const API = getInkogApiBaseUrl();
 const SOCKET_URL =
   process.env.NODE_ENV === "development"
     ? "http://127.0.0.1:3001"
@@ -140,7 +140,7 @@ export default function RoomPage() {
   const {
     cancelRoomHandoff,
     composerStyle,
-    getRoomForegroundStyle,
+    getRoomPartStyle,
     markRoomReady,
     state: routeHandoffState,
   } = useRouteHandoff();
@@ -152,7 +152,7 @@ export default function RoomPage() {
   const [onlineCount, setOnlineCount] = useState(0);
   const [roomUsers, setRoomUsers] = useState<string[]>([]);
   const [alias, setAlias] = useState("");
-  const [activeThemeId, setActiveThemeId] = useState("crimson");
+  const [activeThemeId, setActiveThemeId] = useState("green");
   const [isCreator, setIsCreator] = useState(false);
   const anonTokenRef = useRef<string>("");
 
@@ -196,9 +196,9 @@ export default function RoomPage() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const currentThemeId = document.documentElement.getAttribute("data-inkog-theme");
-    const normalizedThemeId = currentThemeId === "green" ? "crimson" : currentThemeId;
+    const normalizedThemeId = currentThemeId === "crimson" ? "green" : currentThemeId;
     if (inkogThemeChoices.some(theme => theme.id === normalizedThemeId)) {
-      setActiveThemeId(normalizedThemeId ?? "crimson");
+      setActiveThemeId(normalizedThemeId ?? "green");
     }
   }, []);
 
@@ -470,7 +470,12 @@ export default function RoomPage() {
       return;
     }
 
-    if (stage === "password" || stage === "expired" || stage === "error") {
+    if (stage === "password") {
+      markRoomReady(roomId);
+      return;
+    }
+
+    if (stage === "expired" || stage === "error") {
       cancelRoomHandoff();
     }
   }, [cancelRoomHandoff, isRealtimeReady, markRoomReady, roomId, stage]);
@@ -988,8 +993,6 @@ export default function RoomPage() {
   });
   const slashSuggestions = isRoomBooting || isPasswordGate ? [] : getRoomSlashCommandSuggestions({ isCreator, query: composerValue });
   const showSlashSuggestions = slashSuggestions.length > 0 && !pendingCommand;
-  const composerExpanded = composerChrome.expanded;
-  const composerHasTopContent = passwordReveal || composerExpanded || showSlashSuggestions;
   const showComposerHint = showIdleCursor && !showSlashSuggestions && composerChrome.statusMode === "hidden";
   const gateTranscriptLines = isRoomBooting
     ? []
@@ -1005,11 +1008,6 @@ export default function RoomPage() {
       : composerStatus?.tone === "accent"
         ? "var(--accent)"
         : "var(--text-muted)";
-  const roomForegroundStyle =
-    stage === "password" || stage === "expired" || stage === "error"
-      ? undefined
-      : getRoomForegroundStyle(roomId);
-
   useEffect(() => {
     setSlashSuggestionIndex(index => {
       if (!showSlashSuggestions) return 0;
@@ -1045,60 +1043,67 @@ export default function RoomPage() {
       style={styles.roomShell}
       onClick={() => composerRef.current?.focus()}
     >
-      <AmbientShaderBackground opacity={roomAmbientShaderOpacity} style={{ mixBlendMode: "screen", zIndex: 0 }} />
-      <header style={{ ...styles.roomHeader, ...roomForegroundStyle }}>
-        <div style={styles.headerIdentity}>
-          <span style={styles.brand}>inkog</span>
-          <span style={styles.headerDivider}>/</span>
-          <span style={styles.topic} title={topic}>{topic}</span>
-        </div>
-        <div style={styles.headerMeta}>
-          <AvatarRoster roster={roster} usersTitle={usersTitle} viewerAlias={alias} />
-          <RoomTtlMeter meter={ttlMeter} />
+      <header style={{ ...styles.roomHeader, ...getRoomPartStyle(roomId, "header") }}>
+        <div style={styles.roomHeaderInner}>
+          <div style={styles.headerIdentity}>
+            <span style={styles.brand}>inkog</span>
+            <span style={styles.headerDivider}>/</span>
+            <span style={styles.topic} title={topic}>{topic}</span>
+          </div>
+          <div style={styles.headerMeta}>
+            <AvatarRoster roster={roster} usersTitle={usersTitle} viewerAlias={alias} />
+            <RoomTtlMeter meter={ttlMeter} />
+          </div>
         </div>
       </header>
 
-      {socketError && <div style={{ ...styles.errorToast, ...roomForegroundStyle }}>error: {socketError}</div>}
+      {socketError && <div style={{ ...styles.errorToast, ...getRoomPartStyle(roomId, "transcript") }}>error: {socketError}</div>}
 
-      <section aria-label="Room terminal transcript" style={{ ...styles.transcript, ...roomForegroundStyle }}>
-        {gateTranscriptLines.length > 0 ? (
-          <RoomGateTranscript lines={gateTranscriptLines} passwordError={isPasswordGate ? passwordError : ""} />
-        ) : null}
-        {isRoomBooting || isPasswordGate ? null : transcript.length === 0 ? (
-          <div style={styles.emptyTranscript}>
-            <p style={styles.emptyLine}>system: joined as {alias}</p>
-            <p style={styles.emptyLine}>system: type a message</p>
-          </div>
-        ) : (
-          transcript.map(item => {
-            if (item.type === "event") {
-              return <TerminalEventRow event={item.event} key={item.event.id} />;
-            }
+      <section
+        aria-label="Room terminal transcript"
+        className={routeHandoffState.phase === "transitioning" ? "room-route-transcript-enter" : undefined}
+        style={{ ...styles.transcript, ...getRoomPartStyle(roomId, "transcript") }}
+      >
+        <div style={styles.transcriptInner}>
+          {gateTranscriptLines.length > 0 ? (
+            <RoomGateTranscript lines={gateTranscriptLines} passwordError={isPasswordGate ? passwordError : ""} />
+          ) : null}
+          {isRoomBooting || isPasswordGate ? null : transcript.length === 0 ? (
+            <div style={styles.emptyTranscript}>
+              <p style={styles.emptyLine}>system: joined as {alias}</p>
+              <p style={styles.emptyLine}>system: type a message</p>
+            </div>
+          ) : (
+            transcript.map(item => {
+              if (item.type === "event") {
+                return <TerminalEventRow event={item.event} key={item.event.id} />;
+              }
 
-            if (item.type === "poll") {
+              if (item.type === "poll") {
+                return (
+                  <TerminalPoll
+                    key={item.poll.pollId}
+                    myVote={myVote(item.poll)}
+                    onVote={votePoll}
+                    poll={item.poll}
+                    total={totalVotes(item.poll)}
+                    votesFor={votesFor}
+                  />
+                );
+              }
+
               return (
-                <TerminalPoll
-                  key={item.poll.pollId}
-                  myVote={myVote(item.poll)}
-                  onVote={votePoll}
-                  poll={item.poll}
-                  total={totalVotes(item.poll)}
-                  votesFor={votesFor}
+                <TerminalMessage
+                  alias={alias}
+                  key={item.message.id}
+                  message={item.message}
+                  peerColorMap={peerColorMap}
                 />
               );
-            }
-
-            return (
-              <TerminalMessage
-                alias={alias}
-                key={item.message.id}
-                message={item.message}
-                peerColorMap={peerColorMap}
-              />
-            );
-          })
-        )}
-        <div ref={transcriptEndRef} />
+            })
+          )}
+          <div ref={transcriptEndRef} />
+        </div>
       </section>
 
       <form
@@ -1106,14 +1111,12 @@ export default function RoomPage() {
           event.preventDefault();
           runComposer();
         }}
-        style={{ ...styles.composer, ...composerStyle }}
+        style={{ ...styles.composer, ...composerStyle, ...getRoomPartStyle(roomId, "composer") }}
       >
         <div
           data-route-composer="room"
           style={{
             ...styles.composerFrame,
-            minHeight: composerHasTopContent ? "76px" : "58px",
-            padding: composerHasTopContent ? "10px 12px" : "0 16px",
           }}
         >
           <div
@@ -1680,16 +1683,21 @@ const styles: Record<string, CSSProperties> = {
     position: "relative",
   },
   roomHeader: {
-    alignItems: "center",
     borderBottom: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
-    display: "flex",
     flexShrink: 0,
-    gap: "16px",
-    justifyContent: "space-between",
-    minHeight: "64px",
     padding: "12px clamp(32px, calc(3vw + 16px), 48px)",
     position: "relative",
     zIndex: 1,
+  },
+  roomHeaderInner: {
+    alignItems: "center",
+    display: "flex",
+    gap: "16px",
+    justifyContent: "space-between",
+    margin: "0 auto",
+    maxWidth: "1200px",
+    minHeight: "40px",
+    width: "100%",
   },
   headerIdentity: {
     alignItems: "center",
@@ -1852,9 +1860,14 @@ const styles: Record<string, CSSProperties> = {
     flex: 1,
     gap: "6px",
     overflowY: "auto",
-    padding: "24px clamp(32px, calc(3vw + 16px), 48px)",
+    padding: "24px 0",
     position: "relative",
     zIndex: 1,
+  },
+  transcriptInner: {
+    margin: "0 auto",
+    maxWidth: "1200px",
+    width: "min(calc(100% - 5rem), 1200px)",
   },
   emptyTranscript: {
     color: "var(--text-dim)",
@@ -2033,8 +2046,8 @@ const styles: Record<string, CSSProperties> = {
     zIndex: 1,
   },
   composerFrame: {
-    background: "transparent",
-    border: "1px solid color-mix(in srgb, var(--border-light) 92%, var(--accent) 8%)",
+    background: "var(--color-panel)",
+    border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--background) 76%)",
     borderRadius: 0,
     boxSizing: "border-box",
     display: "flex",
@@ -2043,7 +2056,7 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "center",
     minHeight: "58px",
     overflow: "hidden",
-    transition: "min-height 200ms ease-out",
+    padding: "16px 12px",
     width: "100%",
   },
   composerInlineStatus: {

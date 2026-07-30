@@ -1,5 +1,5 @@
 export type DirectionTwoTheme = {
-  id: "orange" | "blue" | "crimson" | "purple";
+  id: "orange" | "blue" | "green" | "purple";
   label: string;
   selection: "1" | "2" | "3" | "4";
 };

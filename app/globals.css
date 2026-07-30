@@ -21,9 +21,9 @@
   --color-dim: #8f8f9e;
   --color-action: #f2f2f0;
   --color-action-ink: #080809;
-  --color-signal: #e63956;
-  --color-signal-dim: #bd2f47;
-  --color-signal-glow: rgba(230, 57, 86, 0.18);
+  --color-signal: #2f7d50;
+  --color-signal-dim: #23603d;
+  --color-signal-glow: rgba(47, 125, 80, 0.2);
   --color-danger: #ff5757;
   --color-info: #57a8ff;
   --color-private: #a857ff;
@@ -84,11 +84,11 @@
   --direction-two-cursor-square: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAAFklEQVR4nGOoOf7/PymYYVTDqAbsGADA29SgIUo3XgAAAABJRU5ErkJggg==");
 }
 
-:root[data-inkog-theme="crimson"] {
-  --color-signal: #e63956;
-  --color-signal-dim: #bd2f47;
-  --color-signal-glow: rgba(230, 57, 86, 0.18);
-  --direction-two-cursor-square: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Crect width='12' height='12' fill='%23e63956'/%3E%3C/svg%3E");
+:root[data-inkog-theme="green"] {
+  --color-signal: #2f7d50;
+  --color-signal-dim: #23603d;
+  --color-signal-glow: rgba(47, 125, 80, 0.2);
+  --direction-two-cursor-square: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Crect width='12' height='12' fill='%232f7d50'/%3E%3C/svg%3E");
 }
 
 :root[data-inkog-theme="purple"] {
@@ -213,11 +213,41 @@ body::before {
 @keyframes direction-two-copy-reveal {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+@keyframes direction-two-route-status-shimmer {
+  0% {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0.4;
+  }
+  48% {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+  100% {
+    clip-path: inset(0 0 0 100%);
+    opacity: 0.4;
+  }
+}
+@keyframes room-route-terminal-decode {
+  0% {
+    clip-path: inset(0 100% 0 0);
+    filter: brightness(0.72);
+    text-shadow: 0 0 0 transparent;
+  }
+  58% {
+    filter: brightness(1.28);
+    text-shadow: 0 0 9px color-mix(in srgb, var(--color-signal) 36%, transparent);
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
   }
 }
 @keyframes direction-two-ambient-pixel-drift {
@@ -291,7 +321,7 @@ body::before {
     background-color: var(--foreground);
     opacity: var(--direction-two-shimmer-idle-opacity, 1);
     filter: brightness(var(--direction-two-shimmer-idle-brightness, 1));
-    box-shadow: 0 0 0 rgba(230, 57, 86, 0);
+    box-shadow: 0 0 0 rgba(47, 125, 80, 0);
   }
   50% {
     background-color: color-mix(in srgb, var(--foreground) var(--direction-two-shimmer-foreground-mix, 62%), var(--color-signal) var(--direction-two-shimmer-color-mix, 38%));
@@ -305,7 +335,7 @@ body::before {
     background-color: var(--foreground);
     opacity: var(--direction-two-shimmer-settle-opacity, 1);
     filter: brightness(var(--direction-two-shimmer-settle-brightness, 1));
-    box-shadow: 0 0 0 rgba(230, 57, 86, 0);
+    box-shadow: 0 0 0 rgba(47, 125, 80, 0);
   }
 }
 @keyframes direction-two-input-stagger {
@@ -410,6 +440,28 @@ body::before {
   opacity: 0;
   animation: direction-two-copy-reveal 260ms var(--ease-out-strong) both;
 }
+.direction-two-route-status {
+  width: fit-content;
+  color: var(--muted-foreground);
+}
+.direction-two-route-status > span:last-child {
+  color: color-mix(in srgb, var(--color-signal) 68%, var(--muted-foreground));
+  display: inline-block;
+  position: relative;
+}
+.direction-two-route-status > span:last-child::after {
+  animation: direction-two-route-status-shimmer 1120ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  color: var(--foreground);
+  content: attr(data-status-text);
+  inset: 0;
+  position: absolute;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--color-signal) 42%, transparent);
+  white-space: nowrap;
+  will-change: clip-path, opacity;
+}
+.room-route-transcript-enter > div {
+  animation: room-route-terminal-decode 320ms steps(7, end) 360ms both;
+}
 .direction-two-highlight-icon {
   transform-origin: center;
   transition: filter var(--direction-two-shimmer-transition-duration, 260ms) cubic-bezier(0.34, 0.8, 0.26, 1);
@@ -425,7 +477,7 @@ body::before {
   will-change: opacity, transform, filter;
 }
 .direction-two-highlight-pixel-active {
-  box-shadow: 0 0 0 rgba(230, 57, 86, 0);
+  box-shadow: 0 0 0 rgba(47, 125, 80, 0);
 }
 .direction-two-intro-row:hover .direction-two-highlight-icon {
   filter: drop-shadow(0 0 6px var(--color-signal-glow));

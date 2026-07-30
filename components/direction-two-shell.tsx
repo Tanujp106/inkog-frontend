@@ -1,10 +1,9 @@
 "use client";
 
-import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useRef, useState } from "react";
 import { useDialKit, type DialConfig } from "dialkit";
 import { useRouter } from "next/navigation";
 
-import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import { useRouteHandoff } from "@/components/route-handoff-provider";
 import {
   completeDirectionTwoCommand,
@@ -33,10 +32,6 @@ import {
 } from "@/lib/direction-two-shell.mjs";
 import {
   buildDirectionTwoMarkPattern,
-  directionTwoAmbientAtmosphere,
-  directionTwoAmbientConfig,
-  createDirectionTwoAmbientRandom,
-  createDirectionTwoAmbientPixels,
   directionTwoTitleMotionDefaults,
   directionTwoMarkMotion,
   directionTwoMarkWords,
@@ -52,13 +47,16 @@ import {
 import { askInkogHelp } from "@/lib/inkog-help-api";
 import { extractInkogHelpQuestion } from "@/lib/inkog-help.mjs";
 import { setStoredRoomPassword } from "@/lib/room-password-command.mjs";
+import { getInkogApiBaseUrl } from "@/lib/api-config.mjs";
+import { getRouteStatusPresentation } from "@/lib/route-handoff.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
-const API = "https://inkog-backend.onrender.com/api";
+const API = getInkogApiBaseUrl();
 const roomIdPattern = /([a-z0-9]{6})$/i;
 const themeStorageKey = "inkog-theme";
 type DirectionTwoTheme = (typeof directionTwoThemes)[number];
 type DirectionTwoTitlePhase = "forming" | "shimmering" | "interactive";
+type RouteActivity = "create" | "join";
 
 type TerminalLine = {
   id: string;
@@ -102,6 +100,9 @@ const mobileIntroHeadline = "Create a temporary room for honest chats, quick vot
 const introScrambleDelayMs = 140;
 const introScrambleDurationMs = 1080;
 const terminalRevealDelayMs = 1640;
+const introCopyRevealDelayMs = 500;
+const introHighlightsRevealDelayMs = 600;
+const introHighlightsStaggerMs = 100;
 
 const introHighlights = [
   {
@@ -148,7 +149,7 @@ const introHighlights = [
 const themePreviewColorById: Record<DirectionTwoTheme["id"], string> = {
   orange: "#ffb15c",
   blue: "#7cc7ff",
-  crimson: "#e63956",
+  green: "#2f7d50",
   purple: "#c792ff",
 };
 const slashMenuImmediateCommands = new Set(["/clear"]);
@@ -358,7 +359,7 @@ export function DirectionTwoShell() {
   const {
     beginRoomHandoff,
     composerStyle,
-    landingForegroundStyle,
+    getLandingPartStyle,
     state: routeHandoffState,
   } = useRouteHandoff();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -378,14 +379,14 @@ export function DirectionTwoShell() {
   const [slashSuggestionIndex, setSlashSuggestionIndex] = useState(0);
   const [slashSelectionMode, setSlashSelectionMode] = useState<"pointer" | "keyboard">("pointer");
   const [creating, setCreating] = useState(false);
+  const [routeActivity, setRouteActivity] = useState<RouteActivity | null>(null);
   const [helping, setHelping] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
   const [inputFeedbackMessage, setInputFeedbackMessage] = useState<string | null>(null);
   const [passwordRevealIndex, setPasswordRevealIndex] = useState<number | null>(null);
   const [passwordFinalShimmer, setPasswordFinalShimmer] = useState(false);
-  const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("crimson");
+  const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isInputNudging, setIsInputNudging] = useState(false);
   const [composerReserveHeight, setComposerReserveHeight] = useState(0);
@@ -417,19 +418,10 @@ export function DirectionTwoShell() {
     magnetMaxDisplacement: titleMotionDials.magnet.maxDisplacement,
     magnetSpringMs: titleMotionDials.magnet.returnDurationMs,
   };
-  const slashCommandSuggestions = !flow && !inputFeedbackMessage ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
+  const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
-  const isLandingForegroundHidden =
-    routeHandoffState.phase === "leaving" || routeHandoffState.phase === "pending";
-  const ambientPixels = useMemo(() => {
-    return createDirectionTwoAmbientPixels(createDirectionTwoAmbientRandom(), directionTwoAmbientConfig);
-  }, []);
-  const ambientAtmosphereStyle = {
-    background: directionTwoAmbientAtmosphere.background,
-    mixBlendMode: directionTwoAmbientAtmosphere.mixBlendMode,
-    "--direction-two-ambient-signal": directionTwoAmbientAtmosphere.signalColor,
-    "--direction-two-ambient-glow": directionTwoAmbientAtmosphere.signalGlow,
-  } as CSSProperties;
+  const isLandingForegroundHidden = routeHandoffState.phase === "transitioning";
+  const routeStatus = routeActivity ? getRouteStatusPresentation(routeActivity) : null;
   const headlineText = useDirectionTwoScrambleText(introHeadline, {
     durationMs: introScrambleDurationMs,
     startDelayMs: introScrambleDelayMs,
@@ -489,6 +481,14 @@ export function DirectionTwoShell() {
     nudgeInput(message);
   };
 
+  const rejectInputToTerminal = (message: string) => {
+    setInputValue("");
+    setInputFeedbackMessage(null);
+    appendLines(line("error", message));
+    sound.play("error");
+    setKeyboardStatus(message);
+  };
+
   const cancelFlow = () => {
     sound.play("close");
     if (flow) appendLines(line("system", "cancelled current prompt"));
@@ -546,27 +546,10 @@ export function DirectionTwoShell() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const mobileQuery = window.matchMedia("(max-width: 639px)");
-
-    const syncViewport = () => {
-      setIsMobileViewport(mobileQuery.matches);
-    };
-
-    syncViewport();
-    mobileQuery.addEventListener("change", syncViewport);
-
-    return () => {
-      mobileQuery.removeEventListener("change", syncViewport);
-    };
-  }, []);
-
-  useEffect(() => {
     if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") return;
 
     const storedTheme = window.localStorage.getItem(themeStorageKey);
-    const normalizedTheme = storedTheme === "green" ? "crimson" : storedTheme;
+    const normalizedTheme = storedTheme === "crimson" ? "green" : storedTheme;
     const savedTheme = directionTwoThemes.find(theme => theme.id === normalizedTheme);
     if (!savedTheme) return;
 
@@ -756,20 +739,35 @@ export function DirectionTwoShell() {
       return;
     }
 
-    appendLines(line("input", command), line("output", `opening room: ${id}`));
-    sound.play("success");
-    await beginRoomHandoff(id);
-    router.push(`/room/${id}`);
+    setRouteActivity("join");
+    setKeyboardStatus(`Joining room ${id}.`);
+    appendLines(line("input", command));
+
+    try {
+      const roomRes = await fetch(`${API}/rooms/${id}`);
+      const roomData = await roomRes.json().catch(() => ({}));
+      if (!roomRes.ok) {
+        rejectInputToTerminal(roomData.message || "Room could not be opened.");
+        setRouteActivity(null);
+        return;
+      }
+
+      sound.play("success");
+      beginRoomHandoff(id);
+      router.push(`/room/${id}`);
+    } catch {
+      setRouteActivity(null);
+      rejectInputToTerminal("Could not reach room server.");
+    }
   };
 
   const createRoom = async (draft: CreateDraft, options: { confirmInput?: string | null } = {}) => {
     const confirmInput = options.confirmInput === undefined ? "y" : options.confirmInput;
 
     setCreating(true);
-    appendLines(
-      ...(confirmInput ? [line("input", confirmInput)] : []),
-      line("output", "creating room..."),
-    );
+    setRouteActivity("create");
+    setKeyboardStatus("Creating private room.");
+    appendLines(...(confirmInput ? [line("input", confirmInput)] : []));
 
     try {
       const body: Record<string, unknown> = {
@@ -788,7 +786,8 @@ export function DirectionTwoShell() {
       const data = await res.json();
 
       if (!res.ok) {
-        rejectInputInline("", data.message || "Room creation failed.");
+        setRouteActivity(null);
+        rejectInputToTerminal(data.message || "Room creation failed.");
         return;
       }
 
@@ -799,10 +798,11 @@ export function DirectionTwoShell() {
         line("output", `opening /room/${data.id}`),
       );
       sound.play("success");
-      await beginRoomHandoff(data.id);
+      beginRoomHandoff(data.id);
       router.push(`/room/${data.id}`);
     } catch {
-      rejectInputInline("", "Could not reach room server.");
+      setRouteActivity(null);
+      rejectInputToTerminal("Could not reach room server.");
     } finally {
       setCreating(false);
       setFlow(null);
@@ -1320,7 +1320,7 @@ export function DirectionTwoShell() {
   const passwordDisplayValue = passwordRevealIndex === null ? inputValue : passwordSubmissionRef.current;
   const visualInputText = isGuidedPasswordEntry
     ? getDirectionTwoPasswordMask(passwordDisplayValue, passwordRevealIndex ?? passwordDisplayValue.length - 1)
-    : inputValue || (creating ? "creating room..." : placeholderFor(flow));
+    : inputValue || placeholderFor(flow);
   const visualCreateSegments = !isGuidedPasswordEntry && inputValue
     ? getDirectionTwoCreateVisualSegments(inputValue, passwordRevealIndex ?? undefined)
     : null;
@@ -1370,43 +1370,10 @@ export function DirectionTwoShell() {
 
   return (
     <main
-      className="direction-two-pixel-cursor relative isolate min-h-[100dvh] overflow-visible bg-[var(--background)] px-6 py-5 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
+      className="direction-two-pixel-cursor relative isolate min-h-[100dvh] overflow-visible bg-transparent px-6 py-5 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
       data-route-handoff-phase={routeHandoffState.phase}
       onClick={focusInput}
     >
-      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-0 h-screen overflow-hidden">
-        <div className="direction-two-ambient-glow absolute inset-0" style={ambientAtmosphereStyle} />
-        {ambientPixels.map(pixel => (
-          <span
-            key={pixel.id}
-            className="direction-two-ambient-pixel absolute"
-            style={
-              {
-                left: `${pixel.left}%`,
-                top: `${pixel.top}%`,
-                width: `${pixel.size}px`,
-                height: `${pixel.size}px`,
-                "--pixel-opacity": String(pixel.opacity),
-                "--pixel-opacity-peak": String(Math.min(pixel.opacity * 1.38, 1)),
-                "--pixel-drift-x": `${pixel.driftX}px`,
-                "--pixel-drift-y": `${pixel.driftY}px`,
-                "--pixel-field-delay": `${pixel.fieldDelay}s`,
-                "--pixel-field-duration": `${pixel.fieldDuration}s`,
-                "--pixel-glow-delay": `${pixel.glowDelay}s`,
-                "--pixel-glow-duration": `${pixel.glowDuration}s`,
-                "--pixel-drift-delay": `${pixel.driftDelay}s`,
-                "--pixel-drift-duration": `${pixel.driftDuration}s`,
-                "--pixel-glow-strength": `${directionTwoAmbientAtmosphere.glowStrength}px`,
-                "--pixel-glow-soft": `${directionTwoAmbientAtmosphere.glowStrength * 0.45}px`,
-                "--direction-two-ambient-signal": directionTwoAmbientAtmosphere.signalColor,
-                "--direction-two-ambient-glow": directionTwoAmbientAtmosphere.signalGlow,
-              } as CSSProperties
-            }
-          >
-            <span className="direction-two-ambient-pixel-core block h-full w-full rounded-[1px]" />
-          </span>
-        ))}
-      </div>
       <p id="direction-two-keyboard-shortcuts" className="sr-only">
         Enter submits a command or answer. Arrow up and arrow down move through command history. Tab autocompletes commands. Escape cancels the current prompt.
       </p>
@@ -1416,15 +1383,14 @@ export function DirectionTwoShell() {
 
       <section
         aria-describedby="direction-two-keyboard-shortcuts"
-        className="relative z-10 mx-auto flex min-h-[calc(100dvh-2.5rem)] w-full max-w-[1120px] flex-col sm:min-h-[calc(100dvh-5rem)]"
+        className="relative z-10 mx-auto flex min-h-[calc(100dvh-2.5rem)] w-full max-w-[1200px] flex-col sm:min-h-[calc(100dvh-5rem)]"
       >
         <header
           aria-hidden={isLandingForegroundHidden || undefined}
           className="sm:hidden direction-two-mobile-landing flex flex-col gap-3 pb-2 pt-4"
           inert={isLandingForegroundHidden || undefined}
-          style={landingForegroundStyle}
         >
-          <div>
+          <div style={getLandingPartStyle("title")}>
             <InkPatternMark
               reducedMotion={prefersReducedMotion}
               size="mobile"
@@ -1433,22 +1399,31 @@ export function DirectionTwoShell() {
             />
           </div>
           <div className="max-w-[360px] space-y-6 text-[12px] leading-[18px] text-[var(--muted-foreground)]">
-            <p className="direction-two-intro-copy pt-2">
-              {mobileHeadlineText}
-            </p>
+            <div style={getLandingPartStyle("body")}>
+              <p
+                className="direction-two-intro-copy pt-2"
+                style={{ animationDelay: `${prefersReducedMotion ? 0 : introCopyRevealDelayMs}ms` }}
+              >
+                {mobileHeadlineText}
+              </p>
+            </div>
             <div className="space-y-3 pt-2 text-[12px] leading-[18px] text-[var(--muted-foreground)]">
               {introHighlights.map((item, index) => (
-                <DirectionTwoIntroRow
+                <div
                   key={item.text}
-                  pattern={item.icon}
-                  reducedMotion={prefersReducedMotion}
-                  rowClassName="flex items-center gap-5"
-                  shimmerSettings={shimmerSettings}
-                  shimmerStyle={shimmerStyle}
-                  size="mobile"
-                  startDelayMs={420 + index * 55}
-                  text={item.mobileText}
-                />
+                  style={getLandingPartStyle("usp", introHighlights.length - 1 - index)}
+                >
+                  <DirectionTwoIntroRow
+                    pattern={item.icon}
+                    reducedMotion={prefersReducedMotion}
+                    rowClassName="flex items-center gap-5"
+                    shimmerSettings={shimmerSettings}
+                    shimmerStyle={shimmerStyle}
+                    size="mobile"
+                    startDelayMs={introHighlightsRevealDelayMs + index * introHighlightsStaggerMs}
+                    text={item.mobileText}
+                  />
+                </div>
               ))}
             </div>
           </div>
@@ -1458,9 +1433,8 @@ export function DirectionTwoShell() {
           aria-hidden={isLandingForegroundHidden || undefined}
           className="hidden flex-col gap-4 pb-5 pt-5 sm:flex sm:pt-6"
           inert={isLandingForegroundHidden || undefined}
-          style={landingForegroundStyle}
         >
-          <div>
+          <div style={getLandingPartStyle("title")}>
             <InkPatternMark
               reducedMotion={prefersReducedMotion}
               titleMotionSettings={titleMotionSettings}
@@ -1468,21 +1442,30 @@ export function DirectionTwoShell() {
             />
           </div>
           <div className="max-w-[680px] space-y-4 text-[13px] leading-[22px] text-[var(--muted-foreground)] sm:text-[14px]">
-            <p className="direction-two-intro-copy pt-5">
-              {headlineText}
-            </p>
+            <div style={getLandingPartStyle("body")}>
+              <p
+                className="direction-two-intro-copy pt-5"
+                style={{ animationDelay: `${prefersReducedMotion ? 0 : introCopyRevealDelayMs}ms` }}
+              >
+                {headlineText}
+              </p>
+            </div>
             <div className="space-y-[20px] pt-8 text-[12px] leading-[18px] text-[var(--muted-foreground)] sm:text-[13px]">
               {introHighlights.map((item, index) => (
-                <DirectionTwoIntroRow
+                <div
                   key={item.text}
-                  pattern={item.icon}
-                  reducedMotion={prefersReducedMotion}
-                  rowClassName="flex items-center gap-[16px] text-[13px] leading-[22px] sm:text-[14px]"
-                  shimmerSettings={shimmerSettings}
-                  shimmerStyle={shimmerStyle}
-                  startDelayMs={620 + index * 70}
-                  text={item.text}
-                />
+                  style={getLandingPartStyle("usp", introHighlights.length - 1 - index)}
+                >
+                  <DirectionTwoIntroRow
+                    pattern={item.icon}
+                    reducedMotion={prefersReducedMotion}
+                    rowClassName="flex items-center gap-[16px] text-[13px] leading-[22px] sm:text-[14px]"
+                    shimmerSettings={shimmerSettings}
+                    shimmerStyle={shimmerStyle}
+                    startDelayMs={introHighlightsRevealDelayMs + index * introHighlightsStaggerMs}
+                    text={item.text}
+                  />
+                </div>
               ))}
             </div>
           </div>
@@ -1494,14 +1477,24 @@ export function DirectionTwoShell() {
             isTerminalVisible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"
           }`}
           inert={isLandingForegroundHidden || undefined}
-          style={landingForegroundStyle}
+          style={getLandingPartStyle("terminal")}
         >
           <div ref={terminalOutputRef} className="flex min-h-0 flex-1 flex-col gap-2" aria-label="Terminal output">
             {lines.map(entry => (
               <TerminalLine key={entry.id} {...entry} />
             ))}
+            {routeStatus && (
+              <p
+                aria-label={routeStatus.ariaLabel}
+                className="direction-two-route-status break-words text-[14px] leading-[24px]"
+                role="status"
+              >
+                <span aria-hidden="true">&gt; </span>
+                <span data-status-text={routeStatus.text}>{routeStatus.text}</span>
+              </p>
+            )}
           </div>
-          <div aria-hidden="true" className="shrink-0" style={{ height: lines.length > 0 ? `${composerReserveHeight}px` : 0 }} />
+          <div aria-hidden="true" className="shrink-0" style={{ height: lines.length > 0 || routeStatus ? `${composerReserveHeight}px` : 0 }} />
 
           {flow?.type === "style" && (
             <div className="mt-4 flex flex-wrap items-center gap-3" role="group" aria-label="Theme choices">
@@ -1540,7 +1533,7 @@ export function DirectionTwoShell() {
         <div
           ref={composerRef}
           className="direction-two-floating-composer"
-          style={composerStyle}
+          style={{ ...composerStyle, ...getLandingPartStyle("composer") }}
         >
             <div
               className={`direction-two-terminal-frame ${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col gap-0 pl-[12px] pr-[12px] text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
@@ -1724,7 +1717,7 @@ export function DirectionTwoShell() {
                         {styleGhostChoices.map(choice => {
                           const color =
                             choice.id === "surprise"
-                              ? `conic-gradient(from 45deg, ${themePreviewColorById.orange}, ${themePreviewColorById.blue}, ${themePreviewColorById.crimson}, ${themePreviewColorById.purple}, ${themePreviewColorById.orange})`
+                              ? `conic-gradient(from 45deg, ${themePreviewColorById.orange}, ${themePreviewColorById.blue}, ${themePreviewColorById.green}, ${themePreviewColorById.purple}, ${themePreviewColorById.orange})`
                               : themePreviewColorById[choice.id];
 
                           return (
@@ -1752,7 +1745,7 @@ export function DirectionTwoShell() {
                   autoComplete="off"
                   autoCorrect="off"
                   className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[0px] font-mono text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
-                  disabled={creating || isLandingForegroundHidden}
+                  disabled={creating || routeActivity !== null || isLandingForegroundHidden}
                   id="terminal-command"
                   name="command"
                   onBeforeInput={event => {
