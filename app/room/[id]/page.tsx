@@ -2067,12 +2067,11 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: "2px",
-    maxWidth: "520px",
     overflow: "hidden",
     pointerEvents: "auto",
     paddingBottom: "8px",
     transition: "max-height 200ms ease-out, opacity 200ms ease-out",
-    width: "min(520px, 100%)",
+    width: "100%",
     willChange: "opacity",
   },
   slashCommandItem: {
