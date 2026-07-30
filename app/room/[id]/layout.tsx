@@ -3,8 +3,6 @@ import {
   buildRoomOgDescription,
   buildRoomOgImagePath,
   buildRoomOgTitle,
-  fetchRoomOgData,
-  getRoomOgApiBaseUrl,
   ROOM_OG_HEIGHT,
   ROOM_OG_WIDTH,
 } from "@/lib/room-og.mjs";
@@ -16,10 +14,9 @@ type RoomLayoutProps = {
 
 export async function generateMetadata({ params }: Pick<RoomLayoutProps, "params">): Promise<Metadata> {
   const { id } = await params;
-  const room = await fetchRoomOgData(id, getRoomOgApiBaseUrl());
-  const title = buildRoomOgTitle(room.topic);
-  const description = buildRoomOgDescription(room);
-  const imageUrl = buildRoomOgImagePath(id);
+  const title = buildRoomOgTitle();
+  const description = buildRoomOgDescription();
+  const imageUrl = buildRoomOgImagePath();
 
   return {
     title,
@@ -40,8 +37,8 @@ export async function generateMetadata({ params }: Pick<RoomLayoutProps, "params
           url: imageUrl,
           width: ROOM_OG_WIDTH,
           height: ROOM_OG_HEIGHT,
-          alt: `${room.topic} Inkog room invite`,
-          type: "image/gif",
+          alt: "Inkog room invite",
+          type: "image/png",
         },
       ],
     },
