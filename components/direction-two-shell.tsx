@@ -1374,6 +1374,7 @@ export function DirectionTwoShell() {
       data-route-handoff-phase={routeHandoffState.phase}
       onClick={focusInput}
     >
+      <h1 className="sr-only">Private anonymous chat rooms for temporary conversations</h1>
       <p id="direction-two-keyboard-shortcuts" className="sr-only">
         Enter submits a command or answer. Arrow up and arrow down move through command history. Tab autocompletes commands. Escape cancels the current prompt.
       </p>

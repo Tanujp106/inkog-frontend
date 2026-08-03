@@ -1,8 +1,14 @@
 import type { Metadata } from "next";
-import { aboutFaqs, getAboutJsonLd } from "@/lib/site-seo.mjs";
+import {
+  ABOUT_DESCRIPTION,
+  ABOUT_TITLE,
+  aboutFaqs,
+  getAboutJsonLd,
+  SITE_IMAGE_PATH,
+} from "@/lib/site-seo.mjs";
 
-const title = "About inkog";
-const description = "How inkog supports private, anonymous, time-bound group conversations.";
+const title = ABOUT_TITLE;
+const description = ABOUT_DESCRIPTION;
 
 export const metadata: Metadata = {
   title,
@@ -14,14 +20,16 @@ export const metadata: Metadata = {
     title,
     description,
     url: "/about",
+    siteName: "inkog",
     type: "website",
+    locale: "en_US",
     images: [
       {
-        url: "/og-image.gif",
-        width: 1208,
+        url: SITE_IMAGE_PATH,
+        width: 1200,
         height: 630,
-        alt: "Inkog pixel logo with shimmer animation",
-        type: "image/gif",
+        alt: "inkog pixel wordmark with the tagline Honest chats. quick votes. no identity trails.",
+        type: "image/png",
       },
     ],
   },
@@ -29,7 +37,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title,
     description,
-    images: ["/og-image.png"],
+    images: [SITE_IMAGE_PATH],
   },
 };
 

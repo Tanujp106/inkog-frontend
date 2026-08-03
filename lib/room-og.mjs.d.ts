@@ -1,4 +1,4 @@
-export const ROOM_OG_WIDTH: 1208;
+export const ROOM_OG_WIDTH: 1200;
 export const ROOM_OG_HEIGHT: 630;
 export const ROOM_OG_DEFAULT_TOPIC: "Private room";
 

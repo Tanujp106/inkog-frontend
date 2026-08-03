@@ -15,6 +15,11 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/api/"],
       },
       {
+        userAgent: "ChatGPT-User",
+        allow: "/",
+        disallow: ["/api/"],
+      },
+      {
         userAgent: "GPTBot",
         allow: "/",
         disallow: ["/api/"],
@@ -30,7 +35,17 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/api/"],
       },
       {
+        userAgent: "anthropic-ai",
+        allow: "/",
+        disallow: ["/api/"],
+      },
+      {
         userAgent: "Google-Extended",
+        allow: "/",
+        disallow: ["/api/"],
+      },
+      {
+        userAgent: "Bingbot",
         allow: "/",
         disallow: ["/api/"],
       },
