@@ -1386,6 +1386,8 @@ export function DirectionTwoShell() {
         aria-describedby="direction-two-keyboard-shortcuts"
         className="relative z-10 mx-auto flex min-h-[calc(100dvh-2.5rem)] w-full max-w-[1200px] flex-col sm:min-h-[calc(100dvh-5rem)]"
       >
+        {/*
+        Previous mobile landing presentation, kept here for the next mobile iteration.
         <header
           aria-hidden={isLandingForegroundHidden || undefined}
           className="sm:hidden direction-two-mobile-landing flex flex-col gap-3 pb-2 pt-4"
@@ -1427,6 +1429,47 @@ export function DirectionTwoShell() {
                 </div>
               ))}
             </div>
+          </div>
+        </header>
+        */}
+
+        <header
+          aria-hidden={isLandingForegroundHidden || undefined}
+          className="sm:hidden flex min-h-0 flex-1 flex-col"
+          inert={isLandingForegroundHidden || undefined}
+        >
+          <div style={getLandingPartStyle("title")}>
+            <InkPatternMark
+              reducedMotion={prefersReducedMotion}
+              size="mobile"
+              titleMotionSettings={titleMotionSettings}
+              word={directionTwoMarkWords[0]}
+            />
+          </div>
+          <div className="flex flex-1 items-center justify-center px-4 pb-10 text-center">
+            <p
+              className="max-w-[320px] text-[13px] leading-[22px] text-[var(--muted-foreground)]"
+              style={getLandingPartStyle("body")}
+            >
+              <a
+                className="text-[var(--foreground)] underline decoration-[var(--color-signal)] underline-offset-4 transition-colors duration-150 hover:text-[var(--color-signal)]"
+                href="https://www.linkedin.com/in/tanujpateldesign/"
+                rel="noreferrer"
+                target="_blank"
+              >
+                Tanuj
+              </a>{" "}
+              is still fighting with{" "}
+              <a
+                className="text-[var(--foreground)] underline decoration-[var(--color-signal)] underline-offset-4 transition-colors duration-150 hover:text-[var(--color-signal)]"
+                href="https://www.linkedin.com/in/shukannnn/"
+                rel="noreferrer"
+                target="_blank"
+              >
+                Shukan
+              </a>{" "}
+              to add a few more features before he builds out the mobile version. Hang tight for a few more days.
+            </p>
           </div>
         </header>
 
@@ -1474,7 +1517,7 @@ export function DirectionTwoShell() {
 
         <div
           aria-hidden={isLandingForegroundHidden || undefined}
-          className={`direction-two-mobile-terminal flex min-h-0 flex-1 flex-col pb-3 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:pt-12 ${
+          className={`direction-two-mobile-terminal hidden min-h-0 flex-1 flex-col pb-3 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:flex sm:pt-12 ${
             isTerminalVisible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"
           }`}
           inert={isLandingForegroundHidden || undefined}
