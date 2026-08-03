@@ -2,19 +2,32 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Local development uses exactly two app ports:
+
+- Frontend: [http://127.0.0.1:3000](http://127.0.0.1:3000)
+- Backend API and Socket.IO: [http://127.0.0.1:3001](http://127.0.0.1:3001)
+
+No extra local app ports should be required by default. Agentation stays off unless `NEXT_PUBLIC_ENABLE_AGENTATION=true` is explicitly set.
+The frontend dev server writes to `.next-dev`, while `npm run build` writes to `.next`, so verification builds will not corrupt a running local dev server.
+
+First, run the backend:
+
+```bash
+cd ../inkog-backend
+npm run dev
+```
+
+Then run the frontend:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000) with your browser to see the result.
+
+The dev and start scripts are locked to `127.0.0.1:3000` for the frontend and `127.0.0.1:3001` for the backend. If either port is busy, the command now fails with a clear error instead of silently creating a new port or shifting to another port.
+
+The homepage is the Direction 2 shell-based entry flow.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

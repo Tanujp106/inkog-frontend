@@ -1,11 +1,60 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { io, Socket } from "socket.io-client";
+import { io, type Socket } from "socket.io-client";
 
-const API = "https://inkog-backend.onrender.com/api";
-const SOCKET_URL = "https://inkog-backend.onrender.com";
+import { useRouteHandoff } from "@/components/route-handoff-provider";
+import {
+  buildRoomGateTranscriptLines,
+  buildRoomPeerColorMap,
+  classifyRoomMessage,
+  isRoomComposerInteractive,
+  resolveRoomStageAfterAuthenticatedJoin,
+} from "@/lib/room-chat-ui.mjs";
+import { getRoomComposerChrome, getRoomSlashCommandSuggestions } from "@/lib/room-composer-ui.mjs";
+import {
+  applyInkogTheme,
+  inkogThemeChoices,
+} from "@/lib/inkog-theme.mjs";
+import { roomThemeBackground } from "@/lib/room-background.mjs";
+import { getRoomRoster, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
+import { getRoomCountdownNotification } from "@/lib/room-notifications.mjs";
+import {
+  createEmptyRoomPollDraft,
+  getRoomPollInlinePrompt,
+  getRoomPollPrompt,
+  submitRoomPollDraftAnswer,
+} from "@/lib/room-poll-command.mjs";
+import {
+  createPendingRoomPollRequest,
+  matchesPendingRoomPollRequest,
+} from "@/lib/room-poll-request.mjs";
+import {
+  getRoomStylePrompt,
+  resolveRoomStyleSelection,
+} from "@/lib/room-style-command.mjs";
+import {
+  getStoredRoomPassword,
+  resolveRoomPasswordCommand,
+} from "@/lib/room-password-command.mjs";
+import { parseRoomCommand } from "@/lib/room-terminal.mjs";
+import type { RoomCommand } from "@/lib/room-terminal-types";
+import { getInkogApiBaseUrl } from "@/lib/api-config.mjs";
+import { askInkogHelp } from "@/lib/inkog-help-api";
+import {
+  formatSystemSoundStatus,
+  parseSystemSoundCommand,
+} from "@/lib/system-sound.mjs";
+import { useSystemSound } from "@/lib/system-sound-provider";
+
+const API = getInkogApiBaseUrl();
+const SOCKET_URL =
+  process.env.NODE_ENV === "development"
+    ? "http://127.0.0.1:3001"
+    : "https://inkog-backend.onrender.com";
+const ROOM_FONT_FAMILY = '"Departure Mono", monospace';
 
 interface Message {
   id: string;
@@ -26,83 +75,236 @@ interface Poll {
   options: string[];
   votesByMember: PollVote[];
   createdAt: string;
+  createdByAlias?: string;
+}
+
+interface TerminalEvent {
+  id: string;
+  kind: "input" | "output" | "error";
+  content: string;
+  createdAt: string;
+}
+
+interface JoinRoomData {
+  anonToken: string;
+  alias: string;
+  isCreator: boolean;
 }
 
 type Stage = "loading" | "password" | "joined" | "expired" | "error";
+type RoomRoster = { visible: { alias: string; initials: string }[]; overflow: number };
+type ComposerStatus = { tone: "muted" | "accent" | "error"; message: string };
+type PasswordReveal = { password: string; hint: string };
+type PendingComposerCommand =
+  | { type: "style" }
+  | { type: "poll"; step: "question" | "option"; draft: { question: string; options: string[] } }
+  | null;
+type TranscriptItem =
+  | { type: "message"; message: Message; timestamp: number }
+  | { type: "poll"; poll: Poll; timestamp: number }
+  | { type: "event"; event: TerminalEvent; timestamp: number };
 
-function formatTime(seconds: number) {
-  if (seconds <= 0) return "expired";
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
+function getStoredToken(roomId: string) {
+  if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") return undefined;
+  return window.localStorage.getItem(`token_${roomId}`) || undefined;
+}
+
+function setStoredToken(roomId: string, token: string) {
+  if (typeof window === "undefined" || typeof window.localStorage?.setItem !== "function") return;
+  window.localStorage.setItem(`token_${roomId}`, token);
+}
+
+function makeId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random()}`;
+}
+
+function timestampFrom(value: string) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function transcriptFrom(messages: Message[], polls: Poll[], events: TerminalEvent[]) {
+  return [
+    ...messages.map(message => ({ type: "message" as const, message, timestamp: timestampFrom(message.createdAt) })),
+    ...polls.map(poll => ({ type: "poll" as const, poll, timestamp: timestampFrom(poll.createdAt) })),
+    ...events.map(event => ({ type: "event" as const, event, timestamp: timestampFrom(event.createdAt) })),
+  ].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
+  const sound = useSystemSound();
   const roomId = params.id as string;
+  const {
+    cancelRoomHandoff,
+    composerStyle,
+    getRoomPartStyle,
+    markRoomReady,
+    state: routeHandoffState,
+  } = useRouteHandoff();
 
   const [stage, setStage] = useState<Stage>("loading");
   const [errorMsg, setErrorMsg] = useState("");
-
-  // Room info
   const [topic, setTopic] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [onlineCount, setOnlineCount] = useState(0);
   const [roomUsers, setRoomUsers] = useState<string[]>([]);
-
-  // Session
   const [alias, setAlias] = useState("");
+  const [activeThemeId, setActiveThemeId] = useState("green");
   const [isCreator, setIsCreator] = useState(false);
   const anonTokenRef = useRef<string>("");
 
-  // Password gate
-  const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [needsPassword, setNeedsPassword] = useState(false);
-
-  // Messages
+  const [passwordGateUnlocked, setPasswordGateUnlocked] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [msgInput, setMsgInput] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Polls
   const [polls, setPolls] = useState<Poll[]>([]);
-  const [showPollForm, setShowPollForm] = useState(false);
-  const [pollQuestion, setPollQuestion] = useState("");
-  const [pollOptions, setPollOptions] = useState(["", ""]);
-
-  // Share toast
-  const [copied, setCopied] = useState(false);
+  const [terminalEvents, setTerminalEvents] = useState<TerminalEvent[]>([]);
+  const [composerValue, setComposerValue] = useState("");
   const [socketError, setSocketError] = useState("");
+  const [isRealtimeReady, setIsRealtimeReady] = useState(false);
+  const [cursorVisible, setCursorVisible] = useState(true);
+  const [composerStatus, setComposerStatus] = useState<ComposerStatus | null>(null);
+  const [pendingCommand, setPendingCommand] = useState<PendingComposerCommand>(null);
+  const [passwordReveal, setPasswordReveal] = useState<PasswordReveal | null>(null);
+  const [slashSuggestionIndex, setSlashSuggestionIndex] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
+  const composerRef = useRef<HTMLInputElement | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const soundRef = useRef(sound);
+  const composerStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousSecondsLeftRef = useRef<number | null>(null);
+  const pendingPollRequestRef = useRef<ReturnType<typeof createPendingRoomPollRequest> | null>(null);
+  const ttlTotalSecondsRef = useRef(0);
 
-  // Countdown timer
+  const focusComposer = () => {
+    requestAnimationFrame(() => {
+      const input = composerRef.current;
+      if (!input) return;
+
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  };
+
+  useEffect(() => {
+    soundRef.current = sound;
+  }, [sound]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const currentThemeId = document.documentElement.getAttribute("data-inkog-theme");
+    const normalizedThemeId = currentThemeId === "crimson" ? "green" : currentThemeId;
+    if (inkogThemeChoices.some(theme => theme.id === normalizedThemeId)) {
+      setActiveThemeId(normalizedThemeId ?? "green");
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (composerStatusTimeoutRef.current) {
+        clearTimeout(composerStatusTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const appendEvent = (kind: TerminalEvent["kind"], content: string) => {
+    setTerminalEvents(current => [
+      ...current,
+      { id: makeId(), kind, content, createdAt: new Date().toISOString() },
+    ]);
+  };
+
+  const setComposerStatusMessage = (message: string, tone: ComposerStatus["tone"] = "muted") => {
+    setComposerStatus({ message, tone });
+    if (composerStatusTimeoutRef.current) {
+      clearTimeout(composerStatusTimeoutRef.current);
+    }
+    composerStatusTimeoutRef.current = setTimeout(() => {
+      setComposerStatus(current => (current?.message === message ? null : current));
+    }, 3200);
+  };
+
+  const clearComposerStatus = () => {
+    if (composerStatusTimeoutRef.current) {
+      clearTimeout(composerStatusTimeoutRef.current);
+      composerStatusTimeoutRef.current = null;
+    }
+    setComposerStatus(null);
+  };
+
+  const transcript = useMemo(
+    () => transcriptFrom(messages, polls, terminalEvents),
+    [messages, polls, terminalEvents],
+  );
+  const peerColorMap = useMemo(
+    () => buildRoomPeerColorMap([...roomUsers, ...messages.map(message => message.alias)], alias, activeThemeId),
+    [activeThemeId, alias, messages, roomUsers],
+  );
+
   useEffect(() => {
     if (stage !== "joined" || secondsLeft <= 0) return;
     const interval = setInterval(() => {
       setSecondsLeft(s => {
-        if (s <= 1) { setStage("expired"); clearInterval(interval); return 0; }
+        if (s <= 1) {
+          setStage("expired");
+          clearInterval(interval);
+          return 0;
+        }
         return s - 1;
       });
     }, 1000);
     return () => clearInterval(interval);
   }, [stage, secondsLeft]);
 
-  // Auto scroll
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [transcript]);
 
+  useEffect(() => {
+    if (isRoomComposerInteractive(stage, isRealtimeReady)) {
+      requestAnimationFrame(() => composerRef.current?.focus());
+    }
+  }, [isRealtimeReady, stage]);
+
+  useEffect(() => {
+    if (stage !== "joined") {
+      previousSecondsLeftRef.current = secondsLeft;
+      return;
+    }
+
+    const previousSecondsLeft = previousSecondsLeftRef.current;
+    previousSecondsLeftRef.current = secondsLeft;
+    if (previousSecondsLeft === null) return;
+
+    const notification = getRoomCountdownNotification(previousSecondsLeft, secondsLeft);
+    if (!notification) return;
+
+    soundRef.current.play("countdownWarning");
+    setMessages(current => [
+      ...current,
+      {
+        id: makeId(),
+        alias: "system",
+        content: notification.message,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      },
+    ]);
+  }, [secondsLeft, stage]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCursorVisible(current => !current);
+    }, 530);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const connectSocket = (token: string, myAlias: string, onReady: () => void) => {
-    // Disconnect any existing socket before creating a new one
+    setIsRealtimeReady(false);
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
@@ -115,13 +317,20 @@ export default function RoomPage() {
       socket.emit("join_room", { roomId, anonToken: token });
     });
 
+    socket.on("connect_error", () => {
+      soundRef.current.play("error");
+      setSocketError("Realtime connection is still trying. Chat will sync when it reconnects.");
+      setTimeout(() => setSocketError(""), 3600);
+    });
+
     socket.on("join_room_success", ({ onlineCount, roomUsers }: { onlineCount: number; roomUsers: string[] }) => {
       setOnlineCount(onlineCount);
       setRoomUsers(roomUsers ?? []);
+      soundRef.current.play("success");
       setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
+        id: makeId(),
         alias: "system",
-        content: `You joined as ${myAlias}`,
+        content: `joined as ${myAlias}`,
         createdAt: new Date().toISOString(),
         isSystem: true,
       }]);
@@ -131,10 +340,11 @@ export default function RoomPage() {
     socket.on("user_joined", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: string[] }) => {
       setOnlineCount(onlineCount);
       setRoomUsers(roomUsers ?? []);
+      soundRef.current.play("notify");
       setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
+        id: makeId(),
         alias: "system",
-        content: `${alias} joined the room`,
+        content: `${alias} joined`,
         createdAt: new Date().toISOString(),
         isSystem: true,
       }]);
@@ -143,16 +353,20 @@ export default function RoomPage() {
     socket.on("user_left", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: string[] }) => {
       setOnlineCount(onlineCount);
       setRoomUsers(roomUsers ?? []);
+      soundRef.current.play("close");
       setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
+        id: makeId(),
         alias: "system",
-        content: `${alias} left the room`,
+        content: `${alias} left`,
         createdAt: new Date().toISOString(),
         isSystem: true,
       }]);
     });
 
     socket.on("new_message", (msg: Message) => {
+      if (msg.alias !== myAlias) {
+        soundRef.current.play("messageReceived");
+      }
       setMessages(prev => [...prev, msg]);
     });
 
@@ -161,6 +375,12 @@ export default function RoomPage() {
     });
 
     socket.on("poll_created", (poll: Poll) => {
+      if (matchesPendingRoomPollRequest(pendingPollRequestRef.current, poll)) {
+        pendingPollRequestRef.current = null;
+        setComposerStatusMessage(`poll created: ${poll.question}`, "accent");
+      } else {
+        soundRef.current.play("pollCreated");
+      }
       setPolls(prev => [...prev, poll]);
     });
 
@@ -173,18 +393,26 @@ export default function RoomPage() {
     });
 
     socket.on("room_closed", () => {
+      soundRef.current.play("close");
       setStage("expired");
     });
 
     socket.on("error", ({ message }: { message: string }) => {
-        if (message === "You are already in this room in another tab.") {
+      if (pendingPollRequestRef.current) {
+        pendingPollRequestRef.current = null;
+        setComposerStatusMessage(`could not create poll: ${message}`, "error");
+      }
+
+      if (message === "You are already in this room in another tab.") {
         socket.disconnect();
         socketRef.current = null;
         setStage("error");
         setErrorMsg("This room is already open in another tab. Please use that tab.");
         return;
       }
-      console.error("Socket error:", message);
+
+      appendEvent("error", message);
+      soundRef.current.play("error");
       setSocketError(message);
       setTimeout(() => setSocketError(""), 3000);
     });
@@ -193,7 +421,7 @@ export default function RoomPage() {
   };
 
   const doJoin = async (password?: string) => {
-    const storedToken = localStorage.getItem(`token_${roomId}`) || undefined;
+    const storedToken = getStoredToken(roomId);
     const body: Record<string, unknown> = {};
     if (storedToken) body.anonToken = storedToken;
     if (password) body.password = password;
@@ -208,431 +436,1817 @@ export default function RoomPage() {
     return data;
   };
 
-  // Fetch messages & polls after join
   const fetchHistory = async (token: string) => {
     const [msgRes, pollRes] = await Promise.all([
       fetch(`${API}/rooms/${roomId}/messages?anonToken=${encodeURIComponent(token)}`),
       fetch(`${API}/rooms/${roomId}/polls?anonToken=${encodeURIComponent(token)}`),
     ]);
+
     if (msgRes.ok) {
-      const d = await msgRes.json();
-      setMessages(d.messages || []);
+      const data = await msgRes.json();
+      setMessages(data.messages || []);
     }
+
     if (pollRes.ok) {
-      const d = await pollRes.json();
-      setPolls(d.polls || []);
+      const data = await pollRes.json();
+      setPolls(data.polls || []);
     }
   };
 
-  // Initial load — runs once per roomId, cancelled flag prevents acting on stale async results
+  const enterJoinedRoom = async (joinData: JoinRoomData, options: { fromPasswordGate?: boolean } = {}) => {
+    anonTokenRef.current = joinData.anonToken;
+    setStoredToken(roomId, joinData.anonToken);
+    setAlias(joinData.alias);
+    setIsCreator(joinData.isCreator);
+    if (options.fromPasswordGate) setPasswordGateUnlocked(true);
+    await fetchHistory(joinData.anonToken);
+    setStage(resolveRoomStageAfterAuthenticatedJoin());
+    connectSocket(joinData.anonToken, joinData.alias, () => setIsRealtimeReady(true));
+  };
+
+  useEffect(() => {
+    if (stage === "joined" && isRealtimeReady) {
+      markRoomReady(roomId);
+      return;
+    }
+
+    if (stage === "password") {
+      markRoomReady(roomId);
+      return;
+    }
+
+    if (stage === "expired" || stage === "error") {
+      cancelRoomHandoff();
+    }
+  }, [cancelRoomHandoff, isRealtimeReady, markRoomReady, roomId, stage]);
+
   useEffect(() => {
     let cancelled = false;
 
     const run = async () => {
+      setPasswordError("");
+      setPasswordGateUnlocked(false);
+
       try {
         const roomRes = await fetch(`${API}/rooms/${roomId}`);
         if (cancelled) return;
         if (!roomRes.ok) {
-          if (roomRes.status === 404) { setErrorMsg("Room not found."); setStage("error"); return; }
-          setErrorMsg("Failed to load room."); setStage("error"); return;
+          if (roomRes.status === 404) {
+            setErrorMsg("Room not found.");
+            setStage("error");
+            return;
+          }
+          setErrorMsg("Failed to load room.");
+          setStage("error");
+          return;
         }
+
         const roomData = await roomRes.json();
         if (cancelled) return;
         setTopic(roomData.topic);
         setSecondsLeft(roomData.secondsLeft);
+        ttlTotalSecondsRef.current = Math.max(1, roomData.totalSeconds ?? roomData.secondsLeft);
 
-        if (roomData.secondsLeft <= 0) { setStage("expired"); return; }
-
-        if (roomData.hasPassword) {
-          setNeedsPassword(true);
-          setStage("password");
-        } else {
-          try {
-            const joinData = await doJoin();
-            if (cancelled) return;
-            anonTokenRef.current = joinData.anonToken;
-            localStorage.setItem(`token_${roomId}`, joinData.anonToken);
-            setAlias(joinData.alias);
-            setIsCreator(joinData.isCreator);
-            await fetchHistory(joinData.anonToken);
-            if (cancelled) return;
-            connectSocket(joinData.anonToken, joinData.alias, () => setStage("joined"));
-          } catch (err: unknown) {
-            if (cancelled) return;
-            const e = err as { status?: number; message?: string };
-            if (e.status === 410) { setStage("expired"); return; }
-            setErrorMsg(e.message || "Failed to join room."); setStage("error");
-          }
+        if (roomData.secondsLeft <= 0) {
+          setStage("expired");
+          return;
         }
-      } catch {
+
+        const storedToken = getStoredToken(roomId);
+        if (roomData.hasPassword && !storedToken) {
+          setStage("password");
+          return;
+        }
+
+        let joinData: JoinRoomData;
+        try {
+          joinData = await doJoin();
+        } catch (err: unknown) {
+          const e = err as { status?: number; message?: string };
+          if (roomData.hasPassword && e.status === 403) {
+            setStage("password");
+            return;
+          }
+          throw err;
+        }
         if (cancelled) return;
-        setErrorMsg("Could not reach server."); setStage("error");
+        await enterJoinedRoom(joinData);
+        if (cancelled) return;
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const e = err as { status?: number; message?: string };
+        if (e.status === 410) {
+          setStage("expired");
+          return;
+        }
+        setErrorMsg(e.message || "Could not reach server.");
+        setStage("error");
       }
     };
 
-    run();
+    void run();
 
     return () => {
       cancelled = true;
       socketRef.current?.disconnect();
       socketRef.current = null;
     };
-  // roomId is the only real dependency; functions are defined in component scope
+  // roomId is the only stable route dependency; socket helpers close over current room state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
-  const handlePasswordSubmit = async () => {
+  const handlePasswordSubmit = async (passwordValue: string) => {
+    const nextPassword = passwordValue.trim();
     setPasswordError("");
+    if (!nextPassword) {
+      sound.play("error");
+      setPasswordError("Password is required.");
+      return;
+    }
+
     try {
-      const joinData = await doJoin(passwordInput);
-      anonTokenRef.current = joinData.anonToken;
-      localStorage.setItem(`token_${roomId}`, joinData.anonToken);
-      setAlias(joinData.alias);
-      setIsCreator(joinData.isCreator);
-      await fetchHistory(joinData.anonToken);
-      connectSocket(joinData.anonToken, joinData.alias, () => setStage("joined"));
+      const joinData = await doJoin(nextPassword);
+      sound.play("success");
+      await enterJoinedRoom(joinData, { fromPasswordGate: true });
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string };
       if (e.status === 410) setStage("expired");
-      else setPasswordError(e.message || "Failed to join.");
+      else {
+        sound.play("error");
+        setPasswordError(e.message || "Failed to join.");
+      }
     }
   };
 
-  const sendMessage = () => {
-    if (!msgInput.trim() || !socketRef.current) return;
-    socketRef.current.emit("send_message", { message : msgInput.trim() });
-    setMsgInput("");
+  const emitPoll = (question: string, options: string[]) => {
+    if (!socketRef.current) {
+      appendEvent("error", "socket not connected");
+      sound.play("error");
+      return false;
+    }
+
+    pendingPollRequestRef.current = createPendingRoomPollRequest(question, options);
+    socketRef.current.emit("create_poll", { question, options });
+    sound.play("pollCreated");
+    return true;
   };
 
-  const deleteMessage = (messageId: string) => {
-    socketRef.current?.emit("delete_message", { messageId });
+  const sendChatMessage = (message: string) => {
+    if (!socketRef.current) {
+      appendEvent("error", "socket not connected");
+      sound.play("error");
+      return;
+    }
+
+    socketRef.current.emit("send_message", { message });
+    sound.play("messageSent");
   };
 
   const closeRoom = () => {
+    sound.play("close");
     socketRef.current?.emit("close_room", {});
   };
 
-  const createPoll = () => {
-    const validOptions = pollOptions.filter(o => o.trim());
-    if (!pollQuestion.trim() || validOptions.length < 2) return;
-    socketRef.current?.emit("create_poll", { question: pollQuestion.trim(), options: validOptions });
-    setPollQuestion(""); setPollOptions(["", ""]); setShowPollForm(false);
-  };
-
-  const votePoll = (pollId: string, optionIndex: number) => {
-    socketRef.current?.emit("vote_poll", { pollId, optionIndex });
-  };
-
   const handleLeave = () => {
+    sound.play("close");
     socketRef.current?.disconnect();
     socketRef.current = null;
     router.push("/");
   };
 
-  const copyShareLink = () => {
-    navigator.clipboard.writeText(`${window.location.href}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      sound.play("success");
+      setComposerStatusMessage("share link copied", "accent");
+    } catch {
+      sound.play("error");
+      setComposerStatusMessage("could not copy share link", "error");
+    }
   };
 
-  // My alias color for chat
-  const isMe = (msgAlias: string) => msgAlias === alias;
+  const copyRevealedPassword = async () => {
+    if (!passwordReveal) return;
 
-  // Expired / error states
+    try {
+      await navigator.clipboard.writeText(passwordReveal.password);
+      sound.play("success");
+      setComposerStatusMessage("password copied", "accent");
+    } catch {
+      sound.play("error");
+      setComposerStatusMessage("could not copy password", "error");
+    }
+  };
+
+  const printHelp = (commandType = "help") => {
+    const base = "commands: /help /commands /style /sound /poll /share /leave /exit";
+    const creator = isCreator ? " /password /close" : "";
+    setComposerStatusMessage(
+      commandType === "commands" ? `${base}${creator}` : `try ${base}${creator}`,
+      "muted",
+    );
+  };
+
+  const askProjectHelp = async (question: string) => {
+    setComposerStatusMessage("asking inkog...", "muted");
+
+    try {
+      const result = await askInkogHelp(API, question);
+      sound.play("notify");
+      setComposerStatus(null);
+      setMessages(current => [
+        ...current,
+        {
+          id: makeId(),
+          alias: "inkog",
+          content: result.answer,
+          createdAt: new Date().toISOString(),
+          isSystem: true,
+        },
+      ]);
+    } catch {
+      sound.play("error");
+      setComposerStatusMessage("I could not reach the inkog help brain right now.", "error");
+    }
+  };
+
+  const handleSoundCommand = (rawCommand: string) => {
+    const parsed = parseSystemSoundCommand(rawCommand);
+
+    if (parsed.type === "invalid") {
+      sound.play("error");
+      setComposerStatusMessage(parsed.message ?? "usage: /sound on, /sound off, or /sound status", "error");
+      return true;
+    }
+
+    if (parsed.type === "status") {
+      sound.play("notify");
+      setComposerStatusMessage(formatSystemSoundStatus(sound.muted), "muted");
+      return true;
+    }
+
+    const nextMuted = parsed.muted === true;
+    if (nextMuted) {
+      sound.play("close");
+    } else {
+      sound.play("notify");
+    }
+    sound.setMuted(nextMuted);
+    setComposerStatusMessage(formatSystemSoundStatus(nextMuted), "accent");
+    return true;
+  };
+
+  const applyResolvedStyleChoice = (argument: string) => {
+    const result = resolveRoomStyleSelection(argument);
+
+    if (!result.ok) {
+      sound.play("error");
+      setComposerStatusMessage(result.message ?? "choose 1, 2, 3, 4, 5, or a theme name", "error");
+      return false;
+    }
+
+    const theme = result.theme;
+    const transcriptMessage = result.transcriptMessage;
+    if (!theme || !transcriptMessage) {
+      sound.play("error");
+      setComposerStatusMessage("choose 1, 2, 3, 4, 5, or a theme name", "error");
+      return false;
+    }
+
+    applyInkogTheme(
+      {
+        documentElement: typeof document !== "undefined" ? document.documentElement : undefined,
+        storage: typeof window !== "undefined" ? window.localStorage : undefined,
+      },
+      theme.id,
+    );
+    setActiveThemeId(theme.id);
+    sound.play("notify");
+    clearComposerStatus();
+    setMessages(current => [
+      ...current,
+      {
+        id: makeId(),
+        alias: "system",
+        content: transcriptMessage,
+        createdAt: new Date().toISOString(),
+        isSystem: true,
+      },
+    ]);
+    return true;
+  };
+
+  const handleStyleCommand = (argument: string) => {
+    if (!argument) {
+      setPendingCommand({ type: "style" });
+      setComposerStatusMessage(getRoomStylePrompt(), "muted");
+      sound.play("notify");
+      return;
+    }
+
+    setPendingCommand(null);
+    applyResolvedStyleChoice(argument);
+  };
+
+  const handlePollCommand = () => {
+    const nextState = {
+      type: "poll" as const,
+      step: "question" as const,
+      draft: createEmptyRoomPollDraft(),
+    };
+    setPendingCommand(nextState);
+    setComposerStatusMessage(getRoomPollPrompt(nextState), "muted");
+    sound.play("notify");
+  };
+
+  const closeRoomWithConfirm = () => {
+    if (window.confirm("Close chat for everyone? This cannot be undone.")) closeRoom();
+  };
+
+  const handlePasswordCommand = () => {
+    const result = resolveRoomPasswordCommand({
+      isCreator,
+      password: getStoredRoomPassword(roomId),
+    });
+
+    if (!result.ok) {
+      sound.play("error");
+      setComposerStatusMessage(result.message ?? "could not show room password", "error");
+      return;
+    }
+
+    sound.play("notify");
+    clearComposerStatus();
+    setPasswordReveal({
+      password: result.password ?? "",
+      hint: result.hint ?? "type c to copy",
+    });
+  };
+
+  const runSlashSuggestion = (command: string) => {
+    setSlashSuggestionIndex(0);
+    setComposerValue("");
+
+    if (command === "/poll") {
+      handlePollCommand();
+      return;
+    }
+
+    if (command === "/style") {
+      handleStyleCommand("");
+      return;
+    }
+
+    if (command === "/sound") {
+      sound.play("press");
+      setComposerValue("/sound ");
+      focusComposer();
+      return;
+    }
+
+    if (command === "/share") {
+      void copyShareLink();
+      return;
+    }
+
+    if (command === "/password") {
+      handlePasswordCommand();
+      return;
+    }
+
+    if (command === "/leave") {
+      handleLeave();
+      return;
+    }
+
+    if (command === "/close") {
+      if (!isCreator) {
+        sound.play("error");
+        setComposerStatusMessage("only the creator can close this chat", "error");
+        return;
+      }
+      sound.play("press");
+      closeRoomWithConfirm();
+      return;
+    }
+
+    printHelp();
+    sound.play("notify");
+  };
+
+  const runComposer = () => {
+    if (!isRoomComposerInteractive(stage, isRealtimeReady)) return;
+
+    const rawValue = composerValue;
+    const value = rawValue.trim();
+    setComposerValue("");
+
+    if (stage === "password") {
+      setPendingCommand(null);
+      void handlePasswordSubmit(rawValue);
+      return;
+    }
+
+    if (pendingCommand?.type === "style") {
+      if (!value) {
+        setComposerStatusMessage(getRoomStylePrompt(), "muted");
+        return;
+      }
+
+      if (value.startsWith("/")) {
+        setPendingCommand(null);
+      } else {
+        if (applyResolvedStyleChoice(value)) {
+          setPendingCommand(null);
+        }
+        return;
+      }
+    }
+
+    if (pendingCommand?.type === "poll") {
+      if (value.startsWith("/")) {
+        setPendingCommand(null);
+      } else {
+        const result = submitRoomPollDraftAnswer(pendingCommand, value);
+
+        if (result.status === "invalid") {
+          sound.play("error");
+          setComposerStatusMessage(result.message ?? "poll input is invalid", "error");
+          return;
+        }
+
+        if (result.status === "pending") {
+          if (!("state" in result) || !result.state) {
+            sound.play("error");
+            setComposerStatusMessage("poll draft could not continue", "error");
+            return;
+          }
+
+          const nextPendingPollCommand: PendingComposerCommand = {
+            type: "poll",
+            step: result.state.step as "question" | "option",
+            draft: result.state.draft,
+          };
+          setPendingCommand(nextPendingPollCommand);
+          setComposerStatusMessage(result.message, "muted");
+          sound.play("notify");
+          return;
+        }
+
+        setPendingCommand(null);
+        if (!emitPoll(result.payload.question, result.payload.options)) return;
+        setComposerStatusMessage(`creating poll: ${result.payload.question}`, "muted");
+        return;
+      }
+    }
+
+    if (passwordReveal && value.toLowerCase() === "c") {
+      void copyRevealedPassword();
+      return;
+    }
+
+    const command = parseRoomCommand(value) as RoomCommand;
+
+    if (value.toLowerCase().replace(/^\/+/, "").startsWith("sound")) {
+      handleSoundCommand(value.startsWith("/") ? value : `/${value}`);
+      return;
+    }
+
+    switch (command.type) {
+      case "empty":
+        return;
+      case "poll":
+        handlePollCommand();
+        return;
+      case "poll-inline":
+        if (!emitPoll(command.question, command.options)) return;
+        setComposerStatusMessage(`creating poll: ${command.question}`, "muted");
+        return;
+      case "message":
+        sendChatMessage(command.text);
+        setComposerStatus(null);
+        setPendingCommand(null);
+        return;
+      case "style":
+        handleStyleCommand(command.argument);
+        return;
+      case "invalid":
+        sound.play("error");
+        setComposerStatusMessage(command.message, "error");
+        return;
+      case "commands":
+        printHelp("commands");
+        sound.play("notify");
+        return;
+      case "share":
+        void copyShareLink();
+        return;
+      case "password": {
+        handlePasswordCommand();
+        return;
+      }
+      case "leave":
+        handleLeave();
+        return;
+      case "exit":
+        handleLeave();
+        return;
+      case "close":
+        if (!isCreator) {
+          sound.play("error");
+          setComposerStatusMessage("only the creator can close this room", "error");
+          return;
+        }
+        closeRoomWithConfirm();
+        return;
+      case "help":
+        printHelp();
+        sound.play("notify");
+        return;
+      case "help-question":
+        void askProjectHelp(command.question);
+        return;
+      case "unknown":
+        sound.play("error");
+        setComposerStatusMessage(`command not found: ${command.command}`, "error");
+        return;
+    }
+  };
+
+  const votePoll = (pollId: string, optionIndex: number) => {
+    sound.play("pollVoted");
+    socketRef.current?.emit("vote_poll", { pollId, optionIndex });
+  };
+
+  const totalVotes = (poll: Poll) => poll.votesByMember.length;
+  const votesFor = (poll: Poll, idx: number) => poll.votesByMember.filter(v => v.optionIndex === idx).length;
+  const myVote = (poll: Poll) => poll.votesByMember.find(v => v.alias === alias)?.optionIndex ?? -1;
+  const isRoomBooting = stage === "loading";
+  const isPasswordGate = stage === "password";
+  const usersTitle = roomUsers.length ? roomUsers.join("\n") : "No users online";
+  const roster = getRoomRoster(roomUsers);
+  const pollInlinePrompt = !isRoomBooting && !isPasswordGate && pendingCommand?.type === "poll" ? getRoomPollInlinePrompt(pendingCommand) : null;
+  const showIdleCursor = composerValue.length === 0 && !pollInlinePrompt;
+  const composerChrome = getRoomComposerChrome({
+    composerStatus: isRoomBooting || isPasswordGate ? null : composerStatus,
+    pendingCommand: isRoomBooting || isPasswordGate ? null : pendingCommand,
+  });
+  const slashSuggestions = isRoomBooting || isPasswordGate ? [] : getRoomSlashCommandSuggestions({ isCreator, query: composerValue });
+  const showSlashSuggestions = slashSuggestions.length > 0 && !pendingCommand;
+  const showComposerHint = showIdleCursor && !showSlashSuggestions && composerChrome.statusMode === "hidden";
+  const gateTranscriptLines = isRoomBooting
+    ? []
+    : isPasswordGate
+      ? buildRoomGateTranscriptLines({ topic, state: "locked" })
+      : passwordGateUnlocked
+        ? buildRoomGateTranscriptLines({ topic, state: "unlocked" })
+        : [];
+  const ttlMeter = getRoomTtlMeter({ secondsLeft, totalSeconds: ttlTotalSecondsRef.current });
+  const composerStatusColor =
+    composerStatus?.tone === "error"
+      ? "var(--red)"
+      : composerStatus?.tone === "accent"
+        ? "var(--accent)"
+        : "var(--text-muted)";
+  useEffect(() => {
+    setSlashSuggestionIndex(index => {
+      if (!showSlashSuggestions) return 0;
+      return Math.min(index, Math.max(slashSuggestions.length - 1, 0));
+    });
+  }, [showSlashSuggestions, slashSuggestions.length]);
+
   if (stage === "expired") {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px", textAlign: "center" }}>
-        <div style={{ fontSize: "48px", marginBottom: "20px" }}>💨</div>
-        <h1 style={{ fontSize: "32px", marginBottom: "12px" }}>Room Expired</h1>
-        <p style={{ color: "var(--text-muted)", marginBottom: "32px", fontSize: "14px" }}>This room has self-destructed. All messages are gone forever.</p>
-        <button className="btn-accent" onClick={() => router.push("/")} style={{ padding: "12px 28px", borderRadius: "6px" }}>← Back to Home</button>
-      </div>
+      <TerminalState
+        action="back"
+        copy="room expired. messages are no longer available."
+        onAction={() => router.push("/")}
+        title="room expired"
+      />
     );
   }
 
   if (stage === "error") {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px", textAlign: "center" }}>
-        <div style={{ fontSize: "48px", marginBottom: "20px" }}>⚠</div>
-        <h1 style={{ fontSize: "28px", marginBottom: "12px" }}>Something went wrong</h1>
-        <p style={{ color: "var(--text-muted)", marginBottom: "32px", fontSize: "14px" }}>{errorMsg}</p>
-        <button className="btn-accent" onClick={() => router.push("/")} style={{ padding: "12px 28px", borderRadius: "6px" }}>← Back to Home</button>
-      </div>
+      <TerminalState
+        action="back"
+        copy={errorMsg}
+        onAction={() => router.push("/")}
+        title="room error"
+      />
     );
   }
-
-  if (stage === "loading") {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: "20px", letterSpacing: "-0.04em", marginBottom: "16px" }}>inkog</div>
-          <p style={{ color: "var(--text-dim)", fontSize: "12px", letterSpacing: "0.1em" }}>loading room<span className="blink">_</span></p>
-        </div>
-      </div>
-    );
-  }
-
-  if (stage === "password") {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px" }}>
-        <div style={{ maxWidth: "400px", width: "100%" }}>
-          <div style={{ marginBottom: "32px", textAlign: "center" }}>
-            <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: "20px", marginBottom: "20px" }}>inkog</div>
-            <p style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Private Room</p>
-            <h2 style={{ fontSize: "20px", color: "var(--text)", margin: "0 0 6px" }}>{topic}</h2>
-          </div>
-          <div style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: "12px", padding: "28px" }}>
-            <label>
-              <div style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Password</div>
-              <input value={passwordInput} onChange={e => setPasswordInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handlePasswordSubmit()}
-                type="password" placeholder="Enter room password" style={{ width: "100%", padding: "11px 14px", borderRadius: "6px", marginBottom: "12px" }} autoFocus />
-            </label>
-            {passwordError && <div style={{ color: "var(--red)", fontSize: "13px", marginBottom: "12px" }}>{passwordError}</div>}
-            <button className="btn-accent" onClick={handlePasswordSubmit} style={{ width: "100%", padding: "13px", borderRadius: "6px" }}>
-              Enter Room →
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Joined — main room UI
-  const totalVotes = (poll: Poll) => poll.votesByMember.length;
-  const votesFor = (poll: Poll, idx: number) => poll.votesByMember.filter(v => v.optionIndex === idx).length;
-  const myVote = (poll: Poll) => poll.votesByMember.find(v => v.alias === alias)?.optionIndex ?? -1;
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* Top bar */}
-      <header style={{ borderBottom: "1px solid var(--border)", padding: "12px 20px", display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
-        <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: "16px", letterSpacing: "-0.04em", marginRight: "4px" }}>inkog</span>
-        <span style={{ color: "var(--border-light)", fontSize: "14px" }}>·</span>
-
-        {/* Topic */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ margin: 0, fontSize: "13px", color: "var(--text)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{topic}</p>
-        </div>
-
-        {/* Meta */}
-        <div style={{ display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
-          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: "5px" }} className="online-users-wrapper">
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: onlineCount > 0 ? "var(--accent)" : "var(--text-dim)", display: "inline-block" }} />
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", cursor: "default" }}>{onlineCount} online</span>
-            {roomUsers.length > 0 && (
-              <div className="online-users-tooltip" style={{
-                position: "absolute", top: "calc(100% + 8px)", right: 0, background: "var(--bg-2)",
-                border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 0",
-                minWidth: "160px", zIndex: 50, boxShadow: "0 4px 16px rgba(0,0,0,0.3)"
-              }}>
-                {roomUsers.map((u) => (
-                  <div key={u} style={{ padding: "5px 14px", fontSize: "12px", color: u === alias ? "var(--accent)" : "var(--text-muted)", fontFamily: "DM Mono, monospace" }}>
-                    {u}{u === alias ? " (you)" : ""}
-                  </div>
-                ))}
-              </div>
-            )}
+    <main
+      data-route-handoff-phase={routeHandoffState.phase}
+      style={styles.roomShell}
+      onClick={() => composerRef.current?.focus()}
+    >
+      <header style={{ ...styles.roomHeader, ...getRoomPartStyle(roomId, "header") }}>
+        <div style={styles.roomHeaderInner}>
+          <div style={styles.headerIdentity}>
+            <span style={styles.brand}>inkog</span>
+            <span style={styles.headerDivider}>/</span>
+            <span style={styles.topic} title={topic}>{topic}</span>
           </div>
-          <div style={{ fontSize: "12px", color: secondsLeft < 300 ? "var(--red)" : "var(--text-muted)", fontFamily: "DM Mono, monospace" }}>
-            ⏱ {formatTime(secondsLeft)}
+          <div style={styles.headerMeta}>
+            <AvatarRoster roster={roster} usersTitle={usersTitle} viewerAlias={alias} />
+            <RoomTtlMeter meter={ttlMeter} />
           </div>
-          <button className="btn-ghost" onClick={copyShareLink} style={{ padding: "5px 12px", borderRadius: "4px", fontSize: "11px", letterSpacing: "0.05em" }}>
-            {copied ? "✓ Copied" : "Share"}
-          </button>
-          <button className="btn-ghost" onClick={handleLeave} style={{ padding: "5px 12px", borderRadius: "4px", fontSize: "11px", letterSpacing: "0.05em", color: "var(--red)" }}>
-            Leave
-          </button>
         </div>
       </header>
 
-      {/* Socket error toast */}
-      {socketError && (
-        <div style={{ background: "var(--red)", color: "#fff", fontSize: "12px", padding: "8px 20px", textAlign: "center", letterSpacing: "0.03em" }}>
-          ⚠ {socketError}
-        </div>
-      )}
+      {socketError && <div style={{ ...styles.errorToast, ...getRoomPartStyle(roomId, "transcript") }}>error: {socketError}</div>}
 
-      {/* Body */}
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Chat column */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
-            {messages.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--text-dim)", fontSize: "13px" }}>
-                <p style={{ fontSize: "28px", marginBottom: "12px" }}>👻</p>
-                <p>No messages yet. Break the ice.</p>
-                <p style={{ marginTop: "8px", fontSize: "12px" }}>You are <span style={{ color: "var(--accent)", fontWeight: 600 }}>{alias}</span>{isCreator ? " (creator)" : ""}</p>
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                {messages.map((msg, i) => {
-                  if (msg.isSystem) {
-                    return (
-                      <div key={msg.id} style={{ textAlign: "center", padding: "6px 0", margin: "4px 0" }}>
-                        <span style={{ fontSize: "11px", color: "var(--text-dim)", fontFamily: "DM Mono, monospace", background: "var(--bg-3)", padding: "3px 12px", borderRadius: "20px" }}>
-                          {msg.content}
-                        </span>
-                      </div>
-                    );
-                  }
-                  const mine = isMe(msg.alias);
-                  const prevAlias = i > 0 ? messages[i - 1].alias : null;
-                  const showAlias = msg.alias !== prevAlias;
-                  return (
-                    <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start", marginTop: showAlias ? "14px" : "2px" }}>
-                      {showAlias && (
-                        <span style={{ fontSize: "11px", color: mine ? "var(--accent)" : "var(--text-muted)", marginBottom: "4px", letterSpacing: "0.05em" }}>
-                          {mine ? `${msg.alias} (you)` : msg.alias}
-                        </span>
-                      )}
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        {/* {!mine && isCreator && (
-                          <button className="btn-danger" onClick={() => deleteMessage(msg.id)} title="Delete">✕</button>
-                        )} */}
-                        <div style={{
-                          background: mine ? "var(--accent)" : "var(--bg-3)",
-                          color: mine ? "#0c0c0e" : "var(--text)",
-                          padding: "8px 14px",
-                          borderRadius: mine ? "14px 14px 2px 14px" : "14px 14px 14px 2px",
-                          fontSize: "14px",
-                          maxWidth: "420px",
-                          wordBreak: "break-word",
-                          lineHeight: 1.5,
-                        }}>
-                          {msg.content}
-                        </div>
-                        {/* {mine && isCreator && (
-                          <button className="btn-danger" onClick={() => deleteMessage(msg.id)} title="Delete">✕</button>
-                        )} */}
-                      </div>
-                    </div>
-                  );
-                })}
-                <div ref={messagesEndRef} />
-              </div>
-            )}
-          </div>
+      <section
+        aria-label="Room terminal transcript"
+        className={routeHandoffState.phase === "transitioning" ? "room-route-transcript-enter" : undefined}
+        style={{ ...styles.transcript, ...getRoomPartStyle(roomId, "transcript") }}
+      >
+        <div style={styles.transcriptInner}>
+          {gateTranscriptLines.length > 0 ? (
+            <RoomGateTranscript lines={gateTranscriptLines} passwordError={isPasswordGate ? passwordError : ""} />
+          ) : null}
+          {isRoomBooting || isPasswordGate ? null : transcript.length === 0 ? (
+            <div style={styles.emptyTranscript}>
+              <p style={styles.emptyLine}>system: joined as {alias}</p>
+              <p style={styles.emptyLine}>system: type a message</p>
+            </div>
+          ) : (
+            transcript.map(item => {
+              if (item.type === "event") {
+                return <TerminalEventRow event={item.event} key={item.event.id} />;
+              }
 
-          {/* Input */}
-          <div style={{ borderTop: "1px solid var(--border)", padding: "14px 20px", display: "flex", gap: "10px", flexShrink: 0 }}>
-            <input
-              value={msgInput}
-              onChange={e => setMsgInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-              placeholder={`Message as ${alias}...`}
-              style={{ flex: 1, padding: "10px 14px", borderRadius: "8px", fontSize: "14px" }}
-            />
-            <button className="btn-accent" onClick={sendMessage} disabled={!msgInput.trim()} style={{ padding: "10px 20px", borderRadius: "8px", whiteSpace: "nowrap" }}>
-              Send
-            </button>
-          </div>
-        </div>
+              if (item.type === "poll") {
+                return (
+                  <TerminalPoll
+                    key={item.poll.pollId}
+                    myVote={myVote(item.poll)}
+                    onVote={votePoll}
+                    poll={item.poll}
+                    total={totalVotes(item.poll)}
+                    votesFor={votesFor}
+                  />
+                );
+              }
 
-        {/* Right sidebar — Polls + Creator controls */}
-        <div style={{ width: "300px", borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0 }}>
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: "11px", color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>Polls</span>
-              <button className="btn-ghost" onClick={() => setShowPollForm(f => !f)} style={{ padding: "4px 10px", borderRadius: "4px", fontSize: "11px" }}>
-                {showPollForm ? "Cancel" : "+ Poll"}
-              </button>
-          </div>
-
-          <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
-            {/* Poll creation form */}
-            {showPollForm && (
-              <div className="animate-fadeIn" style={{ background: "var(--bg-3)", border: "1px solid var(--border)", borderRadius: "8px", padding: "14px", marginBottom: "16px" }}>
-                <p style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "10px" }}>New Poll</p>
-                <input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)}
-                  placeholder="Question..." style={{ width: "100%", padding: "8px 10px", borderRadius: "5px", marginBottom: "8px", fontSize: "13px" }} />
-                {pollOptions.map((opt, i) => (
-                  <input key={i} value={opt} onChange={e => { const o = [...pollOptions]; o[i] = e.target.value; setPollOptions(o); }}
-                    placeholder={`Option ${i + 1}`} style={{ width: "100%", padding: "8px 10px", borderRadius: "5px", marginBottom: "6px", fontSize: "13px" }} />
-                ))}
-                {pollOptions.length < 4 && (
-                  <button className="btn-ghost" onClick={() => setPollOptions([...pollOptions, ""])} style={{ padding: "5px 10px", borderRadius: "4px", fontSize: "11px", marginBottom: "8px" }}>
-                    + Add option
-                  </button>
-                )}
-                <button className="btn-accent" onClick={createPoll} style={{ width: "100%", padding: "9px", borderRadius: "5px", marginTop: "4px" }}>
-                  Create Poll
-                </button>
-              </div>
-            )}
-
-            {/* Poll list */}
-            {polls.length === 0 && !showPollForm && (
-              <div style={{ textAlign: "center", padding: "32px 12px", color: "var(--text-dim)", fontSize: "12px" }}>
-                No polls yet
-              </div>
-            )}
-
-            {polls.map(poll => {
-              const total = totalVotes(poll);
-              const myVoteIdx = myVote(poll);
               return (
-                <div key={poll.pollId} style={{ background: "var(--bg-3)", border: "1px solid var(--border)", borderRadius: "8px", padding: "14px", marginBottom: "12px" }}>
-                  <p style={{ fontSize: "13px", fontWeight: 600, marginBottom: "12px", lineHeight: 1.4, color: "var(--text)" }}>{poll.question}</p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    {poll.options.map((opt, idx) => {
-                      const count = votesFor(poll, idx);
-                      const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-                      const isMyVote = myVoteIdx === idx;
-                      return (
-                        <button key={idx} onClick={() => votePoll(poll.pollId, idx)}
-                          style={{
-                            background: "transparent",
-                            border: `1px solid ${isMyVote ? "var(--accent)" : "var(--border)"}`,
-                            borderRadius: "5px",
-                            padding: "8px 10px",
-                            cursor: "pointer",
-                            textAlign: "left",
-                            position: "relative",
-                            overflow: "hidden",
-                            transition: "border-color 0.15s",
-                          }}>
-                          {/* Progress bar */}
-                          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, background: isMyVote ? "rgba(200,255,87,0.12)" : "rgba(255,255,255,0.04)", transition: "width 0.3s ease" }} />
-                          <div style={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={{ fontSize: "12px", color: isMyVote ? "var(--accent)" : "var(--text)", fontFamily: "DM Mono, monospace" }}>{opt}</span>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)", flexShrink: 0, marginLeft: "8px" }}>{count} · {pct}%</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p style={{ fontSize: "11px", color: "var(--text-dim)", marginTop: "8px", marginBottom: 0 }}>{total} vote{total !== 1 ? "s" : ""}</p>
-                </div>
+                <TerminalMessage
+                  alias={alias}
+                  key={item.message.id}
+                  message={item.message}
+                  peerColorMap={peerColorMap}
+                />
               );
-            })}
-          </div>
-
-          {/* Creator controls */}
-          {isCreator && (
-            <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-              <p style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>Creator</p>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "12px", color: "var(--accent)", fontFamily: "DM Mono, monospace" }}>{alias}</span>
-                <button
-                  className="btn-danger"
-                  onClick={() => { if (confirm("Close room for everyone? This cannot be undone.")) closeRoom(); }}
-                  style={{ marginLeft: "auto", padding: "5px 12px", fontSize: "11px" }}
-                >
-                  Close Room
-                </button>
-              </div>
-            </div>
+            })
           )}
-
-          {/* Alias display for non-creator */}
-          {!isCreator && (
-            <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-              <p style={{ fontSize: "11px", color: "var(--text-dim)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>Your alias</p>
-              <span style={{ fontSize: "13px", color: "var(--text-muted)", fontFamily: "DM Mono, monospace" }}>{alias}</span>
-            </div>
-          )}
+          <div ref={transcriptEndRef} />
         </div>
-      </div>
+      </section>
+
+      <form
+        onSubmit={event => {
+          event.preventDefault();
+          runComposer();
+        }}
+        style={{ ...styles.composer, ...composerStyle, ...getRoomPartStyle(roomId, "composer") }}
+      >
+        <div
+          data-route-composer="room"
+          style={{
+            ...styles.composerFrame,
+          }}
+        >
+          <div
+            aria-hidden={!showSlashSuggestions}
+            style={{
+              ...styles.slashCommandMenu,
+              maxHeight: showSlashSuggestions ? "220px" : "0px",
+              opacity: showSlashSuggestions ? 1 : 0,
+              marginBottom: showSlashSuggestions ? "6px" : "0px",
+              paddingBottom: showSlashSuggestions ? "8px" : "0px",
+              pointerEvents: showSlashSuggestions ? "auto" : "none",
+            }}
+          >
+            {showSlashSuggestions ? slashSuggestions.map((item, index) => {
+              const selected = slashSuggestionIndex === index;
+
+              return (
+                <button
+                  key={item.command}
+                  onPointerDown={event => event.preventDefault()}
+                  onClick={() => runSlashSuggestion(item.command)}
+                  onMouseEnter={() => {
+                    setSlashSuggestionIndex(index);
+                    sound.play("hover");
+                  }}
+                  style={{
+                    ...styles.slashCommandItem,
+                    background: selected ? "color-mix(in srgb, var(--accent) 7%, transparent)" : "transparent",
+                    color: selected ? "var(--accent)" : "var(--text)",
+                  }}
+                  type="button"
+                >
+                  <span aria-hidden="true" style={styles.slashCommandMarker}>{selected ? ">" : ""}</span>
+                  <span style={styles.slashCommandName}>{item.command}</span>
+                  <span style={styles.slashCommandDescription}>{item.label}</span>
+                </button>
+              );
+            }) : null}
+          </div>
+          <div
+            aria-hidden={composerChrome.statusMode !== "inline"}
+            style={{
+              ...styles.composerInlineStatus,
+              maxHeight: composerChrome.statusMode === "inline" ? "22px" : "0px",
+              marginBottom: composerChrome.statusMode === "inline" ? "6px" : "0px",
+              opacity: composerChrome.statusMode === "inline" ? 1 : 0,
+            }}
+          >
+            <p id="room-composer-status" role="status" aria-live="polite" style={{ ...styles.composerStatus, color: composerStatusColor }}>
+              {composerChrome.statusMode === "inline" ? (composerStatus?.message ?? "") : ""}
+            </p>
+          </div>
+          {passwordReveal ? (
+            <RoomPasswordReveal
+              hint={passwordReveal.hint}
+              password={passwordReveal.password}
+            />
+          ) : null}
+          <div style={styles.composerRow}>
+            <label htmlFor="room-terminal-input" style={styles.srOnly}>room command</label>
+            <span aria-hidden="true" style={styles.composerPrompt}>$</span>
+            {pollInlinePrompt ? (
+              <span aria-hidden="true" style={styles.composerPollPrefix}>
+                {pollInlinePrompt.prefix}
+              </span>
+            ) : null}
+            {showIdleCursor || showComposerHint ? (
+              <span aria-hidden="true" style={styles.composerIdleText}>
+                {showIdleCursor ? (
+                  <span
+                    style={{
+                      ...styles.composerCursor,
+                      opacity: cursorVisible ? 1 : 0.18,
+                    }}
+                  >
+                    |
+                  </span>
+                ) : null}
+                {showComposerHint ? (
+                  <span style={styles.composerHint}>
+                    {isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or / for commands"}
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
+            <input
+              autoCapitalize="off"
+              autoComplete="off"
+              autoCorrect="off"
+              aria-describedby="room-composer-status"
+              id="room-terminal-input"
+              onChange={event => {
+                setComposerValue(event.target.value);
+                setSlashSuggestionIndex(0);
+              }}
+              onKeyDown={event => {
+                if (event.key === "Escape" && passwordReveal) {
+                  event.preventDefault();
+                  sound.play("close");
+                  setPasswordReveal(null);
+                  setSlashSuggestionIndex(0);
+                  return;
+                }
+
+                if (
+                  passwordReveal
+                  && event.key.toLowerCase() === "c"
+                  && !event.altKey
+                  && !event.ctrlKey
+                  && !event.metaKey
+                ) {
+                  event.preventDefault();
+                  void copyRevealedPassword();
+                  return;
+                }
+
+                if (!showSlashSuggestions) return;
+
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setSlashSuggestionIndex(index => (index + 1) % slashSuggestions.length);
+                  return;
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSlashSuggestionIndex(index => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
+                  return;
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setComposerValue("");
+                  setSlashSuggestionIndex(0);
+                  return;
+                }
+
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  runSlashSuggestion(slashSuggestions[slashSuggestionIndex]?.command ?? slashSuggestions[0].command);
+                }
+              }}
+              ref={composerRef}
+              spellCheck={false}
+              disabled={!isRoomComposerInteractive(stage, isRealtimeReady)}
+              placeholder={!isRoomComposerInteractive(stage, isRealtimeReady) ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
+              style={{
+                ...styles.composerInput,
+                caretColor: showIdleCursor ? "transparent" : "var(--text)",
+                color: pollInlinePrompt ? "var(--accent)" : "var(--text)",
+              }}
+              type={isPasswordGate ? "password" : "text"}
+              value={composerValue}
+            />
+          </div>
+        </div>
+      </form>
+    </main>
+  );
+}
+
+function RoomPasswordReveal({
+  hint,
+  password,
+}: {
+  hint: string;
+  password: string;
+}) {
+  const [displayedPassword, setDisplayedPassword] = useState(() => getPasswordCipherText(password, 0));
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (mediaQuery.matches) {
+      setDisplayedPassword(password);
+      return;
+    }
+
+    const characters = Array.from(password);
+    const duration = 420;
+    const startedAt = performance.now();
+    let animationFrame = 0;
+
+    const reveal = (now: number) => {
+      const progress = Math.min((now - startedAt) / duration, 1);
+      const revealedCharacters = Math.floor(progress * (characters.length + 1));
+      setDisplayedPassword(getPasswordCipherText(password, revealedCharacters));
+
+      if (progress < 1) animationFrame = requestAnimationFrame(reveal);
+    };
+
+    animationFrame = requestAnimationFrame(reveal);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [password]);
+
+  return (
+    <div aria-live="polite" style={styles.passwordRevealLine}>
+      <style>{`
+        @keyframes room-password-shimmer {
+          from { background-position: 140% 0; }
+          to { background-position: -40% 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .room-password-shimmer { animation: none !important; }
+        }
+      `}</style>
+      <span style={styles.passwordRevealLabel}>password:</span>
+      <span className="room-password-shimmer" style={styles.passwordRevealValue}>
+        {displayedPassword}
+      </span>
+      <span style={styles.passwordRevealHint}>{hint}</span>
     </div>
   );
 }
+
+const PASSWORD_CIPHER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*";
+
+function getPasswordCipherText(password: string, revealedCharacters: number) {
+  return Array.from(password, (character, index) => {
+    if (character === " " || index < revealedCharacters) return character;
+    return PASSWORD_CIPHER[(index * 13 + revealedCharacters * 7) % PASSWORD_CIPHER.length];
+  }).join("");
+}
+
+function RoomGateTranscript({ lines, passwordError }: { lines: string[]; passwordError?: string }) {
+  return (
+    <div style={styles.gateTranscript}>
+      {lines.map(line => (
+        <p
+          key={line}
+          style={{
+            ...styles.transcriptLine,
+            color: line === "--------" ? "var(--text-dim)" : line.includes("password accepted") ? "var(--accent)" : "var(--text-muted)",
+          }}
+        >
+          {line}
+        </p>
+      ))}
+      {passwordError ? (
+        <p style={{ ...styles.transcriptLine, color: "var(--red)" }}>error: {passwordError}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function TerminalState({
+  action,
+  copy,
+  onAction,
+  title,
+}: {
+  action?: string;
+  copy: string;
+  onAction?: () => void;
+  title: string;
+}) {
+  const sound = useSystemSound();
+
+  return (
+    <main style={styles.stateShell}>
+      <section style={styles.statePanel}>
+        <h1 style={styles.stateTitle}>{title}</h1>
+        <p style={styles.mutedLine}>{copy}</p>
+        {action && (
+          <button
+            className="btn-ghost"
+            onClick={() => {
+              sound.play("press");
+              onAction?.();
+            }}
+            onMouseEnter={() => sound.play("hover")}
+            style={styles.commandButton}
+            type="button"
+          >
+            {action}
+          </button>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function TerminalEventRow({ event }: { event: TerminalEvent }) {
+  const prefix = event.kind === "input" ? "$" : event.kind === "error" ? "error:" : ">";
+  const color =
+    event.kind === "input"
+      ? "var(--accent)"
+      : event.kind === "error"
+        ? "var(--red)"
+        : "var(--text-muted)";
+
+  return (
+    <p style={{ ...styles.transcriptLine, color }}>
+      <span aria-hidden="true">{prefix} </span>
+      {event.content}
+    </p>
+  );
+}
+
+function TerminalMessage({
+  alias,
+  message,
+  peerColorMap,
+}: {
+  alias: string;
+  message: Message;
+  peerColorMap: Record<string, string>;
+}) {
+  const presentation = classifyRoomMessage(message, alias);
+  const lineColor =
+    presentation.kind === "incoming"
+      ? peerColorMap[message.alias] ?? "var(--accent)"
+      : presentation.kind === "outgoing"
+        ? "var(--text-muted)"
+        : "var(--text-dim)";
+
+  if (presentation.kind === "system") {
+    return (
+      <p style={styles.systemMessageLine}>
+        <span aria-hidden="true" style={styles.systemMessageRule} />
+        <span style={styles.systemMessageText}>
+          {presentation.prefix} {message.content}
+        </span>
+        <span aria-hidden="true" style={styles.systemMessageRule} />
+      </p>
+    );
+  }
+
+  return (
+    <p
+      style={{
+        ...styles.transcriptLine,
+        color: lineColor,
+      }}
+    >
+      <span aria-hidden="true">{presentation.prefix} </span>
+      {message.content}
+    </p>
+  );
+}
+
+function AvatarRoster({
+  roster,
+  usersTitle,
+  viewerAlias,
+}: {
+  roster: RoomRoster;
+  usersTitle: string;
+  viewerAlias: string;
+}) {
+  const [activeAlias, setActiveAlias] = useState<string | null>(null);
+
+  return (
+    <div aria-label={`${roster.visible.length + roster.overflow} online`} style={styles.roster}>
+      {roster.visible.map((member, index) => {
+        const active = activeAlias === member.alias;
+        const label = member.alias === viewerAlias ? `${member.alias} (you)` : member.alias;
+
+        return (
+          <span
+            key={member.alias}
+            onBlur={() => setActiveAlias(null)}
+            onFocus={() => setActiveAlias(member.alias)}
+            onMouseEnter={() => setActiveAlias(member.alias)}
+            onMouseLeave={() => setActiveAlias(null)}
+            style={{
+              ...styles.rosterMember,
+              marginLeft: index === 0 ? 0 : active ? "-2px" : "-8px",
+              zIndex: active ? roster.visible.length + 1 : roster.visible.length - index,
+            }}
+            tabIndex={0}
+            title={label}
+          >
+            <span
+              aria-label={label}
+              style={{
+                ...styles.rosterAvatar,
+                ...(active ? styles.rosterAvatarExpanded : null),
+              }}
+            >
+              <span style={styles.rosterInitials}>{member.initials}</span>
+              <span
+                aria-hidden={!active}
+                style={{
+                  ...styles.rosterName,
+                  maxWidth: active ? "150px" : "0px",
+                  opacity: active ? 1 : 0,
+                }}
+              >
+                {label}
+              </span>
+            </span>
+          </span>
+        );
+      })}
+      {roster.overflow > 0 && (
+        <span
+          style={{
+            ...styles.rosterAvatar,
+            ...styles.rosterOverflow,
+            marginLeft: roster.visible.length > 0 ? "-8px" : 0,
+          }}
+          title={usersTitle}
+        >
+          +{roster.overflow}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function RoomTtlMeter({
+  meter,
+}: {
+  meter: ReturnType<typeof getRoomTtlMeter>;
+}) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const meterColor = meter.warning ? "var(--red)" : "var(--accent)";
+
+  return (
+    <span
+      aria-label={`room expires in ${meter.time}`}
+      onBlur={() => setPreviewOpen(false)}
+      onFocus={() => setPreviewOpen(true)}
+      onMouseEnter={() => setPreviewOpen(true)}
+      onMouseLeave={() => setPreviewOpen(false)}
+      onPointerDown={() => setPreviewOpen(open => !open)}
+      style={{
+        ...styles.ttlMeter,
+        color: meter.warning ? "var(--red)" : "var(--text-muted)",
+      }}
+      tabIndex={0}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          ...styles.ttlTrack,
+          opacity: previewOpen ? 1 : 0,
+        }}
+      >
+        <span
+          style={{
+            ...styles.ttlFill,
+            background: meterColor,
+            width: `${meter.percent}%`,
+          }}
+        />
+      </span>
+      <span
+        style={{
+          ...styles.ttlTime,
+          color: meterColor,
+          opacity: previewOpen ? 0 : 1,
+        }}
+      >
+        {meter.time}
+      </span>
+      {meter.marker ? <span aria-hidden="true" style={styles.ttlMarker}>{meter.marker}</span> : null}
+    </span>
+  );
+}
+
+function TerminalPoll({
+  myVote,
+  onVote,
+  poll,
+  total,
+  votesFor,
+}: {
+  myVote: number;
+  onVote: (pollId: string, optionIndex: number) => void;
+  poll: Poll;
+  total: number;
+  votesFor: (poll: Poll, idx: number) => number;
+}) {
+  const sound = useSystemSound();
+  const [hoveredOption, setHoveredOption] = useState<number | null>(null);
+  const meterSlots = 16;
+  const creator = poll.createdByAlias?.trim();
+
+  return (
+    <div style={styles.pollBlock}>
+      <span aria-hidden="true" style={styles.pollTitle}>poll --active{creator ? ` by ${creator}` : ""}</span>
+      <p style={styles.pollQuestion}>{poll.question}</p>
+      <div style={styles.pollOptions}>
+        {poll.options.map((option, index) => {
+          const count = votesFor(poll, index);
+          const percent = total > 0 ? count / total : 0;
+          const filledSlots = total > 0 ? Math.round(percent * meterSlots) : 0;
+          const meter = `${"█".repeat(filledSlots)}${"░".repeat(meterSlots - filledSlots)}`;
+          const selected = myVote === index;
+          const hovered = hoveredOption === index;
+
+          return (
+            <button
+              key={option}
+              onBlur={() => setHoveredOption(null)}
+              onFocus={() => setHoveredOption(index)}
+              onClick={() => onVote(poll.pollId, index)}
+              onMouseEnter={() => {
+                setHoveredOption(index);
+                sound.play("hover");
+              }}
+              onMouseLeave={() => setHoveredOption(null)}
+              style={{
+                ...styles.pollOption,
+                backgroundColor: selected
+                  ? "color-mix(in srgb, var(--accent) 12%, transparent)"
+                  : hovered
+                    ? "color-mix(in srgb, var(--text) 6%, transparent)"
+                    : "color-mix(in srgb, var(--text) 3%, transparent)",
+                color: selected || hovered ? "var(--accent)" : "var(--text)",
+              }}
+              type="button"
+            >
+              <span aria-hidden="true" style={styles.pollOptionMarker}>{selected || hovered ? ">" : ""}</span>
+              <span
+                style={{
+                  ...styles.pollOptionIndex,
+                  color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
+                }}
+              >
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span style={styles.pollOptionLabel}>{option}</span>
+              <span
+                aria-hidden="true"
+                style={{
+                  ...styles.pollOptionMeter,
+                  color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
+                  opacity: selected ? 0.86 : hovered ? 0.5 : 0.34,
+                }}
+              >
+                {meter}
+              </span>
+              <span
+                style={{
+                  ...styles.pollStat,
+                  color: selected ? "var(--accent)" : hovered ? "var(--text)" : "var(--text-muted)",
+                }}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p style={styles.pollFooter}>:: {total} vote{total === 1 ? "" : "s"}</p>
+    </div>
+  );
+}
+
+const styles: Record<string, CSSProperties> = {
+  roomShell: {
+    backgroundColor: "transparent",
+    backgroundImage: roomThemeBackground.background,
+    backgroundBlendMode: roomThemeBackground.blendMode as CSSProperties["backgroundBlendMode"],
+    color: "var(--text)",
+    display: "flex",
+    flexDirection: "column",
+    fontFamily: ROOM_FONT_FAMILY,
+    height: "100dvh",
+    isolation: "isolate",
+    overflow: "hidden",
+    position: "relative",
+  },
+  roomHeader: {
+    borderBottom: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
+    flexShrink: 0,
+    padding: "12px clamp(32px, calc(3vw + 16px), 48px)",
+    position: "relative",
+    zIndex: 1,
+  },
+  roomHeaderInner: {
+    alignItems: "center",
+    display: "flex",
+    gap: "16px",
+    justifyContent: "space-between",
+    margin: "0 auto",
+    maxWidth: "1200px",
+    minHeight: "40px",
+    width: "100%",
+  },
+  headerIdentity: {
+    alignItems: "center",
+    display: "flex",
+    gap: "10px",
+    minWidth: 0,
+  },
+  brand: {
+    color: "var(--text)",
+    fontFamily: ROOM_FONT_FAMILY,
+    fontSize: "15px",
+    fontWeight: 700,
+  },
+  headerDivider: {
+    color: "var(--text-dim)",
+  },
+  roomId: {
+    color: "var(--accent)",
+    fontSize: "12px",
+    whiteSpace: "nowrap",
+  },
+  topic: {
+    color: "var(--text-muted)",
+    fontSize: "13px",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  headerMeta: {
+    alignItems: "center",
+    display: "flex",
+    flexShrink: 0,
+    flexWrap: "wrap",
+    gap: "10px",
+    justifyContent: "flex-end",
+  },
+  metaItem: {
+    alignItems: "center",
+    color: "var(--text-muted)",
+    display: "inline-flex",
+    fontSize: "13px",
+    gap: "6px",
+    whiteSpace: "nowrap",
+  },
+  ttlMeter: {
+    alignItems: "center",
+    cursor: "default",
+    display: "inline-flex",
+    gap: "6px",
+    height: "18px",
+    minWidth: "56px",
+    outline: "none",
+    position: "relative",
+    whiteSpace: "nowrap",
+  },
+  ttlTrack: {
+    background: "linear-gradient(90deg, color-mix(in srgb, var(--text-dim) 16%, transparent), color-mix(in srgb, var(--text-dim) 7%, transparent))",
+    border: "1px solid color-mix(in srgb, var(--text-dim) 22%, transparent)",
+    boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--bg) 42%, transparent), inset 0 1px 8px rgba(0, 0, 0, 0.32)",
+    boxSizing: "border-box",
+    display: "inline-flex",
+    height: "9px",
+    overflow: "hidden",
+    position: "absolute",
+    right: 0,
+    top: "50%",
+    transform: "translateY(-50%)",
+    transition: "opacity 140ms ease",
+    width: "56px",
+  },
+  ttlFill: {
+    boxShadow: "0 0 10px color-mix(in srgb, currentColor 26%, transparent)",
+    display: "block",
+    height: "100%",
+    minWidth: "2px",
+    opacity: 0.86,
+    transition: "width 900ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease",
+  },
+  ttlTime: {
+    fontSize: "13px",
+    minWidth: "56px",
+    textAlign: "right",
+    transition: "opacity 120ms ease",
+  },
+  ttlMarker: {
+    color: "var(--red)",
+    fontSize: "13px",
+  },
+  roster: {
+    alignItems: "center",
+    display: "inline-flex",
+    marginRight: "6px",
+    minHeight: "32px",
+  },
+  rosterMember: {
+    alignItems: "center",
+    display: "inline-flex",
+    outline: "none",
+    position: "relative",
+    transition: "margin-left 180ms cubic-bezier(0.23, 1, 0.32, 1), z-index 0ms linear",
+  },
+  rosterAvatar: {
+    alignItems: "center",
+    background: "color-mix(in srgb, var(--bg-3) 78%, transparent)",
+    border: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
+    borderRadius: "999px",
+    boxSizing: "border-box",
+    color: "var(--text)",
+    display: "inline-flex",
+    fontSize: "12px",
+    gap: "0px",
+    height: "32px",
+    justifyContent: "center",
+    lineHeight: 1,
+    minWidth: "32px",
+    overflow: "hidden",
+    padding: "0 9px",
+    position: "relative",
+    transition: "max-width 190ms cubic-bezier(0.23, 1, 0.32, 1), border-color 140ms ease, background-color 140ms ease, gap 190ms cubic-bezier(0.23, 1, 0.32, 1)",
+    maxWidth: "32px",
+  },
+  rosterAvatarExpanded: {
+    background: "color-mix(in srgb, var(--bg-2) 88%, transparent)",
+    borderColor: "color-mix(in srgb, var(--text-muted) 42%, transparent)",
+    gap: "8px",
+    maxWidth: "220px",
+  },
+  rosterInitials: {
+    flexShrink: 0,
+    minWidth: "14px",
+    textAlign: "center",
+  },
+  rosterName: {
+    color: "var(--text-muted)",
+    display: "inline-block",
+    fontSize: "12px",
+    lineHeight: "16px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    transition: "max-width 190ms cubic-bezier(0.23, 1, 0.32, 1), opacity 120ms ease",
+    whiteSpace: "nowrap",
+  },
+  rosterOverflow: {
+    background: "var(--bg)",
+    color: "var(--text-muted)",
+  },
+  errorToast: {
+    background: "rgba(255, 87, 87, 0.12)",
+    color: "var(--red)",
+    flexShrink: 0,
+    fontSize: "12px",
+    padding: "8px clamp(16px, 3vw, 32px)",
+    position: "relative",
+    zIndex: 1,
+  },
+  transcript: {
+    display: "flex",
+    flexDirection: "column",
+    flex: 1,
+    gap: "6px",
+    overflowY: "auto",
+    padding: "24px 0",
+    position: "relative",
+    zIndex: 1,
+  },
+  transcriptInner: {
+    margin: "0 auto",
+    maxWidth: "1200px",
+    width: "min(calc(100% - 5rem), 1200px)",
+  },
+  emptyTranscript: {
+    color: "var(--text-dim)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    paddingTop: "8vh",
+  },
+  emptyLine: {
+    margin: "0 0 4px",
+  },
+  gateTranscript: {
+    color: "var(--text-muted)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    paddingTop: "8vh",
+  },
+  transcriptLine: {
+    color: "var(--text)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    margin: 0,
+    overflowWrap: "anywhere",
+    whiteSpace: "pre-wrap" as const,
+  },
+  passwordRevealLine: {
+    alignItems: "baseline",
+    display: "flex",
+    gap: "8px",
+    minHeight: "20px",
+    paddingBottom: "4px",
+    width: "100%",
+    flexWrap: "wrap",
+  },
+  passwordRevealLabel: {
+    color: "var(--text-dim)",
+    flexShrink: 0,
+    fontSize: "13px",
+    lineHeight: "20px",
+  },
+  passwordRevealValue: {
+    animation: "room-password-shimmer 760ms linear 360ms 1 both",
+    backgroundImage: "linear-gradient(100deg, var(--accent) 0%, var(--accent) 43%, color-mix(in srgb, var(--text) 88%, var(--accent)) 50%, var(--accent) 57%, var(--accent) 100%)",
+    backgroundPosition: "140% 0",
+    backgroundSize: "220% 100%",
+    color: "transparent",
+    fontSize: "13px",
+    lineHeight: "20px",
+    overflowWrap: "anywhere",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  },
+  passwordRevealHint: {
+    color: "var(--text-dim)",
+    fontSize: "12px",
+    lineHeight: "20px",
+  },
+  systemMessageLine: {
+    alignItems: "center",
+    color: "color-mix(in srgb, var(--text-dim) 74%, transparent)",
+    display: "flex",
+    fontSize: "12px",
+    gap: "10px",
+    lineHeight: "20px",
+    margin: "3px 0",
+    whiteSpace: "nowrap",
+  },
+  systemMessageRule: {
+    borderTop: "1px solid color-mix(in srgb, var(--text-dim) 18%, transparent)",
+    flex: "0 1 36px",
+    minWidth: "18px",
+  },
+  systemMessageText: {
+    flex: "0 1 auto",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  pollBlock: {
+    background: "color-mix(in srgb, var(--bg-2) 34%, transparent)",
+    border: "1px solid color-mix(in srgb, var(--text-dim) 30%, transparent)",
+    borderRadius: 0,
+    boxSizing: "border-box",
+    boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--text) 1%, transparent)",
+    margin: "18px 0 12px",
+    maxWidth: "760px",
+    padding: "30px clamp(22px, 4vw, 36px) 24px",
+    position: "relative",
+    width: "100%",
+  },
+  pollTitle: {
+    background: "color-mix(in srgb, var(--bg) 92%, transparent)",
+    color: "color-mix(in srgb, var(--text-dim) 82%, transparent)",
+    fontSize: "14px",
+    left: "18px",
+    lineHeight: "20px",
+    padding: "0 10px",
+    position: "absolute",
+    top: "-11px",
+    whiteSpace: "nowrap",
+  },
+  pollQuestion: {
+    color: "var(--text)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    margin: "0 0 18px",
+    overflowWrap: "anywhere",
+  },
+  pollOptions: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  },
+  pollOption: {
+    alignItems: "center",
+    backgroundColor: "transparent",
+    border: 0,
+    borderRadius: 0,
+    boxSizing: "border-box",
+    cursor: "pointer",
+    display: "grid",
+    gridTemplateColumns: "18px 38px minmax(0, 1fr) clamp(88px, 18vw, 132px) 30px",
+    fontFamily: ROOM_FONT_FAMILY,
+    fontSize: "14px",
+    gap: "8px",
+    lineHeight: "24px",
+    minHeight: "34px",
+    padding: "0 12px",
+    textAlign: "left",
+    transition: "color 0.15s ease, opacity 0.15s ease, background-color 0.15s ease",
+    width: "100%",
+  },
+  pollOptionLabel: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  pollOptionMarker: {
+    color: "var(--accent)",
+    flexShrink: 0,
+    textAlign: "center",
+    width: "18px",
+  },
+  pollOptionIndex: {
+    color: "var(--text-dim)",
+    flexShrink: 0,
+    textAlign: "right",
+  },
+  pollOptionMeter: {
+    fontSize: "12px",
+    letterSpacing: "-0.02em",
+    overflow: "hidden",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+  },
+  pollStat: {
+    color: "var(--text-muted)",
+    flexShrink: 0,
+    fontSize: "13px",
+    minWidth: "24px",
+    textAlign: "right",
+  },
+  pollFooter: {
+    color: "var(--text-dim)",
+    fontSize: "12px",
+    lineHeight: "20px",
+    margin: "18px 0 0",
+  },
+  composer: {
+    alignItems: "center",
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    padding: 0,
+    position: "relative",
+    zIndex: 1,
+  },
+  composerFrame: {
+    background: "var(--color-panel)",
+    border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--background) 76%)",
+    borderRadius: 0,
+    boxSizing: "border-box",
+    display: "flex",
+    flexDirection: "column",
+    gap: 0,
+    justifyContent: "center",
+    minHeight: "58px",
+    overflow: "hidden",
+    padding: "16px 12px",
+    width: "100%",
+  },
+  composerInlineStatus: {
+    overflow: "hidden",
+    transition: "max-height 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 140ms ease",
+  },
+  slashCommandMenu: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    overflow: "hidden",
+    pointerEvents: "auto",
+    paddingBottom: "8px",
+    transition: "max-height 200ms ease-out, opacity 200ms ease-out",
+    width: "100%",
+    willChange: "opacity",
+  },
+  slashCommandItem: {
+    alignItems: "center",
+    background: "transparent",
+    border: 0,
+    borderRadius: 0,
+    cursor: "pointer",
+    display: "flex",
+    fontFamily: ROOM_FONT_FAMILY,
+    fontSize: "12px",
+    gap: "6px",
+    lineHeight: "20px",
+    minHeight: "24px",
+    padding: "3px 8px",
+    textAlign: "left",
+    transition: "background-color 0.12s ease, color 0.12s ease",
+    width: "100%",
+  },
+  slashCommandMarker: {
+    color: "var(--accent)",
+    flexShrink: 0,
+    width: "10px",
+  },
+  slashCommandName: {
+    color: "inherit",
+    flexShrink: 0,
+  },
+  slashCommandDescription: {
+    color: "var(--text-dim)",
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textAlign: "right",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  composerRow: {
+    alignItems: "center",
+    display: "flex",
+    gap: "8px",
+    minHeight: "24px",
+    width: "100%",
+  },
+  composerStatus: {
+    fontSize: "12px",
+    lineHeight: "18px",
+    margin: 0,
+    width: "100%",
+  },
+  composerPrompt: {
+    color: "var(--accent)",
+    flexShrink: 0,
+    fontSize: "14px",
+    lineHeight: "24px",
+  },
+  composerPollPrefix: {
+    color: "var(--text)",
+    flexShrink: 0,
+    fontSize: "14px",
+    lineHeight: "24px",
+    whiteSpace: "pre",
+  },
+  composerIdleText: {
+    alignItems: "center",
+    display: "inline-flex",
+    flexShrink: 1,
+    gap: 0,
+    minWidth: 0,
+  },
+  composerCursor: {
+    color: "var(--text-muted)",
+    flexShrink: 0,
+    fontSize: "14px",
+    lineHeight: "24px",
+    transition: "opacity 0.14s linear",
+  },
+  composerHint: {
+    color: "var(--text-dim)",
+    fontSize: "13px",
+    lineHeight: "24px",
+    marginLeft: "-3px",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  composerInput: {
+    background: "transparent",
+    border: 0,
+    boxShadow: "none",
+    color: "var(--text)",
+    flex: 1,
+    fontFamily: ROOM_FONT_FAMILY,
+    fontSize: "14px",
+    lineHeight: "24px",
+    minWidth: 0,
+    outline: "none",
+    padding: "0 0 0 4px",
+  },
+  stateShell: {
+    alignItems: "center",
+    background: "var(--bg)",
+    color: "var(--text)",
+    display: "flex",
+    fontFamily: ROOM_FONT_FAMILY,
+    isolation: "isolate",
+    justifyContent: "center",
+    minHeight: "100dvh",
+    overflow: "hidden",
+    padding: "24px",
+    position: "relative",
+  },
+  statePanel: {
+    maxWidth: "520px",
+    position: "relative",
+    width: "100%",
+    zIndex: 1,
+  },
+  passwordPanel: {
+    maxWidth: "420px",
+    position: "relative",
+    width: "100%",
+    zIndex: 1,
+  },
+  stateKicker: {
+    color: "var(--text-dim)",
+    fontSize: "12px",
+    margin: "0 0 8px",
+  },
+  stateTitle: {
+    color: "var(--text)",
+    fontFamily: ROOM_FONT_FAMILY,
+    fontSize: "20px",
+    lineHeight: "28px",
+    margin: "0 0 14px",
+  },
+  mutedLine: {
+    color: "var(--text-muted)",
+    fontSize: "14px",
+    lineHeight: "24px",
+    margin: "0 0 16px",
+  },
+  errorLine: {
+    color: "var(--red)",
+    fontSize: "13px",
+    margin: "0 0 12px",
+  },
+  passwordLabel: {
+    display: "block",
+    marginBottom: "12px",
+  },
+  passwordInput: {
+    background: "transparent",
+    border: 0,
+    borderBottom: "1px solid var(--border)",
+    borderRadius: 0,
+    color: "var(--text)",
+    fontFamily: ROOM_FONT_FAMILY,
+    padding: "10px 0",
+    width: "100%",
+  },
+  commandButton: {
+    borderRadius: 0,
+    padding: "7px 12px",
+  },
+  srOnly: {
+    border: 0,
+    clip: "rect(0, 0, 0, 0)",
+    height: "1px",
+    margin: "-1px",
+    overflow: "hidden",
+    padding: 0,
+    position: "absolute",
+    whiteSpace: "nowrap",
+    width: "1px",
+  },
+};
