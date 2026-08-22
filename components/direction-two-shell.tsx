@@ -8,14 +8,15 @@ import {
   completeDirectionTwoCommand,
   completeDirectionTwoCommandArgument,
   completeDirectionTwoCreateField,
+  appendDirectionTwoGuidedCommandSegment,
   directionTwoCommandReferenceLines,
   directionTwoThemes,
+  createDirectionTwoGuidedCommandSegments,
   getDirectionTwoCreateEditingStep,
   getDirectionTwoCreateAnswerError,
   getDirectionTwoCreateHint,
   getDirectionTwoInlineFeedbackMessage,
   getDirectionTwoInlineGhostText,
-  getDirectionTwoCreatePromptPresentation,
   getDirectionTwoPasswordMask,
   getDirectionTwoSlashCommandSuggestions,
   getDirectionTwoCreateTimeArrowValue,
@@ -23,6 +24,8 @@ import {
   getDirectionTwoCreateInlineInputError,
   getDirectionTwoInlinePromptPresentation,
   getDirectionTwoStyleGhostChoices,
+  serializeDirectionTwoGuidedCommandSegments,
+  updateDirectionTwoGuidedCommandSegment,
   parseDirectionTwoInlineCommand,
   parseDirectionTwoCreateCommand,
   resolveDirectionTwoEnterAction,
@@ -85,6 +88,10 @@ type SessionFlow =
   | { type: "create"; step: "confirm"; draft: CreateDraft }
   | { type: "style"; step: "choice" }
   | { type: "join"; step: "room" };
+
+type GuidedCreateSegmentId = "command" | "topic" | "expiry" | "limit" | "password-choice" | "password";
+type GuidedCreateSegment = { id: GuidedCreateSegmentId; value: string };
+type CreateFlow = Extract<SessionFlow, { type: "create" }>;
 
 const initialDraft: CreateDraft = {
   topic: "",
@@ -260,21 +267,7 @@ function promptFor(flow: SessionFlow | null) {
   if (!flow) return "$";
   if (flow.type === "join") return "room id";
   if (flow.type === "style") return "style";
-
-  switch (flow.step) {
-    case "topic":
-      return "room name";
-    case "expiry":
-      return "total minutes";
-    case "limit":
-      return "maximum participants";
-    case "password-choice":
-      return "add password?(y/n)";
-    case "password":
-      return "write password";
-    case "confirm":
-      return "tap enter to create";
-  }
+  return "create";
 }
 
 function placeholderFor(flow: SessionFlow | null) {
@@ -298,23 +291,37 @@ function placeholderFor(flow: SessionFlow | null) {
   }
 }
 
-function createPromptPresentationForFlow(flow: SessionFlow | null) {
-  if (!flow || flow.type !== "create") return null;
+const guidedCreateSegmentStep: Record<Exclude<GuidedCreateSegmentId, "command">, CreateFlow["step"]> = {
+  topic: "topic",
+  expiry: "expiry",
+  limit: "limit",
+  "password-choice": "password-choice",
+  password: "password",
+};
 
-  switch (flow.step) {
+function guidedCreateQuestionForStep(step: CreateFlow["step"]) {
+  switch (step) {
     case "topic":
-      return getDirectionTwoCreatePromptPresentation("/create");
+      return "What should be the room name?";
     case "expiry":
-      return getDirectionTwoCreatePromptPresentation("/create room");
+      return "What should be the time?";
     case "limit":
-      return getDirectionTwoCreatePromptPresentation("/create room 60");
+      return "How many people can join?";
     case "password-choice":
-      return getDirectionTwoCreatePromptPresentation("/create room 60 8");
+      return "Add a password? (y/n)";
     case "password":
-      return getDirectionTwoCreatePromptPresentation("/create room 60 8 y");
+      return "What should be the password?";
     case "confirm":
-      return getDirectionTwoCreatePromptPresentation("/create room 60 8 n");
+      return null;
   }
+}
+
+function guidedCreateSegmentLabel(segmentId: Exclude<GuidedCreateSegmentId, "command">) {
+  if (segmentId === "topic") return "room name";
+  if (segmentId === "expiry") return "time";
+  if (segmentId === "limit") return "participants";
+  if (segmentId === "password-choice") return "password choice";
+  return "password";
 }
 
 function commandCompletionFor(value: string, flow: SessionFlow | null) {
@@ -343,6 +350,9 @@ export function DirectionTwoShell() {
   const [inputValue, setInputValue] = useState("");
   const [lines, setLines] = useState<TerminalLine[]>(initialLines);
   const [flow, setFlow] = useState<SessionFlow | null>(null);
+  const [guidedCreateSegments, setGuidedCreateSegments] = useState<GuidedCreateSegment[] | null>(null);
+  const [editingCreateSegment, setEditingCreateSegment] = useState<Exclude<GuidedCreateSegmentId, "command"> | null>(null);
+  const [editingReturnFlow, setEditingReturnFlow] = useState<CreateFlow | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [slashSuggestionIndex, setSlashSuggestionIndex] = useState(0);
@@ -364,6 +374,8 @@ export function DirectionTwoShell() {
   const titleMotionSettings = directionTwoTitleMotionDefaults;
   const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
+  const guidedCreateQuestion = flow?.type === "create" ? guidedCreateQuestionForStep(flow.step) : null;
+  const hasPromptMenu = isSlashMenuOpen || Boolean(guidedCreateQuestion);
   const isLandingForegroundHidden = routeHandoffState.phase === "transitioning";
   const routeStatus = routeActivity ? getRouteStatusPresentation(routeActivity) : null;
   const headlineText = useDirectionTwoScrambleText(introHeadline, {
@@ -437,6 +449,9 @@ export function DirectionTwoShell() {
     sound.play("close");
     if (flow) appendLines(line("system", "cancelled current prompt"));
     setFlow(null);
+    setGuidedCreateSegments(null);
+    setEditingCreateSegment(null);
+    setEditingReturnFlow(null);
     setInputValue("");
     setInputFeedbackMessage(null);
     setKeyboardStatus("Prompt cancelled.");
@@ -446,6 +461,9 @@ export function DirectionTwoShell() {
   const clearTerminal = () => {
     sound.play("press");
     setFlow(null);
+    setGuidedCreateSegments(null);
+    setEditingCreateSegment(null);
+    setEditingReturnFlow(null);
     setInputValue("");
     setInputFeedbackMessage(null);
     setLines(initialLines);
@@ -621,12 +639,53 @@ export function DirectionTwoShell() {
     }
   };
 
+  const commitGuidedCreateSegment = (
+    segmentId: Exclude<GuidedCreateSegmentId, "command">,
+    value: string,
+    nextDraft: CreateDraft,
+  ) => {
+    setGuidedCreateSegments(current => {
+      if (!current) return current;
+
+      return editingCreateSegment
+        ? updateDirectionTwoGuidedCommandSegment(current, segmentId, value)
+        : appendDirectionTwoGuidedCommandSegment(current, segmentId, value);
+    });
+
+    if (!editingCreateSegment || !editingReturnFlow) return false;
+
+    setFlow({ ...editingReturnFlow, draft: nextDraft });
+    setEditingCreateSegment(null);
+    setEditingReturnFlow(null);
+    setInputValue("");
+    setInputFeedbackMessage(null);
+    setKeyboardStatus(`${guidedCreateSegmentLabel(segmentId)} updated.`);
+    sound.play("success");
+    focusInput();
+    return true;
+  };
+
+  const handleGuidedCreateSegmentEdit = (segmentId: Exclude<GuidedCreateSegmentId, "command">) => {
+    if (!flow || flow.type !== "create" || !guidedCreateSegments) return;
+
+    const segment = guidedCreateSegments.find(item => item.id === segmentId);
+    const step = guidedCreateSegmentStep[segmentId];
+    if (!segment || !step) return;
+
+    setEditingCreateSegment(segmentId);
+    setEditingReturnFlow(flow);
+    setFlow({ type: "create", step, draft: flow.draft });
+    setInputValue(segment.value);
+    setInputFeedbackMessage(null);
+    setKeyboardStatus(`Editing ${guidedCreateSegmentLabel(segmentId)}.`);
+    sound.play("press");
+    focusInput();
+  };
+
   const beginCreate = (command = "/create") => {
-    appendLines(
-      line("input", command),
-      line("output", "starting private room setup"),
-      line("output", "answer each prompt, or use: /create / room name / minutes / participants / y/n"),
-    );
+    setGuidedCreateSegments(createDirectionTwoGuidedCommandSegments(command) as GuidedCreateSegment[]);
+    setEditingCreateSegment(null);
+    setEditingReturnFlow(null);
     setFlow({ type: "create", step: "topic", draft: initialDraft });
     sound.play("press");
     setKeyboardStatus("Create flow started. What should we call the room?");
@@ -834,9 +893,10 @@ export function DirectionTwoShell() {
     }
 
     if (flowState.step === "topic") {
-      appendLines(line("input", answer), line("output", "topic saved"));
+      const nextDraft = { ...flowState.draft, topic: answer };
+      if (commitGuidedCreateSegment("topic", answer, nextDraft)) return;
       sound.play("success");
-      setFlow({ type: "create", step: "expiry", draft: { ...flowState.draft, topic: answer } });
+      setFlow({ type: "create", step: "expiry", draft: nextDraft });
       setKeyboardStatus("How many minutes should the room stay open?");
       return;
     }
@@ -844,9 +904,10 @@ export function DirectionTwoShell() {
     if (flowState.step === "expiry") {
       const expiry = Number(answer);
 
-      appendLines(line("input", answer), line("output", `expires in ${expiry}m`));
+      const nextDraft = { ...flowState.draft, expiry };
+      if (commitGuidedCreateSegment("expiry", answer, nextDraft)) return;
       sound.play("success");
-      setFlow({ type: "create", step: "limit", draft: { ...flowState.draft, expiry } });
+      setFlow({ type: "create", step: "limit", draft: nextDraft });
       setKeyboardStatus("Maximum participants?");
       return;
     }
@@ -854,24 +915,26 @@ export function DirectionTwoShell() {
     if (flowState.step === "limit") {
       const roomLimit = Number(answer);
 
-      appendLines(line("input", answer), line("output", `member limit set: ${roomLimit}`));
+      const nextDraft = { ...flowState.draft, roomLimit };
+      if (commitGuidedCreateSegment("limit", answer, nextDraft)) return;
       sound.play("success");
-      setFlow({ type: "create", step: "password-choice", draft: { ...flowState.draft, roomLimit } });
+      setFlow({ type: "create", step: "password-choice", draft: nextDraft });
       setKeyboardStatus("Add password? Answer y or n.");
       return;
     }
 
     if (flowState.step === "password-choice") {
       if (isNo(answer)) {
-        appendLines(line("input", answer), line("output", "password: off"));
+        const nextDraft = { ...flowState.draft, password: "" };
+        if (commitGuidedCreateSegment("password-choice", answer, nextDraft)) return;
         sound.play("success");
-        setFlow({ type: "create", step: "confirm", draft: { ...flowState.draft, password: "" } });
-        setKeyboardStatus("Tap Enter to create.");
+        setFlow(null);
+        void createRoom(nextDraft, { confirmInput: null });
         return;
       }
 
       if (isYes(answer)) {
-        appendLines(line("input", answer), line("output", "password: on"));
+        if (commitGuidedCreateSegment("password-choice", answer, flowState.draft)) return;
         sound.play("success");
         setFlow({ type: "create", step: "password", draft: flowState.draft });
         setKeyboardStatus("Write password.");
@@ -881,11 +944,11 @@ export function DirectionTwoShell() {
 
     if (flowState.step === "password") {
       revealPassword(answer, () => {
-        appendLines(line("input", "********"), line("output", "password stored locally until room creation"));
+        const nextDraft = { ...flowState.draft, password: answer };
+        if (commitGuidedCreateSegment("password", answer, nextDraft)) return;
         sound.play("success");
-        setFlow({ type: "create", step: "confirm", draft: { ...flowState.draft, password: answer } });
-        setKeyboardStatus("Tap Enter to create.");
-        focusInput();
+        setFlow(null);
+        void createRoom(nextDraft, { confirmInput: null });
       });
       return;
     }
@@ -1135,31 +1198,7 @@ export function DirectionTwoShell() {
 
     if (event.key === "Enter") {
       event.preventDefault();
-      if (!flow && slashCommandSuggestions.length > 0) {
-        const selectedCommand = slashCommandSuggestions[slashSuggestionIndex]?.command ?? slashCommandSuggestions[0].command;
-        handleSlashCommandSuggestionTap(selectedCommand);
-        return;
-      }
-
-      if (!flow) {
-        const enterAction = resolveDirectionTwoEnterAction(event.currentTarget.value);
-
-        if (enterAction?.type === "continue-inline" && enterAction.value) {
-          setInputValue(enterAction.value);
-          setInputFeedbackMessage(null);
-          sound.play("press");
-          setKeyboardStatus(enterAction.hint);
-          return;
-        }
-
-        if (enterAction?.type === "hold-inline") {
-          sound.play("press");
-          setKeyboardStatus(enterAction.hint);
-          return;
-        }
-      }
-
-      executeCommand(event.currentTarget.value);
+      submitInput(event.currentTarget.value);
       return;
     }
 
@@ -1251,7 +1290,6 @@ export function DirectionTwoShell() {
   const createFieldHint = createFieldSuggestion ? getDirectionTwoCreateHint(inputValue) : null;
   const createFieldPresentation = createFieldSuggestion ? getDirectionTwoInlinePromptPresentation(inputValue) : null;
   const styleGhostChoices = createFieldSuggestion ? getDirectionTwoStyleGhostChoices(inputValue) : null;
-  const activePromptPresentation = createPromptPresentationForFlow(flow);
   const visibleCreateFieldSuggestion = inputFeedbackMessage ? null : createFieldSuggestion;
   const visibleCommandCompletion = inputFeedbackMessage ? null : completionSuggestion;
   const visibleGhostCompletionText =
@@ -1261,10 +1299,11 @@ export function DirectionTwoShell() {
   const ghostTapCompletion = resolveDirectionTwoGhostTapCompletion(inputValue, Boolean(flow));
   const inlineHint = inputFeedbackMessage ?? createFieldHint;
   const isGuidedPasswordEntry = flow?.type === "create" && flow.step === "password";
+  const isGuidedCreateInput = flow?.type === "create" && Boolean(guidedCreateSegments);
   const passwordDisplayValue = passwordRevealIndex === null ? inputValue : passwordSubmissionRef.current;
   const visualInputText = isGuidedPasswordEntry
     ? getDirectionTwoPasswordMask(passwordDisplayValue, passwordRevealIndex ?? passwordDisplayValue.length - 1)
-    : inputValue || placeholderFor(flow);
+    : inputValue || (flow?.type === "create" ? "" : placeholderFor(flow));
   const visualCreateSegments = !isGuidedPasswordEntry && inputValue
     ? getDirectionTwoCreateVisualSegments(inputValue, passwordRevealIndex ?? undefined)
     : null;
@@ -1298,6 +1337,15 @@ export function DirectionTwoShell() {
       return;
     }
 
+    if (command === "/create") {
+      beginCreate(command);
+      setInputValue("");
+      setInputFeedbackMessage(null);
+      setHistoryIndex(null);
+      focusInput();
+      return;
+    }
+
     const enterAction = resolveDirectionTwoEnterAction(command);
     const nextCommandValue =
       enterAction?.type === "continue-inline" && enterAction.value
@@ -1310,6 +1358,36 @@ export function DirectionTwoShell() {
     sound.play("press");
     setKeyboardStatus(enterAction?.hint ?? `${command} selected.`);
     focusInput();
+  };
+
+  const submitInput = (rawValue: string) => {
+    if (creating || passwordRevealIndex !== null || routeActivity !== null) return;
+
+    if (!flow && slashCommandSuggestions.length > 0) {
+      const selectedCommand = slashCommandSuggestions[slashSuggestionIndex]?.command ?? slashCommandSuggestions[0].command;
+      handleSlashCommandSuggestionTap(selectedCommand);
+      return;
+    }
+
+    if (!flow) {
+      const enterAction = resolveDirectionTwoEnterAction(rawValue);
+
+      if (enterAction?.type === "continue-inline" && enterAction.value) {
+        setInputValue(enterAction.value);
+        setInputFeedbackMessage(null);
+        sound.play("press");
+        setKeyboardStatus(enterAction.hint);
+        return;
+      }
+
+      if (enterAction?.type === "hold-inline") {
+        sound.play("press");
+        setKeyboardStatus(enterAction.hint);
+        return;
+      }
+    }
+
+    executeCommand(rawValue);
   };
 
   return (
@@ -1493,13 +1571,13 @@ export function DirectionTwoShell() {
                 paddingBottom: "16px",
               }}
             >
-              <div
-                aria-hidden={slashCommandSuggestions.length === 0}
+            <div
+                aria-hidden={!hasPromptMenu}
                 className="overflow-hidden transition-[max-height,opacity] duration-200 ease-out motion-reduce:transition-none"
                 style={{
-                  maxHeight: slashCommandSuggestions.length > 0 ? "240px" : "0px",
-                  opacity: slashCommandSuggestions.length > 0 ? 1 : 0,
-                  pointerEvents: slashCommandSuggestions.length > 0 ? "auto" : "none",
+                  maxHeight: hasPromptMenu ? "240px" : "0px",
+                  opacity: hasPromptMenu ? 1 : 0,
+                  pointerEvents: hasPromptMenu ? "auto" : "none",
                 }}
               >
                 <div
@@ -1547,6 +1625,20 @@ export function DirectionTwoShell() {
                     );
                   })}
                 </div>
+                {guidedCreateQuestion && (
+                  <div
+                    aria-label={guidedCreateQuestion}
+                    className="direction-two-guided-question-pill mb-2 flex min-h-[52px] w-full min-w-0 items-center gap-3 rounded-[6px] border border-[color-mix(in_srgb,var(--color-signal)_24%,var(--background)_76%)] bg-transparent px-3 py-2 font-mono text-left sm:hidden"
+                    role="status"
+                  >
+                    <span
+                      className="direction-two-guided-question-in min-w-0 text-[12px] leading-[18px] text-[var(--foreground)]"
+                      key={guidedCreateQuestion}
+                    >
+                      {guidedCreateQuestion}
+                    </span>
+                  </div>
+                )}
                 <div
                   aria-label="Slash command suggestions"
                   className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 pb-2 text-[14px] leading-[24px] direction-two-desktop-slash-menu hidden sm:flex"
@@ -1599,73 +1691,83 @@ export function DirectionTwoShell() {
               </div>
               <div className="direction-two-terminal-input-row flex min-w-0 items-center gap-0 pl-[0px]">
               <label className="sr-only" htmlFor="terminal-command">{activePrompt}</label>
-              <span
-                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-base ${
-                  activePromptPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
-                }`}
-                aria-hidden="true"
-              >
-                {activePrompt === "$" ? (
-                  <span className="pl-[12px] text-base text-[var(--color-signal)]">$</span>
+              {!isGuidedCreateInput && (
+                <span
+                  className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-base text-[var(--foreground)]"
+                  aria-hidden="true"
+                >
+                  {activePrompt === "$" ? (
+                    <span className="pl-[12px] text-base text-[var(--color-signal)]">$</span>
+                  ) : (
+                    <>
+                      <span>{">"}</span>
+                      <span>{activePrompt}:</span>
+                    </>
+                  )}
+                </span>
+              )}
+              <div className={`relative min-w-0 flex-1 ${isGuidedCreateInput ? "" : "ml-2"}`}>
+                <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[14px] leading-[24px]">
+                {isGuidedCreateInput ? (
+                  <GuidedCreateInputPreview
+                    currentValue={isGuidedPasswordEntry ? visualInputText : inputValue}
+                    editingSegment={editingCreateSegment}
+                    onEdit={handleGuidedCreateSegmentEdit}
+                    segments={guidedCreateSegments ?? []}
+                  />
                 ) : (
                   <>
-                    <span>{">"}</span>
-                    {activePromptPresentation && <PromptPixelGlyph pattern={activePromptPresentation.pattern} />}
-                    <span>{activePrompt}:</span>
-                  </>
-                )}
-              </span>
-              <div className="relative ml-2 min-w-0 flex-1">
-                <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[14px] leading-[24px]">
-                {!hasVisibleInput && !creating && (
-                  <span aria-hidden="true" className="direction-two-visual-caret mr-px h-[22px] w-[3px] shrink-0 bg-[var(--foreground)]" />
-                )}
-                {isGuidedPasswordEntry && passwordDisplayValue ? (
-                  <span
-                    aria-hidden="true"
-                    className={
-                      passwordFinalShimmer
-                        ? "direction-two-password-complete-shimmer shrink-0 whitespace-pre"
-                        : passwordRevealIndex !== null
-                          ? "direction-two-password-reveal shrink-0 whitespace-pre text-[var(--foreground)]"
-                          : "shrink-0 whitespace-pre text-[var(--foreground)]"
-                    }
-                    key={`password-mask-${passwordRevealIndex ?? "typing"}`}
-                  >
-                    {visualInputText}
-                  </span>
-                ) : inputValue && visualCreateSegments ? (
-                  <span className="shrink-0 whitespace-pre" aria-hidden="true">
-                    {visualCreateSegments.map((segment, index) => (
+                    {!hasVisibleInput && !creating && (
+                      <span aria-hidden="true" className="direction-two-visual-caret mr-px h-[22px] w-[3px] shrink-0 bg-[var(--foreground)]" />
+                    )}
+                    {isGuidedPasswordEntry && passwordDisplayValue ? (
                       <span
+                        aria-hidden="true"
                         className={
-                          segment.tone === "topic"
-                            ? "text-[var(--color-signal)]"
-                            : segment.tone === "password" && passwordFinalShimmer
-                              ? "direction-two-password-complete-shimmer"
-                              : segment.tone === "password" && passwordRevealIndex !== null
-                                ? "direction-two-password-reveal text-[var(--foreground)]"
-                              : "text-[var(--foreground)]"
+                          passwordFinalShimmer
+                            ? "direction-two-password-complete-shimmer shrink-0 whitespace-pre"
+                            : passwordRevealIndex !== null
+                              ? "direction-two-password-reveal shrink-0 whitespace-pre text-[var(--foreground)]"
+                              : "shrink-0 whitespace-pre text-[var(--foreground)]"
                         }
-                        data-create-segment-tone={segment.tone}
-                        key={`${segment.tone}-${index}`}
+                        key={`password-mask-${passwordRevealIndex ?? "typing"}`}
                       >
-                        {segment.text}
+                        {visualInputText}
                       </span>
-                    ))}
-                  </span>
-                ) : (
-                  <span
-                    aria-hidden="true"
-                    className={`shrink-0 whitespace-pre ${
-                      inputValue ? "text-[var(--foreground)]" : "text-[var(--color-dim)]"
-                    }`}
-                  >
-                    {visualInputText}
-                  </span>
-                )}
-                {hasVisibleInput && !creating && passwordRevealIndex === null && (
-                  <span aria-hidden="true" className="direction-two-visual-caret ml-px h-[22px] w-[3px] shrink-0 bg-[var(--foreground)]" />
+                    ) : inputValue && visualCreateSegments ? (
+                      <span className="shrink-0 whitespace-pre" aria-hidden="true">
+                        {visualCreateSegments.map((segment, index) => (
+                          <span
+                            className={
+                              segment.tone === "topic"
+                                ? "text-[var(--color-signal)]"
+                                : segment.tone === "password" && passwordFinalShimmer
+                                  ? "direction-two-password-complete-shimmer"
+                                  : segment.tone === "password" && passwordRevealIndex !== null
+                                    ? "direction-two-password-reveal text-[var(--foreground)]"
+                                    : "text-[var(--foreground)]"
+                            }
+                            data-create-segment-tone={segment.tone}
+                            key={`${segment.tone}-${index}`}
+                          >
+                            {segment.text}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className={`shrink-0 whitespace-pre ${
+                          inputValue ? "text-[var(--foreground)]" : "text-[var(--color-dim)]"
+                        }`}
+                      >
+                        {visualInputText}
+                      </span>
+                    )}
+                    {hasVisibleInput && !creating && passwordRevealIndex === null && (
+                      <span aria-hidden="true" className="direction-two-visual-caret ml-px h-[22px] w-[3px] shrink-0 bg-[var(--foreground)]" />
+                    )}
+                  </>
                 )}
                 {visibleGhostCompletionText && (
                   <button
@@ -1783,6 +1885,23 @@ export function DirectionTwoShell() {
                   value={inputValue}
                 />
               </div>
+              {flow && (
+                <button
+                  aria-label="Press Enter"
+                  aria-keyshortcuts="Enter"
+                  className="ml-2 inline-flex size-7 shrink-0 items-center justify-center rounded-[3px] border border-[color-mix(in_srgb,var(--color-signal)_35%,var(--background)_65%)] text-[var(--color-signal)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] disabled:pointer-events-none disabled:opacity-40"
+                  disabled={creating || passwordRevealIndex !== null || routeActivity !== null}
+                  onClick={event => {
+                    event.stopPropagation();
+                    submitInput(inputValue);
+                  }}
+                  type="button"
+                >
+                  <svg aria-hidden="true" className="size-4" fill="none" viewBox="0 0 16 16">
+                    <path d="m2.25 7.35 11.5-4.7-3.1 10.1-3.05-4.05-5.35-1.35Z M7.6 8.7l4.15-4.15" stroke="currentColor" strokeLinecap="square" strokeLinejoin="miter" strokeWidth="1.25" />
+                  </svg>
+                </button>
+              )}
               </div>
             </div>
         </div>
@@ -2175,6 +2294,63 @@ function PixelIcon({
         }),
       )}
     </div>
+  );
+}
+
+function GuidedCreateInputPreview({
+  currentValue,
+  editingSegment,
+  onEdit,
+  segments,
+}: {
+  currentValue: string;
+  editingSegment: Exclude<GuidedCreateSegmentId, "command"> | null;
+  onEdit: (segmentId: Exclude<GuidedCreateSegmentId, "command">) => void;
+  segments: GuidedCreateSegment[];
+}) {
+  return (
+    <span
+      aria-label={serializeDirectionTwoGuidedCommandSegments(segments)}
+      className="direction-two-guided-command inline-flex min-w-max items-center text-[14px] leading-[24px] text-[var(--muted-foreground)]"
+    >
+      {segments.map((segment, index) => {
+        const editableSegmentId = segment.id === "command" ? null : segment.id;
+        const isEditing = editableSegmentId !== null && editableSegmentId === editingSegment;
+        const displayValue = isEditing
+          ? currentValue
+          : editableSegmentId === "password"
+            ? "••••••••"
+            : segment.value;
+
+        return (
+          <span key={segment.id}>
+            {index > 0 && <span aria-hidden="true"> / </span>}
+            {editableSegmentId === null ? (
+              <span className="text-[var(--color-signal)]">{segment.value}</span>
+            ) : isEditing ? (
+              <span className="text-[var(--foreground)]">{displayValue}</span>
+            ) : (
+              <button
+                aria-label={`Edit ${guidedCreateSegmentLabel(editableSegmentId)}`}
+                className="relative z-10 rounded-[2px] text-left text-[var(--foreground)] underline decoration-[color-mix(in_srgb,var(--color-signal)_35%,transparent)] underline-offset-2 transition-colors duration-150 hover:text-[var(--color-signal)] focus-visible:text-[var(--color-signal)]"
+                data-command-segment={editableSegmentId}
+                onClick={() => onEdit(editableSegmentId)}
+                type="button"
+              >
+                {displayValue}
+              </button>
+            )}
+          </span>
+        );
+      })}
+      {editingSegment === null && (
+        <>
+          <span aria-hidden="true"> / </span>
+          <span className="text-[var(--foreground)]">{currentValue}</span>
+        </>
+      )}
+      <span aria-hidden="true" className="direction-two-visual-caret ml-px h-[22px] w-[3px] shrink-0 bg-[var(--foreground)]" />
+    </span>
   );
 }
 

@@ -914,6 +914,28 @@ input::placeholder, textarea::placeholder {
   --route-composer-inline-gutter: 3rem;
 }
 
+@keyframes direction-two-guided-question-in {
+  from {
+    filter: blur(6px);
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.direction-two-guided-question-in {
+  animation: direction-two-guided-question-in 220ms var(--ease-out-strong) both;
+}
+
+.direction-two-guided-command button {
+  cursor: var(--direction-two-cursor-square), pointer;
+}
+
 @media (min-width: 640px) {
   .direction-two-floating-composer {
     --route-composer-inline-gutter: 5rem;
