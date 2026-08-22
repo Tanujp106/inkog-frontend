@@ -1,7 +1,6 @@
 "use client";
 
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useRef, useState } from "react";
-import { useDialKit, type DialConfig } from "dialkit";
 import { useRouter } from "next/navigation";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
@@ -198,36 +197,6 @@ const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
   easingY2: 1,
 };
 
-const directionTwoTitleDialConfig = {
-  formation: {
-    durationMs: [directionTwoTitleMotionDefaults.formationDurationMs, 120, 900, 10],
-    spreadMs: [directionTwoTitleMotionDefaults.formationSpreadMs, 120, 1200, 10],
-    peakBrightness: [directionTwoTitleMotionDefaults.formationPeakBrightness, 1, 2.5, 0.05],
-  },
-  shimmer: {
-    durationMs: [directionTwoTitleMotionDefaults.shimmerDurationMs, 240, 1600, 10],
-    spreadMs: [directionTwoTitleMotionDefaults.shimmerSpreadMs, 120, 1400, 10],
-    amplitudeMs: [directionTwoTitleMotionDefaults.shimmerAmplitudeMs, 0, 240, 2],
-    frequency: [directionTwoTitleMotionDefaults.shimmerFrequency, 0.25, 3, 0.05],
-    colorMixPercent: [directionTwoTitleMotionDefaults.shimmerColorMixPercent, 0, 100, 1],
-    peakBrightness: [directionTwoTitleMotionDefaults.shimmerPeakBrightness, 1, 3, 0.05],
-    glowRadius: [directionTwoTitleMotionDefaults.shimmerGlowRadius, 0, 32, 1],
-    glowOpacity: [directionTwoTitleMotionDefaults.shimmerGlowOpacity, 0, 100, 1],
-  },
-  hoverHighlight: {
-    brightness: [directionTwoTitleMotionDefaults.hoverHighlightBrightness, 1, 2.5, 0.05],
-    colorMixPercent: [directionTwoTitleMotionDefaults.hoverHighlightColorMixPercent, 0, 100, 1],
-    glowRadius: [directionTwoTitleMotionDefaults.hoverHighlightGlowRadius, 0, 32, 1],
-    glowOpacity: [directionTwoTitleMotionDefaults.hoverHighlightGlowOpacity, 0, 100, 1],
-  },
-  magnet: {
-    radius: [directionTwoTitleMotionDefaults.magnetRadius, 24, 180, 2],
-    strength: [directionTwoTitleMotionDefaults.magnetStrength, 0.1, 2, 0.05],
-    maxDisplacement: [directionTwoTitleMotionDefaults.magnetMaxDisplacement, 0, 16, 0.5],
-    returnDurationMs: [directionTwoTitleMotionDefaults.magnetSpringMs, 60, 500, 10],
-  },
-} satisfies DialConfig;
-
 function percent(value: number) {
   return `${value}%`;
 }
@@ -392,32 +361,7 @@ export function DirectionTwoShell() {
   const [composerReserveHeight, setComposerReserveHeight] = useState(0);
   const shimmerSettings: DirectionTwoShimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
-  const titleMotionDials = useDialKit(
-    "INKOG title motion",
-    directionTwoTitleDialConfig,
-    { id: "inkog-title-motion" },
-  );
-  const titleMotionSettings: typeof directionTwoTitleMotionDefaults = {
-    formationDurationMs: titleMotionDials.formation.durationMs,
-    formationSpreadMs: titleMotionDials.formation.spreadMs,
-    formationPeakBrightness: titleMotionDials.formation.peakBrightness,
-    shimmerDurationMs: titleMotionDials.shimmer.durationMs,
-    shimmerSpreadMs: titleMotionDials.shimmer.spreadMs,
-    shimmerAmplitudeMs: titleMotionDials.shimmer.amplitudeMs,
-    shimmerFrequency: titleMotionDials.shimmer.frequency,
-    shimmerColorMixPercent: titleMotionDials.shimmer.colorMixPercent,
-    shimmerPeakBrightness: titleMotionDials.shimmer.peakBrightness,
-    shimmerGlowRadius: titleMotionDials.shimmer.glowRadius,
-    shimmerGlowOpacity: titleMotionDials.shimmer.glowOpacity,
-    hoverHighlightBrightness: titleMotionDials.hoverHighlight.brightness,
-    hoverHighlightColorMixPercent: titleMotionDials.hoverHighlight.colorMixPercent,
-    hoverHighlightGlowRadius: titleMotionDials.hoverHighlight.glowRadius,
-    hoverHighlightGlowOpacity: titleMotionDials.hoverHighlight.glowOpacity,
-    magnetRadius: titleMotionDials.magnet.radius,
-    magnetStrength: titleMotionDials.magnet.strength,
-    magnetMaxDisplacement: titleMotionDials.magnet.maxDisplacement,
-    magnetSpringMs: titleMotionDials.magnet.returnDurationMs,
-  };
+  const titleMotionSettings = directionTwoTitleMotionDefaults;
   const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
   const isLandingForegroundHidden = routeHandoffState.phase === "transitioning";
@@ -1370,7 +1314,7 @@ export function DirectionTwoShell() {
 
   return (
     <main
-      className="direction-two-pixel-cursor relative isolate min-h-[100dvh] overflow-visible bg-transparent px-6 py-5 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
+      className="direction-two-pixel-cursor relative isolate min-h-[100dvh] overflow-visible bg-transparent px-6 py-6 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
       data-route-handoff-phase={routeHandoffState.phase}
       onClick={focusInput}
     >
@@ -1386,8 +1330,6 @@ export function DirectionTwoShell() {
         aria-describedby="direction-two-keyboard-shortcuts"
         className="relative z-10 mx-auto flex min-h-[calc(100dvh-2.5rem)] w-full max-w-[1200px] flex-col sm:min-h-[calc(100dvh-5rem)]"
       >
-        {/*
-        Previous mobile landing presentation, kept here for the next mobile iteration.
         <header
           aria-hidden={isLandingForegroundHidden || undefined}
           className="sm:hidden direction-two-mobile-landing flex flex-col gap-3 pb-2 pt-4"
@@ -1404,7 +1346,7 @@ export function DirectionTwoShell() {
           <div className="max-w-[360px] space-y-6 text-[12px] leading-[18px] text-[var(--muted-foreground)]">
             <div style={getLandingPartStyle("body")}>
               <p
-                className="direction-two-intro-copy pt-2"
+                className="direction-two-intro-copy pt-2 text-[12px] leading-[18px]"
                 style={{ animationDelay: `${prefersReducedMotion ? 0 : introCopyRevealDelayMs}ms` }}
               >
                 {mobileHeadlineText}
@@ -1419,7 +1361,7 @@ export function DirectionTwoShell() {
                   <DirectionTwoIntroRow
                     pattern={item.icon}
                     reducedMotion={prefersReducedMotion}
-                    rowClassName="flex items-center gap-5"
+                    rowClassName="flex items-center gap-5 text-[12px] leading-[18px]"
                     shimmerSettings={shimmerSettings}
                     shimmerStyle={shimmerStyle}
                     size="mobile"
@@ -1429,47 +1371,6 @@ export function DirectionTwoShell() {
                 </div>
               ))}
             </div>
-          </div>
-        </header>
-        */}
-
-        <header
-          aria-hidden={isLandingForegroundHidden || undefined}
-          className="sm:hidden flex min-h-0 flex-1 flex-col"
-          inert={isLandingForegroundHidden || undefined}
-        >
-          <div style={getLandingPartStyle("title")}>
-            <InkPatternMark
-              reducedMotion={prefersReducedMotion}
-              size="mobile"
-              titleMotionSettings={titleMotionSettings}
-              word={directionTwoMarkWords[0]}
-            />
-          </div>
-          <div className="flex flex-1 items-center justify-center px-4 pb-10 text-center">
-            <p
-              className="max-w-[320px] text-[13px] leading-[22px] text-[var(--muted-foreground)]"
-              style={getLandingPartStyle("body")}
-            >
-              <a
-                className="text-[var(--foreground)] underline decoration-[var(--color-signal)] underline-offset-4 transition-colors duration-150 hover:text-[var(--color-signal)]"
-                href="https://www.linkedin.com/in/tanujpateldesign/"
-                rel="noreferrer"
-                target="_blank"
-              >
-                Tanuj
-              </a>{" "}
-              is still fighting with{" "}
-              <a
-                className="text-[var(--foreground)] underline decoration-[var(--color-signal)] underline-offset-4 transition-colors duration-150 hover:text-[var(--color-signal)]"
-                href="https://www.linkedin.com/in/shukannnn/"
-                rel="noreferrer"
-                target="_blank"
-              >
-                Shukan
-              </a>{" "}
-              to add a few more features before he builds out the mobile version. Hang tight for a few more days.
-            </p>
           </div>
         </header>
 
@@ -1603,7 +1504,52 @@ export function DirectionTwoShell() {
               >
                 <div
                   aria-label="Slash command suggestions"
-                  className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 pb-2 text-[14px] leading-[24px]"
+                  className="direction-two-mobile-slash-menu mb-2 flex w-full min-w-0 gap-2 overflow-x-auto pb-2 text-[14px] leading-[18px] sm:hidden"
+                  role="listbox"
+                >
+                  {slashCommandSuggestions.map((item, index) => {
+                    const selected = slashSuggestionIndex === index;
+
+                    return (
+                      <button
+                        aria-label={`${item.title}: ${item.label}`}
+                        aria-selected={selected}
+                        className={`direction-two-mobile-slash-pill group flex min-h-[52px] w-[138px] flex-none flex-col justify-center rounded-[6px] border border-[color-mix(in_srgb,var(--color-signal)_24%,var(--background)_76%)] bg-transparent px-3 py-2 text-left font-mono transition-colors duration-150 ${slashCommandHoverClass} ${
+                          selected ? "bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] text-[var(--color-signal)]" : "text-[var(--foreground)]"
+                        }`}
+                        key={item.command}
+                        onPointerDown={event => event.preventDefault()}
+                        onClick={event => {
+                          event.stopPropagation();
+                          handleSlashCommandSuggestionTap(item.command);
+                        }}
+                        onMouseEnter={() => {
+                          setSlashSelectionMode("pointer");
+                          setSlashSuggestionIndex(index);
+                          sound.play("hover");
+                        }}
+                        onMouseMove={() => {
+                          setSlashSelectionMode("pointer");
+                          setSlashSuggestionIndex(index);
+                        }}
+                        role="option"
+                        type="button"
+                      >
+                        <span className="block text-[13px] leading-[18px]">{item.title}</span>
+                        <span
+                          className={`block min-w-0 truncate text-[11px] leading-[15px] transition-colors duration-150 ${slashCommandLabelHoverClass} ${
+                            selected ? "text-[var(--color-signal)]/75" : "text-[var(--color-dim)]"
+                          }`}
+                        >
+                          {item.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div
+                  aria-label="Slash command suggestions"
+                  className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 pb-2 text-[14px] leading-[24px] direction-two-desktop-slash-menu hidden sm:flex"
                   ref={slashMenuRef}
                   role="listbox"
                 >
@@ -1889,7 +1835,7 @@ function InkPatternMark({
   );
   const markScaleClass =
     size === "mobile"
-      ? "[--cell:clamp(3.2px,0.84vw,3.6px)] [--gap:1px] [--letter-gap:4px]"
+      ? "[--cell:clamp(3.8px,1vw,4.3px)] [--gap:1px] [--letter-gap:4px]"
       : "[--cell:clamp(4.4px,0.62vw,7.8px)] [--gap:clamp(1px,0.14vw,2.2px)] [--letter-gap:clamp(5.5px,0.5vw,10px)]";
 
   useEffect(() => {

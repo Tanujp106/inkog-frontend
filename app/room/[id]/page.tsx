@@ -169,12 +169,14 @@ export default function RoomPage() {
   const [pendingCommand, setPendingCommand] = useState<PendingComposerCommand>(null);
   const [passwordReveal, setPasswordReveal] = useState<PasswordReveal | null>(null);
   const [slashSuggestionIndex, setSlashSuggestionIndex] = useState(0);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const soundRef = useRef(sound);
   const composerStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shareCopiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousSecondsLeftRef = useRef<number | null>(null);
   const pendingPollRequestRef = useRef<ReturnType<typeof createPendingRoomPollRequest> | null>(null);
   const ttlTotalSecondsRef = useRef(0);
@@ -206,6 +208,9 @@ export default function RoomPage() {
     return () => {
       if (composerStatusTimeoutRef.current) {
         clearTimeout(composerStatusTimeoutRef.current);
+      }
+      if (shareCopiedTimeoutRef.current) {
+        clearTimeout(shareCopiedTimeoutRef.current);
       }
     };
   }, []);
@@ -621,6 +626,26 @@ export default function RoomPage() {
       setComposerStatusMessage("share link copied", "accent");
     } catch {
       sound.play("error");
+      setComposerStatusMessage("could not copy share link", "error");
+    }
+  };
+
+  const copyShareLinkFromButton = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      sound.play("success");
+      setShareCopied(true);
+      if (shareCopiedTimeoutRef.current) {
+        clearTimeout(shareCopiedTimeoutRef.current);
+      }
+      shareCopiedTimeoutRef.current = setTimeout(() => {
+        setShareCopied(false);
+        shareCopiedTimeoutRef.current = null;
+      }, 1000);
+      setComposerStatusMessage("share link copied", "accent");
+    } catch {
+      sound.play("error");
+      setShareCopied(false);
       setComposerStatusMessage("could not copy share link", "error");
     }
   };
@@ -1051,6 +1076,16 @@ export default function RoomPage() {
             <span style={styles.topic} title={topic}>{topic}</span>
           </div>
           <div style={styles.headerMeta}>
+            <button
+              aria-label={shareCopied ? "copied!" : "share room link"}
+              className="btn-ghost"
+              onClick={() => void copyShareLinkFromButton()}
+              onMouseEnter={() => sound.play("hover")}
+              style={styles.headerShareButton}
+              type="button"
+            >
+              {shareCopied ? "copied!" : "share"}
+            </button>
             <AvatarRoster roster={roster} usersTitle={usersTitle} viewerAlias={alias} />
             <RoomTtlMeter meter={ttlMeter} />
           </div>
@@ -1734,6 +1769,11 @@ const styles: Record<string, CSSProperties> = {
     flexWrap: "wrap",
     gap: "10px",
     justifyContent: "flex-end",
+  },
+  headerShareButton: {
+    borderRadius: 0,
+    fontSize: "11px",
+    padding: "4px 8px",
   },
   metaItem: {
     alignItems: "center",

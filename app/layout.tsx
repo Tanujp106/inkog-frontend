@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import Script from "next/script";
-import { DialRoot } from "dialkit";
 import { RouteHandoffProvider } from "@/components/route-handoff-provider";
 import { AgentationProvider } from "./agentation-provider";
 import { InterfaceKit } from "./interface-kit-provider";
-import "dialkit/styles.css";
 import "./globals.css";
 import { SystemSoundProvider } from "@/lib/system-sound-provider";
 import { buildInkogFaviconHref } from "@/lib/inkog-favicon.mjs";
@@ -101,7 +99,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <ThemeFavicon />
           <RouteHandoffProvider>{children}</RouteHandoffProvider>
           {process.env.NODE_ENV === "development" && <InterfaceKit />}
-          {process.env.NODE_ENV === "development" && <DialRoot />}
           <AgentationProvider />
         </SystemSoundProvider>
       </body>
