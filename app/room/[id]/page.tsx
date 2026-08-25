@@ -19,7 +19,7 @@ import {
   inkogThemeChoices,
 } from "@/lib/inkog-theme.mjs";
 import { roomThemeBackground } from "@/lib/room-background.mjs";
-import { getRoomRoster, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
+import { buildRoomShareMessage, getRoomRoster, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
 import { getRoomCountdownNotification } from "@/lib/room-notifications.mjs";
 import {
   createEmptyRoomPollDraft,
@@ -151,6 +151,7 @@ export default function RoomPage() {
   const [alias, setAlias] = useState("");
   const [activeThemeId, setActiveThemeId] = useState("green");
   const [isCreator, setIsCreator] = useState(false);
+  const [hasPassword, setHasPassword] = useState(false);
   const anonTokenRef = useRef<string>("");
 
   const [passwordError, setPasswordError] = useState("");
@@ -506,6 +507,7 @@ export default function RoomPage() {
         const roomData = await roomRes.json();
         if (cancelled) return;
         setTopic(roomData.topic);
+        setHasPassword(Boolean(roomData.hasPassword));
         setSecondsLeft(roomData.secondsLeft);
         ttlTotalSecondsRef.current = Math.max(1, roomData.totalSeconds ?? roomData.secondsLeft);
 
@@ -629,7 +631,14 @@ export default function RoomPage() {
 
   const copyShareLinkFromButton = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      const sharePassword = isCreator ? getStoredRoomPassword(roomId) : null;
+      const shareMessage = buildRoomShareMessage({
+        topic,
+        url: window.location.href,
+        password: sharePassword,
+        hasPassword,
+      });
+      await navigator.clipboard.writeText(shareMessage);
       sound.play("success");
       setShareCopied(true);
       if (shareCopiedTimeoutRef.current) {
@@ -639,11 +648,11 @@ export default function RoomPage() {
         setShareCopied(false);
         shareCopiedTimeoutRef.current = null;
       }, 1000);
-      setComposerStatusMessage("share link copied", "accent");
+      setComposerStatusMessage("share message copied", "accent");
     } catch {
       sound.play("error");
       setShareCopied(false);
-      setComposerStatusMessage("could not copy share link", "error");
+      setComposerStatusMessage("could not copy share message", "error");
     }
   };
 
