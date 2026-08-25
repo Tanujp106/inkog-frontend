@@ -41,7 +41,7 @@ import {
 } from "@/lib/room-password-command.mjs";
 import { parseRoomCommand } from "@/lib/room-terminal.mjs";
 import type { RoomCommand } from "@/lib/room-terminal-types";
-import { getInkogApiBaseUrl } from "@/lib/api-config.mjs";
+import { getInkogApiBaseUrl, getInkogSocketBaseUrl } from "@/lib/api-config.mjs";
 import { askInkogHelp } from "@/lib/inkog-help-api";
 import {
   formatSystemSoundStatus,
@@ -50,10 +50,7 @@ import {
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const API = getInkogApiBaseUrl();
-const SOCKET_URL =
-  process.env.NODE_ENV === "development"
-    ? "http://127.0.0.1:3001"
-    : "https://inkog-backend.onrender.com";
+const SOCKET_URL = getInkogSocketBaseUrl();
 const ROOM_FONT_FAMILY = '"Departure Mono", monospace';
 
 interface Message {

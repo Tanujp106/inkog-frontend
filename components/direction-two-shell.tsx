@@ -2,6 +2,7 @@
 
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useDialKit, type DialConfig } from "dialkit";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
 import {
@@ -22,6 +23,7 @@ import {
   getDirectionTwoCreateTimeArrowValue,
   getDirectionTwoCreateVisualSegments,
   getDirectionTwoCreateInlineInputError,
+  getDirectionTwoCreatePromptPresentation,
   getDirectionTwoInlinePromptPresentation,
   getDirectionTwoStyleGhostChoices,
   serializeDirectionTwoGuidedCommandSegments,
@@ -109,6 +111,7 @@ const terminalRevealDelayMs = 1640;
 const introCopyRevealDelayMs = 500;
 const introHighlightsRevealDelayMs = 600;
 const introHighlightsStaggerMs = 100;
+const mobileViewportMediaQuery = "(max-width: 639px)";
 
 const introHighlights = [
   {
@@ -204,6 +207,27 @@ const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
   easingY2: 1,
 };
 
+const directionTwoComposerEntranceDialConfig = {
+  distancePx: [8, 0, 24],
+  durationMs: [260, 100, 600],
+  startOpacity: [0, 0, 1],
+  easingX1: [0.22, 0, 1],
+  easingY1: [1, 0, 1],
+  easingX2: [0.36, 0, 1],
+  easingY2: [1, 0, 1],
+} satisfies DialConfig;
+
+const directionTwoComposerGlowDialConfig = {
+  delayMs: [250, 0, 900],
+  durationMs: [830, 250, 1200],
+  opacity: [0.3, 0, 0.9],
+  blurPx: [8, 0, 24],
+  easingX1: [0.22, 0, 1],
+  easingY1: [1, 0, 1],
+  easingX2: [0.36, 0, 1],
+  easingY2: [1, 0, 1],
+} satisfies DialConfig;
+
 function percent(value: number) {
   return `${value}%`;
 }
@@ -267,7 +291,21 @@ function promptFor(flow: SessionFlow | null) {
   if (!flow) return "$";
   if (flow.type === "join") return "room id";
   if (flow.type === "style") return "style";
-  return "create";
+
+  switch (flow.step) {
+    case "topic":
+      return "room name";
+    case "expiry":
+      return "total minutes";
+    case "limit":
+      return "maximum participants";
+    case "password-choice":
+      return "add password?(y/n)";
+    case "password":
+      return "write password";
+    case "confirm":
+      return "tap enter to create";
+  }
 }
 
 function placeholderFor(flow: SessionFlow | null) {
@@ -288,6 +326,25 @@ function placeholderFor(flow: SessionFlow | null) {
       return "write password";
     case "confirm":
       return "tap enter to create";
+  }
+}
+
+function createPromptPresentationForFlow(flow: SessionFlow | null) {
+  if (!flow || flow.type !== "create") return null;
+
+  switch (flow.step) {
+    case "topic":
+      return getDirectionTwoCreatePromptPresentation("/create");
+    case "expiry":
+      return getDirectionTwoCreatePromptPresentation("/create room");
+    case "limit":
+      return getDirectionTwoCreatePromptPresentation("/create room 60");
+    case "password-choice":
+      return getDirectionTwoCreatePromptPresentation("/create room 60 8");
+    case "password":
+      return getDirectionTwoCreatePromptPresentation("/create room 60 8 y");
+    case "confirm":
+      return getDirectionTwoCreatePromptPresentation("/create room 60 8 n");
   }
 }
 
@@ -369,12 +426,43 @@ export function DirectionTwoShell() {
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isInputNudging, setIsInputNudging] = useState(false);
   const [composerReserveHeight, setComposerReserveHeight] = useState(0);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(mobileViewportMediaQuery);
+    const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+
+    updateViewport();
+    mediaQuery.addEventListener("change", updateViewport);
+    return () => mediaQuery.removeEventListener("change", updateViewport);
+  }, []);
+  const composerEntranceSettings = useDialKit(
+    "Composer entrance",
+    directionTwoComposerEntranceDialConfig,
+    { id: "inkog-composer-entrance" },
+  );
+  const composerGlowSettings = useDialKit(
+    "Composer glow",
+    directionTwoComposerGlowDialConfig,
+    { id: "inkog-composer-glow" },
+  );
   const shimmerSettings: DirectionTwoShimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
+  const composerMotionStyle = {
+    "--direction-two-composer-entry-distance": `${composerEntranceSettings.distancePx}px`,
+    "--direction-two-composer-entry-duration": `${composerEntranceSettings.durationMs}ms`,
+    "--direction-two-composer-entry-opacity": composerEntranceSettings.startOpacity,
+    "--direction-two-composer-entry-easing": `cubic-bezier(${composerEntranceSettings.easingX1}, ${composerEntranceSettings.easingY1}, ${composerEntranceSettings.easingX2}, ${composerEntranceSettings.easingY2})`,
+    "--direction-two-composer-glow-delay": `${composerGlowSettings.delayMs}ms`,
+    "--direction-two-composer-glow-duration": `${composerGlowSettings.durationMs}ms`,
+    "--direction-two-composer-glow-opacity": composerGlowSettings.opacity,
+    "--direction-two-composer-glow-blur": `${composerGlowSettings.blurPx}px`,
+    "--direction-two-composer-glow-easing": `cubic-bezier(${composerGlowSettings.easingX1}, ${composerGlowSettings.easingY1}, ${composerGlowSettings.easingX2}, ${composerGlowSettings.easingY2})`,
+  } as CSSProperties;
+  const composerMotionActive = isTerminalVisible && !prefersReducedMotion;
   const titleMotionSettings = directionTwoTitleMotionDefaults;
   const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
-  const guidedCreateQuestion = flow?.type === "create" ? guidedCreateQuestionForStep(flow.step) : null;
+  const guidedCreateQuestion = isMobileViewport && flow?.type === "create" ? guidedCreateQuestionForStep(flow.step) : null;
   const hasPromptMenu = isSlashMenuOpen || Boolean(guidedCreateQuestion);
   const isLandingForegroundHidden = routeHandoffState.phase === "transitioning";
   const routeStatus = routeActivity ? getRouteStatusPresentation(routeActivity) : null;
@@ -683,9 +771,20 @@ export function DirectionTwoShell() {
   };
 
   const beginCreate = (command = "/create") => {
-    setGuidedCreateSegments(createDirectionTwoGuidedCommandSegments(command) as GuidedCreateSegment[]);
-    setEditingCreateSegment(null);
-    setEditingReturnFlow(null);
+    if (isMobileViewport) {
+      setGuidedCreateSegments(createDirectionTwoGuidedCommandSegments(command) as GuidedCreateSegment[]);
+      setEditingCreateSegment(null);
+      setEditingReturnFlow(null);
+    } else {
+      appendLines(
+        line("input", command),
+        line("output", "starting private room setup"),
+        line("output", "answer each prompt, or use: /create / room name / minutes / participants / y/n"),
+      );
+      setGuidedCreateSegments(null);
+      setEditingCreateSegment(null);
+      setEditingReturnFlow(null);
+    }
     setFlow({ type: "create", step: "topic", draft: initialDraft });
     sound.play("press");
     setKeyboardStatus("Create flow started. What should we call the room?");
@@ -894,7 +993,8 @@ export function DirectionTwoShell() {
 
     if (flowState.step === "topic") {
       const nextDraft = { ...flowState.draft, topic: answer };
-      if (commitGuidedCreateSegment("topic", answer, nextDraft)) return;
+      if (isMobileViewport && commitGuidedCreateSegment("topic", answer, nextDraft)) return;
+      if (!isMobileViewport) appendLines(line("input", answer), line("output", "topic saved"));
       sound.play("success");
       setFlow({ type: "create", step: "expiry", draft: nextDraft });
       setKeyboardStatus("How many minutes should the room stay open?");
@@ -905,7 +1005,8 @@ export function DirectionTwoShell() {
       const expiry = Number(answer);
 
       const nextDraft = { ...flowState.draft, expiry };
-      if (commitGuidedCreateSegment("expiry", answer, nextDraft)) return;
+      if (isMobileViewport && commitGuidedCreateSegment("expiry", answer, nextDraft)) return;
+      if (!isMobileViewport) appendLines(line("input", answer), line("output", `expires in ${expiry}m`));
       sound.play("success");
       setFlow({ type: "create", step: "limit", draft: nextDraft });
       setKeyboardStatus("Maximum participants?");
@@ -916,7 +1017,8 @@ export function DirectionTwoShell() {
       const roomLimit = Number(answer);
 
       const nextDraft = { ...flowState.draft, roomLimit };
-      if (commitGuidedCreateSegment("limit", answer, nextDraft)) return;
+      if (isMobileViewport && commitGuidedCreateSegment("limit", answer, nextDraft)) return;
+      if (!isMobileViewport) appendLines(line("input", answer), line("output", `member limit set: ${roomLimit}`));
       sound.play("success");
       setFlow({ type: "create", step: "password-choice", draft: nextDraft });
       setKeyboardStatus("Add password? Answer y or n.");
@@ -926,15 +1028,22 @@ export function DirectionTwoShell() {
     if (flowState.step === "password-choice") {
       if (isNo(answer)) {
         const nextDraft = { ...flowState.draft, password: "" };
-        if (commitGuidedCreateSegment("password-choice", answer, nextDraft)) return;
+        if (isMobileViewport && commitGuidedCreateSegment("password-choice", answer, nextDraft)) return;
+        if (!isMobileViewport) appendLines(line("input", answer), line("output", "password: off"));
         sound.play("success");
-        setFlow(null);
-        void createRoom(nextDraft, { confirmInput: null });
+        if (isMobileViewport) {
+          setFlow(null);
+          void createRoom(nextDraft, { confirmInput: null });
+        } else {
+          setFlow({ type: "create", step: "confirm", draft: nextDraft });
+          setKeyboardStatus("Tap Enter to create.");
+        }
         return;
       }
 
       if (isYes(answer)) {
-        if (commitGuidedCreateSegment("password-choice", answer, flowState.draft)) return;
+        if (isMobileViewport && commitGuidedCreateSegment("password-choice", answer, flowState.draft)) return;
+        if (!isMobileViewport) appendLines(line("input", answer), line("output", "password: on"));
         sound.play("success");
         setFlow({ type: "create", step: "password", draft: flowState.draft });
         setKeyboardStatus("Write password.");
@@ -945,10 +1054,17 @@ export function DirectionTwoShell() {
     if (flowState.step === "password") {
       revealPassword(answer, () => {
         const nextDraft = { ...flowState.draft, password: answer };
-        if (commitGuidedCreateSegment("password", answer, nextDraft)) return;
+        if (isMobileViewport && commitGuidedCreateSegment("password", answer, nextDraft)) return;
+        if (!isMobileViewport) appendLines(line("input", "********"), line("output", "password stored locally until room creation"));
         sound.play("success");
-        setFlow(null);
-        void createRoom(nextDraft, { confirmInput: null });
+        if (isMobileViewport) {
+          setFlow(null);
+          void createRoom(nextDraft, { confirmInput: null });
+        } else {
+          setFlow({ type: "create", step: "confirm", draft: nextDraft });
+          setKeyboardStatus("Tap Enter to create.");
+          focusInput();
+        }
       });
       return;
     }
@@ -1281,6 +1397,7 @@ export function DirectionTwoShell() {
   };
 
   const activePrompt = promptFor(flow);
+  const activePromptPresentation = createPromptPresentationForFlow(flow);
   const completionSuggestion = commandCompletionFor(inputValue, flow);
   useEffect(() => {
     setSlashSuggestionIndex(0);
@@ -1299,11 +1416,11 @@ export function DirectionTwoShell() {
   const ghostTapCompletion = resolveDirectionTwoGhostTapCompletion(inputValue, Boolean(flow));
   const inlineHint = inputFeedbackMessage ?? createFieldHint;
   const isGuidedPasswordEntry = flow?.type === "create" && flow.step === "password";
-  const isGuidedCreateInput = flow?.type === "create" && Boolean(guidedCreateSegments);
+  const isGuidedCreateInput = isMobileViewport && flow?.type === "create" && Boolean(guidedCreateSegments);
   const passwordDisplayValue = passwordRevealIndex === null ? inputValue : passwordSubmissionRef.current;
   const visualInputText = isGuidedPasswordEntry
     ? getDirectionTwoPasswordMask(passwordDisplayValue, passwordRevealIndex ?? passwordDisplayValue.length - 1)
-    : inputValue || (flow?.type === "create" ? "" : placeholderFor(flow));
+    : inputValue || placeholderFor(flow);
   const visualCreateSegments = !isGuidedPasswordEntry && inputValue
     ? getDirectionTwoCreateVisualSegments(inputValue, passwordRevealIndex ?? undefined)
     : null;
@@ -1337,7 +1454,7 @@ export function DirectionTwoShell() {
       return;
     }
 
-    if (command === "/create") {
+    if (command === "/create" && isMobileViewport) {
       beginCreate(command);
       setInputValue("");
       setInputFeedbackMessage(null);
@@ -1496,8 +1613,8 @@ export function DirectionTwoShell() {
 
         <div
           aria-hidden={isLandingForegroundHidden || undefined}
-          className={`direction-two-mobile-terminal hidden min-h-0 flex-1 flex-col pb-3 pt-11 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out-strong)] sm:flex sm:pt-12 ${
-            isTerminalVisible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"
+          className={`direction-two-mobile-terminal hidden min-h-0 flex-1 flex-col pb-3 pt-11 transition-opacity duration-300 [transition-timing-function:var(--ease-out-strong)] sm:flex sm:pt-12 ${
+            isTerminalVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
           inert={isLandingForegroundHidden || undefined}
           style={getLandingPartStyle("terminal")}
@@ -1556,14 +1673,15 @@ export function DirectionTwoShell() {
         <div
           ref={composerRef}
           className="direction-two-floating-composer"
-          style={{ ...composerStyle, ...getLandingPartStyle("composer") }}
+          style={{ ...composerStyle, ...getLandingPartStyle("composer"), ...composerMotionStyle }}
         >
             <div
-              className={`direction-two-terminal-frame ${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col gap-0 pl-[12px] pr-[12px] text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
+              className={`direction-two-terminal-frame ${composerMotionActive ? "direction-two-composer-entry " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col gap-0 pl-[12px] pr-[12px] text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
               style={{
                 background: "var(--color-panel)",
                 border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--background) 76%)",
                 borderRadius: 0,
+                opacity: composerMotionActive || prefersReducedMotion ? 1 : 0,
                 padding: "var(--route-composer-frame-padding)",
                 paddingLeft: "12px",
                 paddingRight: "12px",
@@ -1571,6 +1689,10 @@ export function DirectionTwoShell() {
                 paddingBottom: "16px",
               }}
             >
+              <div
+                aria-hidden="true"
+                className={`direction-two-composer-glow ${composerMotionActive ? "direction-two-composer-glow--active" : ""}`}
+              />
             <div
                 aria-hidden={!hasPromptMenu}
                 className="overflow-hidden transition-[max-height,opacity] duration-200 ease-out motion-reduce:transition-none"
@@ -1691,32 +1813,35 @@ export function DirectionTwoShell() {
               </div>
               <div className="direction-two-terminal-input-row flex min-w-0 items-center gap-0 pl-[0px]">
               <label className="sr-only" htmlFor="terminal-command">{activePrompt}</label>
-              {!isGuidedCreateInput && (
-                <span
-                  className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-base text-[var(--foreground)]"
-                  aria-hidden="true"
-                >
-                  {activePrompt === "$" ? (
-                    <span className="pl-[12px] text-base text-[var(--color-signal)]">$</span>
-                  ) : (
-                    <>
-                      <span>{">"}</span>
-                      <span>{activePrompt}:</span>
-                    </>
-                  )}
-                </span>
-              )}
-              <div className={`relative min-w-0 flex-1 ${isGuidedCreateInput ? "" : "ml-2"}`}>
-                <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[14px] leading-[24px]">
-                {isGuidedCreateInput ? (
-                  <GuidedCreateInputPreview
-                    currentValue={isGuidedPasswordEntry ? visualInputText : inputValue}
-                    editingSegment={editingCreateSegment}
-                    onEdit={handleGuidedCreateSegmentEdit}
-                    segments={guidedCreateSegments ?? []}
-                  />
+              <span
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-base ${
+                  activePromptPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
+                } ${isGuidedCreateInput ? "hidden sm:flex" : "flex"}`}
+                aria-hidden="true"
+              >
+                {activePrompt === "$" ? (
+                  <span className="pl-[12px] text-base text-[var(--color-signal)]">$</span>
                 ) : (
                   <>
+                    <span>{">"}</span>
+                    {activePromptPresentation && <PromptPixelGlyph pattern={activePromptPresentation.pattern} />}
+                    <span>{activePrompt}:</span>
+                  </>
+                )}
+              </span>
+              <div className={`relative min-w-0 flex-1 ${isGuidedCreateInput ? "ml-0 sm:ml-2" : "ml-2"}`}>
+                <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[14px] leading-[24px]">
+                {isGuidedCreateInput && (
+                  <span className="sm:hidden">
+                    <GuidedCreateInputPreview
+                      currentValue={isGuidedPasswordEntry ? visualInputText : inputValue}
+                      editingSegment={editingCreateSegment}
+                      onEdit={handleGuidedCreateSegmentEdit}
+                      segments={guidedCreateSegments ?? []}
+                    />
+                  </span>
+                )}
+                <span className={isGuidedCreateInput ? "hidden sm:contents" : "contents"}>
                     {!hasVisibleInput && !creating && (
                       <span aria-hidden="true" className="direction-two-visual-caret mr-px h-[22px] w-[3px] shrink-0 bg-[var(--foreground)]" />
                     )}
@@ -1767,8 +1892,7 @@ export function DirectionTwoShell() {
                     {hasVisibleInput && !creating && passwordRevealIndex === null && (
                       <span aria-hidden="true" className="direction-two-visual-caret ml-px h-[22px] w-[3px] shrink-0 bg-[var(--foreground)]" />
                     )}
-                  </>
-                )}
+                </span>
                 {visibleGhostCompletionText && (
                   <button
                     aria-label="Autocomplete suggestion"
@@ -1889,7 +2013,7 @@ export function DirectionTwoShell() {
                 <button
                   aria-label="Press Enter"
                   aria-keyshortcuts="Enter"
-                  className="ml-2 inline-flex size-7 shrink-0 items-center justify-center rounded-[3px] border border-[color-mix(in_srgb,var(--color-signal)_35%,var(--background)_65%)] text-[var(--color-signal)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] disabled:pointer-events-none disabled:opacity-40"
+                  className="ml-2 inline-flex size-7 shrink-0 items-center justify-center rounded-[3px] border border-[color-mix(in_srgb,var(--color-signal)_35%,var(--background)_65%)] text-[var(--color-signal)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] disabled:pointer-events-none disabled:opacity-40 sm:hidden"
                   disabled={creating || passwordRevealIndex !== null || routeActivity !== null}
                   onClick={event => {
                     event.stopPropagation();
@@ -1949,6 +2073,8 @@ function InkPatternMark({
   const markRef = useRef<HTMLDivElement | null>(null);
   const magnetFrameRef = useRef<number | null>(null);
   const latestPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const markPixelCentersRef = useRef<Array<{ pixel: HTMLElement; x: number; y: number }>>([]);
+  const highlightedMarkPixelsRef = useRef<Set<HTMLElement>>(new Set());
   const [phase, setPhase] = useState<DirectionTwoTitlePhase>(
     reducedMotion ? "interactive" : "forming",
   );
@@ -2002,6 +2128,17 @@ function InkPatternMark({
     );
   }
 
+  function getActiveMarkPixelCenters() {
+    return getActiveMarkPixels().map((pixel) => {
+      const rect = pixel.getBoundingClientRect();
+      return {
+        pixel,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      };
+    });
+  }
+
   function resetMarkMagnetism() {
     latestPointerRef.current = null;
     markRef.current?.removeAttribute("data-mark-magnet-active");
@@ -2013,8 +2150,12 @@ function InkPatternMark({
     for (const pixel of getActiveMarkPixels()) {
       pixel.style.setProperty("--mark-magnet-x", "0px");
       pixel.style.setProperty("--mark-magnet-y", "0px");
+    }
+    for (const pixel of highlightedMarkPixelsRef.current) {
       pixel.removeAttribute("data-mark-magnet-highlight");
     }
+    highlightedMarkPixelsRef.current.clear();
+    markPixelCentersRef.current = [];
   }
 
   function applyMarkMagnetism() {
@@ -2022,11 +2163,10 @@ function InkPatternMark({
     const pointer = latestPointerRef.current;
     if (!pointer || phase !== "interactive" || reducedMotion) return;
 
-    for (const pixel of getActiveMarkPixels()) {
-      const rect = pixel.getBoundingClientRect();
+    for (const { pixel, x, y } of markPixelCentersRef.current) {
       const offset = getDirectionTwoMagnetOffset(
-        rect.left + rect.width / 2,
-        rect.top + rect.height / 2,
+        x,
+        y,
         pointer.x,
         pointer.y,
         titleMotionSettings.magnetRadius,
@@ -2035,10 +2175,14 @@ function InkPatternMark({
       );
       pixel.style.setProperty("--mark-magnet-x", `${offset.x}px`);
       pixel.style.setProperty("--mark-magnet-y", `${offset.y}px`);
-      if (offset.x !== 0 || offset.y !== 0) {
+      const isHighlighted = offset.x !== 0 || offset.y !== 0;
+      const wasHighlighted = highlightedMarkPixelsRef.current.has(pixel);
+      if (isHighlighted && !wasHighlighted) {
         pixel.setAttribute("data-mark-magnet-highlight", "true");
-      } else {
+        highlightedMarkPixelsRef.current.add(pixel);
+      } else if (!isHighlighted && wasHighlighted) {
         pixel.removeAttribute("data-mark-magnet-highlight");
+        highlightedMarkPixelsRef.current.delete(pixel);
       }
     }
   }
@@ -2046,6 +2190,9 @@ function InkPatternMark({
   function handleMarkPointerMove(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "touch" || phase !== "interactive" || reducedMotion) return;
 
+    if (markPixelCentersRef.current.length === 0) {
+      markPixelCentersRef.current = getActiveMarkPixelCenters();
+    }
     markRef.current?.setAttribute("data-mark-magnet-active", "true");
     latestPointerRef.current = { x: event.clientX, y: event.clientY };
     if (magnetFrameRef.current === null) {
