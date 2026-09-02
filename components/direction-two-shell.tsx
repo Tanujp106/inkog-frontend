@@ -61,6 +61,19 @@ const themeStorageKey = "inkog-theme";
 type DirectionTwoTheme = (typeof directionTwoThemes)[number];
 type DirectionTwoTitlePhase = "forming" | "shimmering" | "interactive";
 type RouteActivity = "create" | "join";
+type MarkPixelRecord = {
+  pixel: HTMLElement;
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+};
+
+const markMagnetGridCellSize = 64;
+
+function getMarkMagnetGridKey(cellX: number, cellY: number) {
+  return `${cellX}:${cellY}`;
+}
 
 type TerminalLine = {
   id: string;
@@ -226,6 +239,25 @@ const directionTwoComposerGlowDialConfig = {
   easingY1: [1, 0, 1],
   easingX2: [0.36, 0, 1],
   easingY2: [1, 0, 1],
+} satisfies DialConfig;
+
+const directionTwoTitleAnimationDialConfig = {
+  formationDurationMs: [directionTwoTitleMotionDefaults.formationDurationMs, 120, 900, 10],
+  formationSpreadMs: [directionTwoTitleMotionDefaults.formationSpreadMs, 120, 1200, 10],
+  shimmerDurationMs: [directionTwoTitleMotionDefaults.shimmerDurationMs, 240, 1600, 10],
+  shimmerSpreadMs: [directionTwoTitleMotionDefaults.shimmerSpreadMs, 120, 1400, 10],
+  shimmerAmplitudeMs: [directionTwoTitleMotionDefaults.shimmerAmplitudeMs, 0, 240, 2],
+  shimmerFrequency: [directionTwoTitleMotionDefaults.shimmerFrequency, 0.25, 3, 0.05],
+  shimmerColorMixPercent: [directionTwoTitleMotionDefaults.shimmerColorMixPercent, 0, 100, 1],
+  shimmerPeakOpacity: [directionTwoTitleMotionDefaults.shimmerPeakOpacity, 0, 1, 0.05],
+} satisfies DialConfig;
+
+const directionTwoTitleHoverDialConfig = {
+  radius: [directionTwoTitleMotionDefaults.magnetRadius, 24, 180, 2],
+  strength: [directionTwoTitleMotionDefaults.magnetStrength, 0.1, 2, 0.05],
+  maxDisplacement: [directionTwoTitleMotionDefaults.magnetMaxDisplacement, 0, 16, 0.5],
+  returnDurationMs: [directionTwoTitleMotionDefaults.magnetSpringMs, 60, 500, 10],
+  colorMixPercent: [directionTwoTitleMotionDefaults.hoverHighlightColorMixPercent, 0, 100, 1],
 } satisfies DialConfig;
 
 function percent(value: number) {
@@ -445,6 +477,16 @@ export function DirectionTwoShell() {
     directionTwoComposerGlowDialConfig,
     { id: "inkog-composer-glow" },
   );
+  const titleAnimationSettings = useDialKit(
+    "INKOG title animation",
+    directionTwoTitleAnimationDialConfig,
+    { id: "inkog-title-animation" },
+  );
+  const titleHoverSettings = useDialKit(
+    "INKOG title hover",
+    directionTwoTitleHoverDialConfig,
+    { id: "inkog-title-hover" },
+  );
   const shimmerSettings: DirectionTwoShimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
   const composerMotionStyle = {
@@ -459,7 +501,21 @@ export function DirectionTwoShell() {
     "--direction-two-composer-glow-easing": `cubic-bezier(${composerGlowSettings.easingX1}, ${composerGlowSettings.easingY1}, ${composerGlowSettings.easingX2}, ${composerGlowSettings.easingY2})`,
   } as CSSProperties;
   const composerMotionActive = isTerminalVisible && !prefersReducedMotion;
-  const titleMotionSettings = directionTwoTitleMotionDefaults;
+  const titleMotionSettings: typeof directionTwoTitleMotionDefaults = {
+    formationDurationMs: titleAnimationSettings.formationDurationMs,
+    formationSpreadMs: titleAnimationSettings.formationSpreadMs,
+    shimmerDurationMs: titleAnimationSettings.shimmerDurationMs,
+    shimmerSpreadMs: titleAnimationSettings.shimmerSpreadMs,
+    shimmerAmplitudeMs: titleAnimationSettings.shimmerAmplitudeMs,
+    shimmerFrequency: titleAnimationSettings.shimmerFrequency,
+    shimmerColorMixPercent: titleAnimationSettings.shimmerColorMixPercent,
+    shimmerPeakOpacity: titleAnimationSettings.shimmerPeakOpacity,
+    hoverHighlightColorMixPercent: titleHoverSettings.colorMixPercent,
+    magnetRadius: titleHoverSettings.radius,
+    magnetStrength: titleHoverSettings.strength,
+    magnetMaxDisplacement: titleHoverSettings.maxDisplacement,
+    magnetSpringMs: titleHoverSettings.returnDurationMs,
+  };
   const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
   const guidedCreateQuestion = isMobileViewport && flow?.type === "create" ? guidedCreateQuestionForStep(flow.step) : null;
@@ -2074,7 +2130,9 @@ function InkPatternMark({
   const magnetFrameRef = useRef<number | null>(null);
   const magnetActiveRef = useRef<boolean>(false);
   const latestPointerRef = useRef<{ x: number; y: number } | null>(null);
-  const markPixelCentersRef = useRef<Array<{ pixel: HTMLElement; x: number; y: number; offsetX: number; offsetY: number }>>([]);
+  const markPixelCentersRef = useRef<MarkPixelRecord[]>([]);
+  const markPixelGridRef = useRef<Map<string, MarkPixelRecord[]>>(new Map());
+  const activeMarkPixelRecordsRef = useRef<Set<MarkPixelRecord>>(new Set());
   const highlightedMarkPixelsRef = useRef<Set<HTMLElement>>(new Set());
   const [phase, setPhase] = useState<DirectionTwoTitlePhase>(
     reducedMotion ? "interactive" : "forming",
@@ -2108,7 +2166,14 @@ function InkPatternMark({
       window.clearTimeout(formationTimer);
       window.clearTimeout(interactiveTimer);
     };
-  }, [reducedMotion]);
+  }, [
+    reducedMotion,
+    titleMotionSettings.formationDurationMs,
+    titleMotionSettings.formationSpreadMs,
+    titleMotionSettings.shimmerDurationMs,
+    titleMotionSettings.shimmerSpreadMs,
+    titleMotionSettings.shimmerAmplitudeMs,
+  ]);
 
   useEffect(() => {
     if (phase !== "interactive" || reducedMotion) {
@@ -2124,7 +2189,7 @@ function InkPatternMark({
   }, [phase, reducedMotion]);
 
   function getActiveMarkPixelCenters() {
-    return Array.from(
+    const records = Array.from(
       markRef.current?.querySelectorAll<HTMLElement>(".direction-two-mark-pixel-active") ?? [],
     ).map((pixel) => {
       const rect = pixel.getBoundingClientRect();
@@ -2136,6 +2201,53 @@ function InkPatternMark({
         offsetY: 0,
       };
     });
+
+    const grid = new Map<string, MarkPixelRecord[]>();
+    for (const record of records) {
+      const key = getMarkMagnetGridKey(
+        Math.floor(record.x / markMagnetGridCellSize),
+        Math.floor(record.y / markMagnetGridCellSize),
+      );
+      const bucket = grid.get(key);
+      if (bucket) {
+        bucket.push(record);
+      } else {
+        grid.set(key, [record]);
+      }
+    }
+    markPixelGridRef.current = grid;
+    return records;
+  }
+
+  function getMarkMagnetCandidates(pointerX: number, pointerY: number, radius: number) {
+    const minCellX = Math.floor((pointerX - radius) / markMagnetGridCellSize);
+    const maxCellX = Math.floor((pointerX + radius) / markMagnetGridCellSize);
+    const minCellY = Math.floor((pointerY - radius) / markMagnetGridCellSize);
+    const maxCellY = Math.floor((pointerY + radius) / markMagnetGridCellSize);
+    const candidates: MarkPixelRecord[] = [];
+
+    for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
+      for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+        const bucket = markPixelGridRef.current.get(getMarkMagnetGridKey(cellX, cellY));
+        if (bucket) candidates.push(...bucket);
+      }
+    }
+
+    return candidates;
+  }
+
+  function clearMarkPixelRecord(record: MarkPixelRecord) {
+    if (record.offsetX !== 0 || record.offsetY !== 0) {
+      record.pixel.style.setProperty("--mark-magnet-x", "0px");
+      record.pixel.style.setProperty("--mark-magnet-y", "0px");
+      record.offsetX = 0;
+      record.offsetY = 0;
+    }
+    if (highlightedMarkPixelsRef.current.has(record.pixel)) {
+      record.pixel.removeAttribute("data-mark-magnet-highlight");
+      highlightedMarkPixelsRef.current.delete(record.pixel);
+    }
+    activeMarkPixelRecordsRef.current.delete(record);
   }
 
   function resetMarkMagnetism() {
@@ -2147,18 +2259,11 @@ function InkPatternMark({
       magnetFrameRef.current = null;
     }
 
-    for (const record of markPixelCentersRef.current) {
-      if (record.offsetX === 0 && record.offsetY === 0) continue;
-      record.pixel.style.setProperty("--mark-magnet-x", "0px");
-      record.pixel.style.setProperty("--mark-magnet-y", "0px");
-      record.offsetX = 0;
-      record.offsetY = 0;
-    }
-    for (const pixel of highlightedMarkPixelsRef.current) {
-      pixel.removeAttribute("data-mark-magnet-highlight");
-    }
+    for (const record of activeMarkPixelRecordsRef.current) clearMarkPixelRecord(record);
+    activeMarkPixelRecordsRef.current.clear();
     highlightedMarkPixelsRef.current.clear();
     markPixelCentersRef.current = [];
+    markPixelGridRef.current.clear();
   }
 
   function applyMarkMagnetism() {
@@ -2166,7 +2271,24 @@ function InkPatternMark({
     const pointer = latestPointerRef.current;
     if (!pointer || phase !== "interactive" || reducedMotion) return;
 
-    for (const record of markPixelCentersRef.current) {
+    const radius = Math.max(0, titleMotionSettings.magnetRadius);
+    const radiusSquared = radius * radius;
+    const candidates = getMarkMagnetCandidates(pointer.x, pointer.y, radius);
+    const candidateSet = new Set(candidates);
+
+    for (const record of activeMarkPixelRecordsRef.current) {
+      if (!candidateSet.has(record)) clearMarkPixelRecord(record);
+    }
+
+    for (const record of candidates) {
+      const deltaX = pointer.x - record.x;
+      const deltaY = pointer.y - record.y;
+      const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+      if (distanceSquared >= radiusSquared) {
+        clearMarkPixelRecord(record);
+        continue;
+      }
+
       const offset = getDirectionTwoMagnetOffset(
         record.x,
         record.y,
@@ -2183,13 +2305,14 @@ function InkPatternMark({
         record.offsetY = offset.y;
       }
       const isHighlighted = offset.x !== 0 || offset.y !== 0;
-      const wasHighlighted = highlightedMarkPixelsRef.current.has(record.pixel);
-      if (isHighlighted && !wasHighlighted) {
-        record.pixel.setAttribute("data-mark-magnet-highlight", "true");
-        highlightedMarkPixelsRef.current.add(record.pixel);
-      } else if (!isHighlighted && wasHighlighted) {
-        record.pixel.removeAttribute("data-mark-magnet-highlight");
-        highlightedMarkPixelsRef.current.delete(record.pixel);
+      if (isHighlighted) {
+        activeMarkPixelRecordsRef.current.add(record);
+        if (!highlightedMarkPixelsRef.current.has(record.pixel)) {
+          record.pixel.setAttribute("data-mark-magnet-highlight", "true");
+          highlightedMarkPixelsRef.current.add(record.pixel);
+        }
+      } else {
+        clearMarkPixelRecord(record);
       }
     }
   }
@@ -2217,18 +2340,13 @@ function InkPatternMark({
 
   const titleMotionStyle = {
     "--direction-two-title-formation-duration": `${titleMotionSettings.formationDurationMs}ms`,
-    "--direction-two-title-formation-brightness": titleMotionSettings.formationPeakBrightness,
     "--direction-two-title-shimmer-duration": `${titleMotionSettings.shimmerDurationMs}ms`,
     "--direction-two-title-shimmer-color-mix": percent(titleMotionSettings.shimmerColorMixPercent),
     "--direction-two-title-shimmer-foreground-mix": percent(100 - titleMotionSettings.shimmerColorMixPercent),
-    "--direction-two-title-shimmer-peak-brightness": titleMotionSettings.shimmerPeakBrightness,
-    "--direction-two-title-shimmer-glow-radius": `${titleMotionSettings.shimmerGlowRadius}px`,
-    "--direction-two-title-shimmer-glow-opacity": percent(titleMotionSettings.shimmerGlowOpacity),
-    "--direction-two-title-hover-highlight-brightness": titleMotionSettings.hoverHighlightBrightness,
+    "--direction-two-title-shimmer-peak-opacity": titleMotionSettings.shimmerPeakOpacity,
     "--direction-two-title-hover-highlight-color-mix": percent(titleMotionSettings.hoverHighlightColorMixPercent),
     "--direction-two-title-hover-highlight-foreground-mix": percent(100 - titleMotionSettings.hoverHighlightColorMixPercent),
-    "--direction-two-title-hover-highlight-glow-radius": `${titleMotionSettings.hoverHighlightGlowRadius}px`,
-    "--direction-two-title-hover-highlight-glow-opacity": percent(titleMotionSettings.hoverHighlightGlowOpacity),
+    "--direction-two-title-hover-shimmer-duration": `${directionTwoMarkMotion.highlightHoverShimmerMs}ms`,
     "--direction-two-title-magnet-return-duration": `${titleMotionSettings.magnetSpringMs}ms`,
   } as CSSProperties;
 
@@ -2341,6 +2459,9 @@ function PixelPatternGrid({
                 {
                   "--mark-formation-delay": `${formationDelay}ms`,
                   "--mark-shimmer-delay": `${shimmerDelay}ms`,
+                  "--mark-hover-delay": `${Math.round(
+                    (shimmerColumn / Math.max(1, shimmerColumnCount - 1)) * directionTwoMarkMotion.highlightHoverMaxDelayMs,
+                  )}ms`,
                 } as CSSProperties
               }
             />

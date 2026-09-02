@@ -302,22 +302,18 @@ body::before {
 @keyframes direction-two-mark-form {
   0% {
     opacity: 0;
-    filter: brightness(var(--direction-two-title-formation-brightness, 1.55));
   }
   68% {
     opacity: 1;
-    filter: brightness(1.12);
   }
   100% {
     opacity: 1;
-    filter: brightness(1);
   }
 }
 @keyframes direction-two-mark-sine-shimmer {
   0% {
     background-color: var(--foreground);
-    filter: brightness(1);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+    opacity: 1;
   }
   50% {
     background-color: color-mix(
@@ -325,20 +321,29 @@ body::before {
       var(--foreground) var(--direction-two-title-shimmer-foreground-mix, 54%),
       var(--color-signal) var(--direction-two-title-shimmer-color-mix, 46%)
     );
-    filter: brightness(var(--direction-two-title-shimmer-peak-brightness, 1.65));
-    box-shadow:
-      0 0 0 1px rgba(0, 0, 0, 0.18),
-      0 0 var(--direction-two-title-shimmer-glow-radius, 14px)
-        color-mix(
-          in srgb,
-          var(--color-signal) var(--direction-two-title-shimmer-glow-opacity, 46%),
-          transparent
-        );
+    opacity: var(--direction-two-title-shimmer-peak-opacity, 1);
   }
   100% {
     background-color: var(--foreground);
-    filter: brightness(1);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+    opacity: 1;
+  }
+}
+@keyframes direction-two-mark-hover-shimmer {
+  0% {
+    background-color: var(--foreground);
+    opacity: 1;
+  }
+  50% {
+    background-color: color-mix(
+      in srgb,
+      var(--foreground) var(--direction-two-title-hover-highlight-foreground-mix, 34%),
+      var(--color-signal) var(--direction-two-title-hover-highlight-color-mix, 66%)
+    );
+    opacity: 1;
+  }
+  100% {
+    background-color: var(--foreground);
+    opacity: 1;
   }
 }
 @keyframes direction-two-highlight-soft-shimmer {
@@ -458,7 +463,15 @@ body::before {
   );
 }
 .direction-two-mark[data-mark-phase="interactive"][data-mark-magnet-active="true"] .direction-two-mark-pixel-active {
-  transition: none;
+  animation:
+    direction-two-mark-hover-shimmer
+    var(--direction-two-title-hover-shimmer-duration, 1040ms)
+    var(--ease-out-strong)
+    var(--mark-hover-delay, 0ms)
+    1;
+  transition:
+    transform 72ms var(--ease-out-strong),
+    background-color 120ms var(--ease-out-strong);
 }
 .direction-two-mark-pixel-idle {
   background: var(--color-border);

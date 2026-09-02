@@ -20,15 +20,13 @@ export declare const directionTwoMarkSlotCount: number;
 export declare const directionTwoTitleMotionDefaults: {
   formationDurationMs: number;
   formationSpreadMs: number;
-  formationPeakBrightness: number;
   shimmerDurationMs: number;
   shimmerSpreadMs: number;
   shimmerAmplitudeMs: number;
   shimmerFrequency: number;
   shimmerColorMixPercent: number;
-  shimmerPeakBrightness: number;
-  shimmerGlowRadius: number;
-  shimmerGlowOpacity: number;
+  shimmerPeakOpacity: number;
+  hoverHighlightColorMixPercent: number;
   magnetRadius: number;
   magnetStrength: number;
   magnetMaxDisplacement: number;
