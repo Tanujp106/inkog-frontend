@@ -2072,8 +2072,9 @@ function InkPatternMark({
 }) {
   const markRef = useRef<HTMLDivElement | null>(null);
   const magnetFrameRef = useRef<number | null>(null);
+  const magnetActiveRef = useRef<boolean>(false);
   const latestPointerRef = useRef<{ x: number; y: number } | null>(null);
-  const markPixelCentersRef = useRef<Array<{ pixel: HTMLElement; x: number; y: number }>>([]);
+  const markPixelCentersRef = useRef<Array<{ pixel: HTMLElement; x: number; y: number; offsetX: number; offsetY: number }>>([]);
   const highlightedMarkPixelsRef = useRef<Set<HTMLElement>>(new Set());
   const [phase, setPhase] = useState<DirectionTwoTitlePhase>(
     reducedMotion ? "interactive" : "forming",
@@ -2122,34 +2123,36 @@ function InkPatternMark({
     };
   }, [phase, reducedMotion]);
 
-  function getActiveMarkPixels() {
+  function getActiveMarkPixelCenters() {
     return Array.from(
       markRef.current?.querySelectorAll<HTMLElement>(".direction-two-mark-pixel-active") ?? [],
-    );
-  }
-
-  function getActiveMarkPixelCenters() {
-    return getActiveMarkPixels().map((pixel) => {
+    ).map((pixel) => {
       const rect = pixel.getBoundingClientRect();
       return {
         pixel,
         x: rect.left + rect.width / 2,
         y: rect.top + rect.height / 2,
+        offsetX: 0,
+        offsetY: 0,
       };
     });
   }
 
   function resetMarkMagnetism() {
     latestPointerRef.current = null;
+    magnetActiveRef.current = false;
     markRef.current?.removeAttribute("data-mark-magnet-active");
     if (magnetFrameRef.current !== null) {
       window.cancelAnimationFrame(magnetFrameRef.current);
       magnetFrameRef.current = null;
     }
 
-    for (const pixel of getActiveMarkPixels()) {
-      pixel.style.setProperty("--mark-magnet-x", "0px");
-      pixel.style.setProperty("--mark-magnet-y", "0px");
+    for (const record of markPixelCentersRef.current) {
+      if (record.offsetX === 0 && record.offsetY === 0) continue;
+      record.pixel.style.setProperty("--mark-magnet-x", "0px");
+      record.pixel.style.setProperty("--mark-magnet-y", "0px");
+      record.offsetX = 0;
+      record.offsetY = 0;
     }
     for (const pixel of highlightedMarkPixelsRef.current) {
       pixel.removeAttribute("data-mark-magnet-highlight");
@@ -2163,26 +2166,30 @@ function InkPatternMark({
     const pointer = latestPointerRef.current;
     if (!pointer || phase !== "interactive" || reducedMotion) return;
 
-    for (const { pixel, x, y } of markPixelCentersRef.current) {
+    for (const record of markPixelCentersRef.current) {
       const offset = getDirectionTwoMagnetOffset(
-        x,
-        y,
+        record.x,
+        record.y,
         pointer.x,
         pointer.y,
         titleMotionSettings.magnetRadius,
         titleMotionSettings.magnetStrength,
         titleMotionSettings.magnetMaxDisplacement,
       );
-      pixel.style.setProperty("--mark-magnet-x", `${offset.x}px`);
-      pixel.style.setProperty("--mark-magnet-y", `${offset.y}px`);
+      if (offset.x !== record.offsetX || offset.y !== record.offsetY) {
+        record.pixel.style.setProperty("--mark-magnet-x", `${offset.x}px`);
+        record.pixel.style.setProperty("--mark-magnet-y", `${offset.y}px`);
+        record.offsetX = offset.x;
+        record.offsetY = offset.y;
+      }
       const isHighlighted = offset.x !== 0 || offset.y !== 0;
-      const wasHighlighted = highlightedMarkPixelsRef.current.has(pixel);
+      const wasHighlighted = highlightedMarkPixelsRef.current.has(record.pixel);
       if (isHighlighted && !wasHighlighted) {
-        pixel.setAttribute("data-mark-magnet-highlight", "true");
-        highlightedMarkPixelsRef.current.add(pixel);
+        record.pixel.setAttribute("data-mark-magnet-highlight", "true");
+        highlightedMarkPixelsRef.current.add(record.pixel);
       } else if (!isHighlighted && wasHighlighted) {
-        pixel.removeAttribute("data-mark-magnet-highlight");
-        highlightedMarkPixelsRef.current.delete(pixel);
+        record.pixel.removeAttribute("data-mark-magnet-highlight");
+        highlightedMarkPixelsRef.current.delete(record.pixel);
       }
     }
   }
@@ -2193,7 +2200,10 @@ function InkPatternMark({
     if (markPixelCentersRef.current.length === 0) {
       markPixelCentersRef.current = getActiveMarkPixelCenters();
     }
-    markRef.current?.setAttribute("data-mark-magnet-active", "true");
+    if (!magnetActiveRef.current) {
+      magnetActiveRef.current = true;
+      markRef.current?.setAttribute("data-mark-magnet-active", "true");
+    }
     latestPointerRef.current = { x: event.clientX, y: event.clientY };
     if (magnetFrameRef.current === null) {
       magnetFrameRef.current = window.requestAnimationFrame(applyMarkMagnetism);
