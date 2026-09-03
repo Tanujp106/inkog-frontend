@@ -37,7 +37,6 @@ import {
 import {
   buildDirectionTwoMarkPattern,
   directionTwoTitleMotionDefaults,
-  directionTwoMarkMotion,
   directionTwoMarkWords,
   getDirectionTwoFormationDelay,
   getDirectionTwoMagnetOffset,
@@ -258,6 +257,15 @@ const directionTwoTitleHoverDialConfig = {
   maxDisplacement: [directionTwoTitleMotionDefaults.magnetMaxDisplacement, 0, 16, 0.5],
   returnDurationMs: [directionTwoTitleMotionDefaults.magnetSpringMs, 60, 500, 10],
   colorMixPercent: [directionTwoTitleMotionDefaults.hoverHighlightColorMixPercent, 0, 100, 1],
+  brightness: [directionTwoTitleMotionDefaults.hoverHighlightBrightness, 1, 2.5, 0.05],
+  glowRadius: [directionTwoTitleMotionDefaults.hoverHighlightGlowRadius, 0, 32, 1],
+  glowOpacity: [directionTwoTitleMotionDefaults.hoverHighlightGlowOpacity, 0, 100, 1],
+  hoverShimmerDurationMs: [directionTwoTitleMotionDefaults.hoverShimmerDurationMs, 240, 1800, 10],
+  hoverShimmerMaxDelayMs: [directionTwoTitleMotionDefaults.hoverShimmerMaxDelayMs, 0, 240, 4],
+  easingX1: [directionTwoTitleMotionDefaults.hoverEasingX1, 0, 1, 0.01],
+  easingY1: [directionTwoTitleMotionDefaults.hoverEasingY1, 0, 1, 0.01],
+  easingX2: [directionTwoTitleMotionDefaults.hoverEasingX2, 0, 1, 0.01],
+  easingY2: [directionTwoTitleMotionDefaults.hoverEasingY2, 0, 1, 0.01],
 } satisfies DialConfig;
 
 function percent(value: number) {
@@ -511,10 +519,19 @@ export function DirectionTwoShell() {
     shimmerColorMixPercent: titleAnimationSettings.shimmerColorMixPercent,
     shimmerPeakOpacity: titleAnimationSettings.shimmerPeakOpacity,
     hoverHighlightColorMixPercent: titleHoverSettings.colorMixPercent,
+    hoverHighlightBrightness: titleHoverSettings.brightness,
+    hoverHighlightGlowRadius: titleHoverSettings.glowRadius,
+    hoverHighlightGlowOpacity: titleHoverSettings.glowOpacity,
     magnetRadius: titleHoverSettings.radius,
     magnetStrength: titleHoverSettings.strength,
     magnetMaxDisplacement: titleHoverSettings.maxDisplacement,
     magnetSpringMs: titleHoverSettings.returnDurationMs,
+    hoverShimmerDurationMs: titleHoverSettings.hoverShimmerDurationMs,
+    hoverShimmerMaxDelayMs: titleHoverSettings.hoverShimmerMaxDelayMs,
+    hoverEasingX1: titleHoverSettings.easingX1,
+    hoverEasingY1: titleHoverSettings.easingY1,
+    hoverEasingX2: titleHoverSettings.easingX2,
+    hoverEasingY2: titleHoverSettings.easingY2,
   };
   const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
@@ -2346,7 +2363,12 @@ function InkPatternMark({
     "--direction-two-title-shimmer-peak-opacity": titleMotionSettings.shimmerPeakOpacity,
     "--direction-two-title-hover-highlight-color-mix": percent(titleMotionSettings.hoverHighlightColorMixPercent),
     "--direction-two-title-hover-highlight-foreground-mix": percent(100 - titleMotionSettings.hoverHighlightColorMixPercent),
-    "--direction-two-title-hover-shimmer-duration": `${directionTwoMarkMotion.highlightHoverShimmerMs}ms`,
+    "--direction-two-title-hover-highlight-brightness": titleMotionSettings.hoverHighlightBrightness,
+    "--direction-two-title-hover-highlight-glow-radius": `${titleMotionSettings.hoverHighlightGlowRadius}px`,
+    "--direction-two-title-hover-highlight-glow-opacity": percent(titleMotionSettings.hoverHighlightGlowOpacity),
+    "--direction-two-title-hover-highlight-duration": `${titleMotionSettings.hoverShimmerDurationMs}ms`,
+    "--direction-two-title-hover-highlight-delay": `${titleMotionSettings.hoverShimmerMaxDelayMs}ms`,
+    "--direction-two-title-hover-easing": `cubic-bezier(${titleMotionSettings.hoverEasingX1}, ${titleMotionSettings.hoverEasingY1}, ${titleMotionSettings.hoverEasingX2}, ${titleMotionSettings.hoverEasingY2})`,
     "--direction-two-title-magnet-return-duration": `${titleMotionSettings.magnetSpringMs}ms`,
   } as CSSProperties;
 
@@ -2459,9 +2481,6 @@ function PixelPatternGrid({
                 {
                   "--mark-formation-delay": `${formationDelay}ms`,
                   "--mark-shimmer-delay": `${shimmerDelay}ms`,
-                  "--mark-hover-delay": `${Math.round(
-                    (shimmerColumn / Math.max(1, shimmerColumnCount - 1)) * directionTwoMarkMotion.highlightHoverMaxDelayMs,
-                  )}ms`,
                 } as CSSProperties
               }
             />
@@ -2524,7 +2543,7 @@ function DirectionTwoIntroRow({
 
 function PixelIcon({
   pattern,
-  shimmerDelayMaxMs = directionTwoMarkMotion.highlightHoverMaxDelayMs,
+  shimmerDelayMaxMs = defaultDirectionTwoShimmerSettings.delayMaxMs,
   size = "desktop",
 }: {
   pattern: string[];
