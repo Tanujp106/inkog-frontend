@@ -57,7 +57,7 @@ import { useSystemSound } from "@/lib/system-sound-provider";
 const API = getInkogApiBaseUrl();
 const roomIdPattern = /([a-z0-9]{6})$/i;
 const themeStorageKey = "inkog-theme";
-type DirectionTwoTheme = (typeof directionTwoThemes)[number];
+type DirectionTwoTheme = NonNullable<ReturnType<typeof resolveDirectionTwoThemeChoice>>;
 type DirectionTwoTitlePhase = "forming" | "shimmering" | "interactive";
 type RouteActivity = "create" | "join";
 type MarkPixelRecord = {
@@ -172,6 +172,14 @@ const themePreviewColorById: Record<DirectionTwoTheme["id"], string> = {
   blue: "#7cc7ff",
   green: "#2f7d50",
   purple: "#c792ff",
+  rose: "#ff7f9f",
+  amber: "#f3c969",
+  cyan: "#61dde6",
+  teal: "#65d6b3",
+  red: "#ff6b6b",
+  pink: "#f08ad4",
+  indigo: "#9aa7ff",
+  lime: "#b7e36b",
 };
 const slashMenuImmediateCommands = new Set(["/clear"]);
 
@@ -536,7 +544,7 @@ export function DirectionTwoShell() {
   const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
   const guidedCreateQuestion = isMobileViewport && flow?.type === "create" ? guidedCreateQuestionForStep(flow.step) : null;
-  const hasPromptMenu = isSlashMenuOpen || Boolean(guidedCreateQuestion);
+  const hasPromptMenu = isSlashMenuOpen;
   const isLandingForegroundHidden = routeHandoffState.phase === "transitioning";
   const routeStatus = routeActivity ? getRouteStatusPresentation(routeActivity) : null;
   const headlineText = useDirectionTwoScrambleText(introHeadline, {
@@ -1748,13 +1756,23 @@ export function DirectionTwoShell() {
           className="direction-two-floating-composer"
           style={{ ...composerStyle, ...getLandingPartStyle("composer"), ...composerMotionStyle }}
         >
+          {guidedCreateQuestion && (
+            <p aria-live="polite" className="sr-only" role="status">
+              {guidedCreateQuestion}
+            </p>
+          )}
             <div
-              className={`direction-two-terminal-frame ${composerMotionActive ? "direction-two-composer-entry " : ""}${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col gap-0 pl-[12px] pr-[12px] text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
+              className={composerMotionActive ? "direction-two-composer-entry" : undefined}
+              style={{
+                opacity: composerMotionActive || prefersReducedMotion ? 1 : 0,
+              }}
+            >
+            <div
+              className={`direction-two-terminal-frame ${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col gap-0 pl-[12px] pr-[12px] text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
               style={{
                 background: "var(--color-panel)",
                 border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--background) 76%)",
                 borderRadius: 0,
-                opacity: composerMotionActive || prefersReducedMotion ? 1 : 0,
                 padding: "var(--route-composer-frame-padding)",
                 paddingLeft: "12px",
                 paddingRight: "12px",
@@ -1820,20 +1838,6 @@ export function DirectionTwoShell() {
                     );
                   })}
                 </div>
-                {guidedCreateQuestion && (
-                  <div
-                    aria-label={guidedCreateQuestion}
-                    className="direction-two-guided-question-pill mb-2 flex min-h-[52px] w-full min-w-0 items-center gap-3 rounded-[6px] border border-[color-mix(in_srgb,var(--color-signal)_24%,var(--background)_76%)] bg-transparent px-3 py-2 font-mono text-left sm:hidden"
-                    role="status"
-                  >
-                    <span
-                      className="direction-two-guided-question-in min-w-0 text-[12px] leading-[18px] text-[var(--foreground)]"
-                      key={guidedCreateQuestion}
-                    >
-                      {guidedCreateQuestion}
-                    </span>
-                  </div>
-                )}
                 <div
                   aria-label="Slash command suggestions"
                   className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 pb-2 text-[14px] leading-[24px] direction-two-desktop-slash-menu hidden sm:flex"
@@ -2006,7 +2010,7 @@ export function DirectionTwoShell() {
                         {styleGhostChoices.map(choice => {
                           const color =
                             choice.id === "surprise"
-                              ? `conic-gradient(from 45deg, ${themePreviewColorById.orange}, ${themePreviewColorById.blue}, ${themePreviewColorById.green}, ${themePreviewColorById.purple}, ${themePreviewColorById.orange})`
+                              ? `conic-gradient(from 45deg, ${themePreviewColorById.orange}, ${themePreviewColorById.blue}, ${themePreviewColorById.green}, ${themePreviewColorById.purple}, ${themePreviewColorById.rose}, ${themePreviewColorById.amber}, ${themePreviewColorById.cyan}, ${themePreviewColorById.teal}, ${themePreviewColorById.red}, ${themePreviewColorById.pink}, ${themePreviewColorById.indigo}, ${themePreviewColorById.lime}, ${themePreviewColorById.orange})`
                               : themePreviewColorById[choice.id];
 
                           return (
@@ -2100,6 +2104,7 @@ export function DirectionTwoShell() {
                 </button>
               )}
               </div>
+            </div>
             </div>
         </div>
       </section>

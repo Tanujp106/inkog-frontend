@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
+import { ExpiredRoomPixelBubble } from "@/components/expired-room-pixel-bubble";
 import {
   buildRoomGateTranscriptLines,
   buildRoomPeerColorMap,
@@ -43,6 +44,8 @@ import { parseRoomCommand } from "@/lib/room-terminal.mjs";
 import type { RoomCommand } from "@/lib/room-terminal-types";
 import { getInkogApiBaseUrl, getInkogSocketBaseUrl } from "@/lib/api-config.mjs";
 import { askInkogHelp } from "@/lib/inkog-help-api";
+import { copyTextToClipboard } from "@/lib/copy-to-clipboard.mjs";
+import { isExpiredRoomPreview } from "@/lib/room-preview.mjs";
 import {
   formatSystemSoundStatus,
   parseSystemSoundCommand,
@@ -487,6 +490,11 @@ export default function RoomPage() {
     let cancelled = false;
 
     const run = async () => {
+      if (isExpiredRoomPreview({ nodeEnv: process.env.NODE_ENV, search: window.location.search })) {
+        setStage("expired");
+        return;
+      }
+
       setPasswordError("");
       setPasswordGateUnlocked(false);
 
@@ -620,9 +628,9 @@ export default function RoomPage() {
 
   const copyShareLink = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      await copyTextToClipboard(window.location.href);
       sound.play("success");
-      setComposerStatusMessage("share link copied", "accent");
+      setComposerStatusMessage("Room link copied", "accent");
     } catch {
       sound.play("error");
       setComposerStatusMessage("could not copy share link", "error");
@@ -795,6 +803,12 @@ export default function RoomPage() {
   };
 
   const handlePasswordCommand = () => {
+    if (!hasPassword) {
+      sound.play("error");
+      setComposerStatusMessage("this room has no password", "muted");
+      return;
+    }
+
     const result = resolveRoomPasswordCommand({
       isCreator,
       password: getStoredRoomPassword(roomId),
@@ -812,6 +826,14 @@ export default function RoomPage() {
       password: result.password ?? "",
       hint: result.hint ?? "type c to copy",
     });
+  };
+
+  const startHelpPrompt = () => {
+    setPendingCommand(null);
+    setComposerValue("/help ");
+    setComposerStatusMessage("ask anything about inkog", "muted");
+    sound.play("press");
+    focusComposer();
   };
 
   const runSlashSuggestion = (command: string) => {
@@ -842,6 +864,11 @@ export default function RoomPage() {
 
     if (command === "/password") {
       handlePasswordCommand();
+      return;
+    }
+
+    if (command === "/help") {
+      startHelpPrompt();
       return;
     }
 
@@ -991,8 +1018,7 @@ export default function RoomPage() {
         closeRoomWithConfirm();
         return;
       case "help":
-        printHelp();
-        sound.play("notify");
+        startHelpPrompt();
         return;
       case "help-question":
         void askProjectHelp(command.question);
@@ -1022,7 +1048,11 @@ export default function RoomPage() {
     composerStatus: isRoomBooting || isPasswordGate ? null : composerStatus,
     pendingCommand: isRoomBooting || isPasswordGate ? null : pendingCommand,
   });
-  const slashSuggestions = isRoomBooting || isPasswordGate ? [] : getRoomSlashCommandSuggestions({ isCreator, query: composerValue });
+  const slashSuggestions = isRoomBooting || isPasswordGate ? [] : getRoomSlashCommandSuggestions({
+    hasPassword,
+    isCreator,
+    query: composerValue,
+  });
   const showSlashSuggestions = slashSuggestions.length > 0 && !pendingCommand;
   const showComposerHint = showIdleCursor && !showSlashSuggestions && composerChrome.statusMode === "hidden";
   const gateTranscriptLines = isRoomBooting
@@ -1050,9 +1080,10 @@ export default function RoomPage() {
     return (
       <TerminalState
         action="back"
-        copy="room expired. messages are no longer available."
+        copy="messages are no longer available."
         onAction={() => router.push("/")}
-        title="room expired"
+        showPixelBubble
+        title="Room Expired!"
       />
     );
   }
@@ -1406,11 +1437,13 @@ function TerminalState({
   action,
   copy,
   onAction,
+  showPixelBubble = false,
   title,
 }: {
   action?: string;
   copy: string;
   onAction?: () => void;
+  showPixelBubble?: boolean;
   title: string;
 }) {
   const sound = useSystemSound();
@@ -1418,6 +1451,7 @@ function TerminalState({
   return (
     <main style={styles.stateShell}>
       <section style={styles.statePanel}>
+        {showPixelBubble ? <ExpiredRoomPixelBubble /> : null}
         <h1 style={styles.stateTitle}>{title}</h1>
         <p style={styles.mutedLine}>{copy}</p>
         {action && (
@@ -1573,43 +1607,20 @@ function RoomTtlMeter({
 }: {
   meter: ReturnType<typeof getRoomTtlMeter>;
 }) {
-  const [previewOpen, setPreviewOpen] = useState(false);
   const meterColor = meter.warning ? "var(--red)" : "var(--accent)";
 
   return (
     <span
       aria-label={`room expires in ${meter.time}`}
-      onBlur={() => setPreviewOpen(false)}
-      onFocus={() => setPreviewOpen(true)}
-      onMouseEnter={() => setPreviewOpen(true)}
-      onMouseLeave={() => setPreviewOpen(false)}
-      onPointerDown={() => setPreviewOpen(open => !open)}
       style={{
         ...styles.ttlMeter,
         color: meter.warning ? "var(--red)" : "var(--text-muted)",
       }}
-      tabIndex={0}
     >
-      <span
-        aria-hidden="true"
-        style={{
-          ...styles.ttlTrack,
-          opacity: previewOpen ? 1 : 0,
-        }}
-      >
-        <span
-          style={{
-            ...styles.ttlFill,
-            background: meterColor,
-            width: `${meter.percent}%`,
-          }}
-        />
-      </span>
       <span
         style={{
           ...styles.ttlTime,
           color: meterColor,
-          opacity: previewOpen ? 0 : 1,
         }}
       >
         {meter.time}
@@ -1800,34 +1811,10 @@ const styles: Record<string, CSSProperties> = {
     position: "relative",
     whiteSpace: "nowrap",
   },
-  ttlTrack: {
-    background: "linear-gradient(90deg, color-mix(in srgb, var(--text-dim) 16%, transparent), color-mix(in srgb, var(--text-dim) 7%, transparent))",
-    border: "1px solid color-mix(in srgb, var(--text-dim) 22%, transparent)",
-    boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--bg) 42%, transparent), inset 0 1px 8px rgba(0, 0, 0, 0.32)",
-    boxSizing: "border-box",
-    display: "inline-flex",
-    height: "9px",
-    overflow: "hidden",
-    position: "absolute",
-    right: 0,
-    top: "50%",
-    transform: "translateY(-50%)",
-    transition: "opacity 140ms ease",
-    width: "56px",
-  },
-  ttlFill: {
-    boxShadow: "0 0 10px color-mix(in srgb, currentColor 26%, transparent)",
-    display: "block",
-    height: "100%",
-    minWidth: "2px",
-    opacity: 0.86,
-    transition: "width 900ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease",
-  },
   ttlTime: {
     fontSize: "13px",
     minWidth: "56px",
     textAlign: "right",
-    transition: "opacity 120ms ease",
   },
   ttlMarker: {
     color: "var(--red)",
@@ -2234,6 +2221,7 @@ const styles: Record<string, CSSProperties> = {
   statePanel: {
     maxWidth: "520px",
     position: "relative",
+    textAlign: "center",
     width: "100%",
     zIndex: 1,
   },

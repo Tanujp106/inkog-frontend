@@ -1,7 +1,7 @@
 export type DirectionTwoTheme = {
-  id: "orange" | "blue" | "green" | "purple";
+  id: "orange" | "blue" | "green" | "purple" | "rose" | "amber" | "cyan" | "teal" | "red" | "pink" | "indigo" | "lime";
   label: string;
-  selection: "1" | "2" | "3" | "4";
+  selection: string;
 };
 export type DirectionTwoStyleGhostChoice =
   | DirectionTwoTheme

@@ -6,6 +6,8 @@ import { PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useS
 import { AmbientShaderBackground } from "@/components/ambient-shader-background";
 import {
   clientXToBreakoutX,
+  getBreakoutEnergyLevel,
+  getPaddleTierLabel,
   createInitialBreakoutState,
   launchBreakout,
   movePaddle,
@@ -23,7 +25,10 @@ import {
   stepImpactFeedback,
   triggerImpactFeedback,
 } from "@/lib/not-found-feedback.mjs";
-import { getBreakoutIdleBallOffset } from "@/lib/not-found-breakout-render.mjs";
+import {
+  getBreakoutColorStage,
+  getBreakoutIdleBallOffset,
+} from "@/lib/not-found-breakout-render.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 
 const soundByEvent = {
@@ -33,6 +38,8 @@ const soundByEvent = {
   brickA: "breakoutBrickA",
   brickB: "breakoutBrickB",
   brickC: "breakoutBrickC",
+  cluster: "breakoutBrickC",
+  multiBall: "breakoutBrickC",
   miss: "breakoutMiss",
   clear: "breakoutClear",
 } as const;
@@ -69,7 +76,7 @@ export function NotFoundBreakout() {
   const [hud, setHud] = useState(() => pickHud(gameRef.current));
   const { play } = useSystemSound();
 
-  const renderCurrentGame = useCallback((idleBallOffset = 0) => {
+  const renderCurrentGame = useCallback((idleBallOffset = 0, timestamp = window.performance.now()) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -80,6 +87,7 @@ export function NotFoundBreakout() {
       prefersReducedMotionRef.current,
       feedbackRef.current.particles,
       idleBallOffset,
+      timestamp,
     );
   }, []);
 
@@ -138,14 +146,22 @@ export function NotFoundBreakout() {
       gameRef.current = nextState;
       setHud(previous => {
         const next = pickHud(nextState);
-        return previous.mode === next.mode && previous.lives === next.lives ? previous : next;
+        return previous.mode === next.mode
+          && previous.lives === next.lives
+          && previous.score === next.score
+          && previous.combo === next.combo
+          && previous.activeBalls === next.activeBalls
+          && previous.paddleTier === next.paddleTier
+          && previous.energyLevel === next.energyLevel
+          ? previous
+          : next;
       });
     },
     [play],
   );
 
   const advanceGame = useCallback(
-    (seconds: number) => {
+    (seconds: number, timestamp = window.performance.now()) => {
       let nextState = gameRef.current;
 
       if (nextState.mode === "running") {
@@ -174,7 +190,7 @@ export function NotFoundBreakout() {
       }
 
       advanceImpactFeedback(seconds);
-      renderCurrentGame();
+      renderCurrentGame(0, timestamp);
     },
     [advanceImpactFeedback, renderCurrentGame, setGame],
   );
@@ -477,7 +493,7 @@ export function NotFoundBreakout() {
           ref={canvasRef}
           aria-describedby="not-found-breakout-status not-found-breakout-controls"
           aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight R Enter Space"
-          aria-label={`Breakout game with a destructible pixel 404, a ball, a paddle, and ${hud.lives} lives remaining`}
+          aria-label={`Single-player Breakout game with a destructible pixel 404, ${hud.activeBalls} active balls, a ${getPaddleTierLabel(hud.paddleTier)} paddle, score ${hud.score}, and ${hud.lives} lives remaining`}
           className="not-found-breakout-canvas"
           onPointerCancel={handlePointerUp}
           onPointerDown={handlePointerDown}
@@ -486,6 +502,12 @@ export function NotFoundBreakout() {
           role="application"
           tabIndex={0}
         />
+
+        <div className="not-found-breakout-stats" id="not-found-breakout-stats" aria-label="single-player game stats">
+          <span>score {hud.score}</span>
+          <span>combo {hud.combo > 0 ? `x${hud.combo}` : "—"}</span>
+          <span>balls {hud.activeBalls}</span>
+        </div>
 
         <p
           className={hud.mode === "cleared" ? "sr-only" : "not-found-breakout-controls"}
@@ -525,7 +547,19 @@ export function NotFoundBreakout() {
 }
 
 function pickHud(state: BreakoutState) {
-  return { mode: state.mode as BreakoutMode, lives: state.lives };
+  const balls = Array.isArray(state.balls) && state.balls.length > 0
+    ? state.balls
+    : [state.ball];
+
+  return {
+    mode: state.mode as BreakoutMode,
+    lives: state.lives,
+    score: state.score ?? 0,
+    combo: state.combo ?? 0,
+    activeBalls: balls.filter(ball => ball.isActive).length || (state.mode === "cleared" ? 0 : 1),
+    paddleTier: state.paddleTier ?? 1,
+    energyLevel: getBreakoutEnergyLevel(state),
+  };
 }
 
 function getStatusLabel(mode: BreakoutMode) {
@@ -549,6 +583,7 @@ function drawGame(
   isStaticConfetti: boolean,
   impactParticles: BreakoutImpactParticle[],
   idleBallOffset = 0,
+  timestamp = 0,
 ) {
   const context = canvas.getContext("2d");
   if (!context) return;
@@ -560,8 +595,21 @@ function drawGame(
   const text = theme.getPropertyValue("--color-text").trim() || "#e8e8f0";
   const muted = theme.getPropertyValue("--color-dim").trim() || "#8f8f9e";
   const accent = theme.getPropertyValue("--color-signal").trim() || "#2f7d50";
+  const energyLevel = getBreakoutEnergyLevel(state);
+  const colors = getBreakoutColorStage(energyLevel, accent);
+  const pulse = !isStaticConfetti && state.mode === "running" && energyLevel > 0
+    ? 0.5 + Math.sin(timestamp * 0.006) * 0.5
+    : 0;
 
   context.clearRect(0, 0, state.width, state.height);
+
+  if (energyLevel > 0) {
+    context.save();
+    context.fillStyle = colors.glow;
+    context.globalAlpha = 0.008 + pulse * 0.012;
+    context.fillRect(0, 0, state.width, state.height);
+    context.restore();
+  }
 
   context.save();
   context.fillStyle = accent;
@@ -574,9 +622,9 @@ function drawGame(
   context.restore();
 
   context.save();
-  context.fillStyle = accent;
+  context.fillStyle = colors.brick;
   context.shadowBlur = 10;
-  context.shadowColor = accent;
+  context.shadowColor = colors.glow;
   for (const brick of state.bricks) {
     if (!brick.isActive) continue;
     context.globalAlpha = 0.72 + brick.row * 0.02;
@@ -585,30 +633,64 @@ function drawGame(
   context.restore();
 
   if (state.mode !== "cleared") {
-    context.fillStyle = text;
+    context.save();
+    context.fillStyle = energyLevel > 0 ? colors.paddle : text;
+    context.shadowBlur = energyLevel > 0 && !isStaticConfetti ? 5 + pulse * 5 : 0;
+    context.shadowColor = colors.glow;
     context.fillRect(
       state.paddle.x - state.paddle.width / 2,
       state.paddle.y,
       state.paddle.width,
       state.paddle.height,
     );
-
-    context.save();
-    context.fillStyle = accent;
-    context.shadowBlur = 12;
-    context.shadowColor = accent;
-    context.beginPath();
-    context.arc(state.ball.x, state.ball.y + idleBallOffset, state.ball.radius, 0, Math.PI * 2);
-    context.fill();
     context.restore();
+
+    const balls = Array.isArray(state.balls) && state.balls.length > 0
+      ? state.balls
+      : [state.ball];
+
+    for (const [index, ball] of balls.entries()) {
+      if (!ball.isActive && state.mode === "running") continue;
+
+      const y = ball.y + (index === 0 ? idleBallOffset : 0);
+      const speed = Math.hypot(ball.vx, ball.vy);
+      const trailLength = !isStaticConfetti && ball.isActive && speed > 0
+        ? Math.min(22, speed * 0.045)
+        : 0;
+
+      if (trailLength > 0) {
+        context.save();
+        context.strokeStyle = colors.trail;
+        context.globalAlpha = 0.22 + pulse * 0.12;
+        context.lineWidth = Math.max(1, ball.radius * 0.9);
+        context.lineCap = "round";
+        context.beginPath();
+        context.moveTo(
+          ball.x - (ball.vx / speed) * trailLength,
+          y - (ball.vy / speed) * trailLength,
+        );
+        context.lineTo(ball.x, y);
+        context.stroke();
+        context.restore();
+      }
+
+      context.save();
+      context.fillStyle = colors.ball;
+      context.shadowBlur = 8 + energyLevel * 2 + pulse * 4;
+      context.shadowColor = colors.glow;
+      context.beginPath();
+      context.arc(ball.x, y, ball.radius, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    }
   }
 
   if (state.mode === "cleared") {
-    const colors = [accent, text, muted, border];
+    const confettiColors = [colors.glow, colors.ball, muted, border];
 
     for (const particle of confetti) {
       context.save();
-      context.fillStyle = colors[particle.colorIndex] ?? accent;
+      context.fillStyle = confettiColors[particle.colorIndex] ?? accent;
       context.globalAlpha = isStaticConfetti ? 0.72 : Math.min(1, particle.life / 0.6);
       context.translate(particle.x, particle.y);
       context.rotate((particle.rotation * Math.PI) / 180);
@@ -619,7 +701,7 @@ function drawGame(
 
   for (const particle of impactParticles) {
     context.save();
-    context.fillStyle = accent;
+    context.fillStyle = colors.ball;
     context.globalAlpha = Math.min(0.9, particle.life / 0.22);
     context.beginPath();
     context.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
@@ -635,6 +717,12 @@ function serializeGameState(state: BreakoutState) {
     lives: state.lives,
     paddle: state.paddle,
     ball: state.ball,
+    balls: state.balls,
+    score: state.score,
+    combo: state.combo,
+    activeBalls: state.balls?.filter(ball => ball.isActive).length ?? (state.ball.isActive ? 1 : 0),
+    paddleTier: state.paddleTier,
+    energyLevel: getBreakoutEnergyLevel(state),
     bricks: {
       active: state.bricks.filter(brick => brick.isActive).length,
       total: state.bricks.length,
