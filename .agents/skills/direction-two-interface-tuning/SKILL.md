@@ -12,10 +12,13 @@ If the playground is open, use the DialKit panel on `/playground` first. It is t
 ## What to touch first
 
 1. `lib/direction-two-intro.mjs`
-2. `components/direction-two-shell.tsx`
-3. `app/globals.css`
+2. `lib/direction-two-mark-canvas.mjs` (INKOG title canvas: formation, shimmer, magnet, highlight)
+3. `lib/direction-two-ambient-canvas.mjs` (ambient pixel field canvas)
+4. `components/direction-two-shell.tsx`
+5. `components/direction-two-ambient-background.tsx`
+6. `app/globals.css`
 
-Keep the effect in square pixels, not circles. Preserve the directional feel by biasing motion and opacity along a diagonal.
+The title mark and ambient pixel field render on canvas for performance. Prefer shared canvas helpers over reintroducing per-pixel DOM nodes. Keep the effect in square pixels, not circles. Preserve the directional feel by biasing motion and opacity along a diagonal.
 
 ## Tuning workflow
 

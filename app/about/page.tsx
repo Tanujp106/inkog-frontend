@@ -43,7 +43,7 @@ export const metadata: Metadata = {
 
 export default function AboutPage() {
   return (
-    <main>
+    <main className="about-page">
       <article>
         <h1>Private, anonymous chat for temporary conversations</h1>
         <p>

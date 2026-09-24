@@ -436,6 +436,36 @@ body::before {
   isolation: isolate;
   position: relative;
 }
+
+.direction-two-composer-message {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  .direction-two-composer-message {
+    display: grid;
+    grid-template-rows: 0fr;
+    margin-bottom: 0;
+    opacity: 0;
+    transition: grid-template-rows 220ms cubic-bezier(0.23, 1, 0.32, 1), margin-bottom 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms ease;
+  }
+
+  .direction-two-composer-message[data-visible="true"] {
+    grid-template-rows: 1fr;
+    margin-bottom: 8px;
+    opacity: 1;
+  }
+
+  .direction-two-composer-message-inner {
+    min-height: 0;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+
+  .direction-two-composer-message p {
+    margin: 0;
+  }
+}
 .direction-two-composer-entry {
   animation: direction-two-composer-enter var(--direction-two-composer-entry-duration, 260ms) var(--direction-two-composer-entry-easing, cubic-bezier(0.22, 1, 0.36, 1)) both;
   will-change: transform, opacity;
@@ -455,68 +485,16 @@ body::before {
   animation: direction-two-composer-glow-breathe var(--direction-two-composer-glow-duration, 700ms) var(--direction-two-composer-glow-easing, cubic-bezier(0.22, 1, 0.36, 1)) var(--direction-two-composer-glow-delay, 0ms) 1 both;
 }
 .animate-inkog-phosphor { animation: inkog-phosphor 2.4s ease-in-out infinite; }
-.direction-two-mark-pixel {
-  transform-origin: center;
-  transition:
-    opacity var(--direction-two-shimmer-transition-duration, 260ms) cubic-bezier(0.34, 0.8, 0.26, 1);
+.direction-two-mark {
+  contain: layout style;
 }
-.direction-two-mark-pixel-active {
-  background: var(--foreground);
-  opacity: 1;
-  transition:
-    transform var(--direction-two-title-magnet-return-duration, 180ms) var(--direction-two-title-hover-easing, var(--ease-out-strong)),
-    background-color var(--direction-two-title-hover-highlight-duration, 120ms) var(--direction-two-title-hover-easing, var(--ease-out-strong)) var(--direction-two-title-hover-highlight-delay, 0ms),
-    filter var(--direction-two-title-hover-highlight-duration, 120ms) var(--direction-two-title-hover-easing, var(--ease-out-strong)) var(--direction-two-title-hover-highlight-delay, 0ms),
-    box-shadow var(--direction-two-title-hover-highlight-duration, 120ms) var(--direction-two-title-hover-easing, var(--ease-out-strong)) var(--direction-two-title-hover-highlight-delay, 0ms);
+.direction-two-mark-canvas {
+  display: block;
+  pointer-events: none;
 }
-.direction-two-mark[data-mark-phase="forming"] .direction-two-mark-pixel-active {
-  animation:
-    direction-two-mark-form
-    var(--direction-two-title-formation-duration, 260ms)
-    var(--ease-out-strong)
-    var(--mark-formation-delay, 0ms)
-    both;
-  transform: none;
-}
-.direction-two-mark[data-mark-phase="shimmering"] .direction-two-mark-pixel-active {
-  animation:
-    direction-two-mark-sine-shimmer
-    var(--direction-two-title-shimmer-duration, 760ms)
-    cubic-bezier(0.34, 0.8, 0.26, 1)
-    var(--mark-shimmer-delay, 0ms)
-    1
-    both;
-  transform: none;
-}
-.direction-two-mark[data-mark-phase="interactive"] .direction-two-mark-pixel-active {
-  transform: translate3d(
-    var(--mark-magnet-x, 0px),
-    var(--mark-magnet-y, 0px),
-    0
-  );
-}
-.direction-two-mark[data-mark-phase="interactive"] .direction-two-mark-pixel-active[data-mark-magnet-highlight="true"] {
-  background-color: color-mix(
-    in srgb,
-    var(--foreground) var(--direction-two-title-hover-highlight-foreground-mix, 34%),
-    var(--color-signal) var(--direction-two-title-hover-highlight-color-mix, 66%)
-  );
-  filter: brightness(var(--direction-two-title-hover-highlight-brightness, 1.35));
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.18),
-    0 0 var(--direction-two-title-hover-highlight-glow-radius, 10px)
-      color-mix(in srgb, var(--color-signal) var(--direction-two-title-hover-highlight-glow-opacity, 42%), transparent);
-}
-.direction-two-mark[data-mark-phase="interactive"][data-mark-magnet-active="true"] .direction-two-mark-pixel-active {
-  transition:
-    background-color var(--direction-two-title-hover-highlight-duration, 120ms) var(--direction-two-title-hover-easing, var(--ease-out-strong)) var(--direction-two-title-hover-highlight-delay, 0ms),
-    filter var(--direction-two-title-hover-highlight-duration, 120ms) var(--direction-two-title-hover-easing, var(--ease-out-strong)) var(--direction-two-title-hover-highlight-delay, 0ms),
-    box-shadow var(--direction-two-title-hover-highlight-duration, 120ms) var(--direction-two-title-hover-easing, var(--ease-out-strong)) var(--direction-two-title-hover-highlight-delay, 0ms);
-}
-.direction-two-mark-pixel-idle {
-  background: var(--color-border);
-  opacity: 0.06;
-  transform: scale(0.26);
+.direction-two-mark[data-mark-phase="interactive"][data-mark-magnet-active="true"] .direction-two-mark-canvas {
+  /* Canvas redraws highlights immediately while tracking. */
+  transition: none;
 }
 .direction-two-intro-copy {
   max-width: 680px;
@@ -568,7 +546,6 @@ body::before {
 .direction-two-highlight-icon {
   transform-origin: center;
   transition: filter var(--direction-two-shimmer-transition-duration, 260ms) cubic-bezier(0.34, 0.8, 0.26, 1);
-  will-change: filter;
 }
 .direction-two-highlight-pixel-active,
 .direction-two-highlight-pixel-idle {
@@ -577,7 +554,6 @@ body::before {
     transform var(--direction-two-shimmer-transition-duration, 260ms) cubic-bezier(0.34, 0.8, 0.26, 1),
     filter var(--direction-two-shimmer-transition-duration, 260ms) cubic-bezier(0.34, 0.8, 0.26, 1),
     box-shadow var(--direction-two-shimmer-transition-duration, 260ms) cubic-bezier(0.34, 0.8, 0.26, 1);
-  will-change: opacity, transform, filter;
 }
 .direction-two-highlight-pixel-active {
   box-shadow: 0 0 0 rgba(47, 125, 80, 0);
@@ -596,20 +572,22 @@ body::before {
   .direction-two-highlight-icon,
   .direction-two-highlight-pixel-active,
   .direction-two-highlight-pixel-idle,
-  .direction-two-mark-pixel-active,
   .direction-two-input-nudge,
   .direction-two-composer-entry,
-  .direction-two-composer-glow {
+  .direction-two-composer-glow,
+  .direction-two-ambient-pixel,
+  .direction-two-ambient-pixel-core {
     animation: none;
     transition: none;
   }
 
-  .direction-two-mark[data-mark-phase="interactive"] .direction-two-mark-pixel-active {
-    transform: none;
-  }
-
   .direction-two-intro-row:hover .direction-two-highlight-pixel-active {
     animation: none;
+  }
+
+  .direction-two-ambient-pixel-core {
+    opacity: calc(var(--pixel-opacity, 0.24) * 0.5);
+    transform: none;
   }
 }
 .direction-two-ambient-glow {
@@ -619,19 +597,25 @@ body::before {
     radial-gradient(circle at 18% 6%, var(--color-signal-glow) 0%, rgba(0, 0, 0, 0) 38%);
   mix-blend-mode: screen;
 }
+[data-direction-two-ambient-background] {
+  contain: layout style;
+  transform: translateZ(0);
+}
+[data-direction-two-ambient-background][data-ambient-paused] .direction-two-ambient-pixel,
+[data-direction-two-ambient-background][data-ambient-paused] .direction-two-ambient-pixel-core {
+  animation-play-state: paused;
+}
 .direction-two-ambient-pixel {
   opacity: 1;
   animation: direction-two-ambient-pixel-drift var(--pixel-drift-duration, 14s) ease-in-out var(--pixel-drift-delay, 0s) infinite;
   mix-blend-mode: screen;
   transform-origin: 50% 60%;
-  will-change: transform;
 }
 .direction-two-ambient-pixel-core {
   background-color: var(--direction-two-ambient-signal, var(--color-signal));
   opacity: calc(var(--pixel-opacity, 0.24) * 0.5);
   transform-origin: center;
   animation: direction-two-ambient-pixel-presence var(--pixel-field-duration, 10s) ease-in-out var(--pixel-field-delay, 0s) infinite;
-  will-change: transform, opacity;
 }
 .direction-two-input-nudge {
   animation: direction-two-input-stagger 240ms var(--ease-out-strong) both;
@@ -987,7 +971,13 @@ input::placeholder, textarea::placeholder {
   }
 
   .not-found-breakout-clear-actions {
-    gap: 18px;
+    gap: 14px;
+  }
+
+  .not-found-breakout-clear-actions a,
+  .not-found-breakout-clear-actions button {
+    font-size: 11px;
+    line-height: 16px;
   }
 }
 
@@ -1065,4 +1055,80 @@ input::placeholder, textarea::placeholder {
 
 .direction-two-mobile-slash-menu::-webkit-scrollbar {
   display: none;
+}
+
+@media (max-width: 640px) {
+  .room-screen {
+    --room-brand-size: 14px;
+    --room-meta-size: 12px;
+    --room-body-size: 13px;
+    --room-body-line-height: 20px;
+    --room-small-size: 11px;
+    --room-header-padding: 10px 16px;
+    --room-header-gap: 10px;
+    --room-poll-margin: 14px 0 10px;
+    --room-poll-padding: 26px 16px 18px;
+    --room-poll-question-gap: 14px;
+  }
+
+  .room-state-screen {
+    --room-state-padding: 20px;
+    --room-state-title-size: 18px;
+    --room-state-title-line-height: 24px;
+    --room-state-title-gap: 10px;
+    --room-state-body-size: 13px;
+    --room-state-body-line-height: 20px;
+    --room-state-body-gap: 14px;
+  }
+
+  .room-state-screen .btn-ghost {
+    font-size: 12px;
+  }
+
+  .room-state-screen .expired-room-pixel-bubble {
+    height: 150px;
+    margin-bottom: 16px;
+    max-width: 270px;
+  }
+
+  .about-page {
+    padding: 24px 20px 40px;
+  }
+
+  .about-page h1 {
+    font-size: 20px;
+    line-height: 28px;
+  }
+
+  .about-page h2 {
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .about-page h3 {
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .about-page p,
+  .about-page li {
+    font-size: 13px;
+    line-height: 20px;
+    overflow-wrap: anywhere;
+  }
+
+  .room-chat-transcript {
+    --room-chat-gutters: 2rem;
+    --room-chat-font-size: 13px;
+    --room-chat-line-height: 20px;
+    --room-system-font-size: 11px;
+    --room-system-line-height: 17px;
+    --room-system-margin: 1px;
+    --room-system-opacity: 58%;
+  }
+
+  .room-chat-transcript .room-chat-sender {
+    font-size: 12px;
+    white-space: nowrap;
+  }
 }

@@ -14,7 +14,7 @@ export async function askInkogHelp(apiBase: string, question: string): Promise<I
   if (!res.ok) {
     return {
       type: "answer",
-      answer: data?.answer || "I could not reach the inkog help brain right now.",
+      answer: data?.answer || "The inkog help brain is taking a breather. Try again in a moment.",
     };
   }
 
