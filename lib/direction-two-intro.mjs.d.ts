@@ -27,10 +27,19 @@ export declare const directionTwoTitleMotionDefaults: {
   shimmerColorMixPercent: number;
   shimmerPeakOpacity: number;
   hoverHighlightColorMixPercent: number;
+  hoverHighlightBrightness: number;
+  hoverHighlightGlowRadius: number;
+  hoverHighlightGlowOpacity: number;
   magnetRadius: number;
   magnetStrength: number;
   magnetMaxDisplacement: number;
   magnetSpringMs: number;
+  hoverShimmerDurationMs: number;
+  hoverShimmerMaxDelayMs: number;
+  hoverEasingX1: number;
+  hoverEasingY1: number;
+  hoverEasingX2: number;
+  hoverEasingY2: number;
 };
 export declare const directionTwoMarkIcons: Array<{
   id: string;
