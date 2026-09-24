@@ -24,8 +24,21 @@ export function AmbientShaderBackground({
   style,
 }: AmbientShaderBackgroundProps) {
   const [resolvedColors, setResolvedColors] = useState<ResolvedShaderColors | null>(null);
+  const [isDocumentVisible, setIsDocumentVisible] = useState(true);
   const animationFrameRef = useRef<number | null>(null);
   const resolvedColorsRef = useRef<ResolvedShaderColors | null>(null);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const syncVisibility = () => {
+      setIsDocumentVisible(document.visibilityState === "visible");
+    };
+
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => document.removeEventListener("visibilitychange", syncVisibility);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return;
@@ -116,7 +129,7 @@ export function AmbientShaderBackground({
         scale={ambientShaderConfig.scale}
         shape={ambientShaderConfig.shape as GrainGradientProps["shape"]}
         softness={ambientShaderConfig.softness}
-        speed={ambientShaderConfig.speed}
+        speed={isDocumentVisible ? ambientShaderConfig.speed : 0}
         width="100%"
       />
     </div>

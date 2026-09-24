@@ -7,6 +7,7 @@ import { io, type Socket } from "socket.io-client";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
 import { ExpiredRoomPixelBubble } from "@/components/expired-room-pixel-bubble";
+import { getSlashCommandTokenDeletionRange } from "@/lib/slash-command-token.mjs";
 import {
   buildRoomGateTranscriptLines,
   buildRoomPeerColorMap,
@@ -46,6 +47,11 @@ import { getInkogApiBaseUrl, getInkogSocketBaseUrl } from "@/lib/api-config.mjs"
 import { askInkogHelp } from "@/lib/inkog-help-api";
 import { copyTextToClipboard } from "@/lib/copy-to-clipboard.mjs";
 import { isExpiredRoomPreview } from "@/lib/room-preview.mjs";
+import {
+  isValidRoomId,
+  resolveRoomAccessFailureStage,
+  resolveRoomLookupOutcome,
+} from "@/lib/room-lookup.mjs";
 import {
   formatSystemSoundStatus,
   parseSystemSoundCommand,
@@ -145,7 +151,7 @@ export default function RoomPage() {
     state: routeHandoffState,
   } = useRouteHandoff();
 
-  const [stage, setStage] = useState<Stage>("loading");
+  const [stage, setStage] = useState<Stage>(() => (isValidRoomId(roomId) ? "loading" : "expired"));
   const [errorMsg, setErrorMsg] = useState("");
   const [topic, setTopic] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
@@ -325,7 +331,7 @@ export default function RoomPage() {
 
     socket.on("connect_error", () => {
       soundRef.current.play("error");
-      setSocketError("Realtime connection is still trying. Chat will sync when it reconnects.");
+      setSocketError("Chat is reconnecting. Your messages will catch up in a moment.");
       setTimeout(() => setSocketError(""), 3600);
     });
 
@@ -406,14 +412,14 @@ export default function RoomPage() {
     socket.on("error", ({ message }: { message: string }) => {
       if (pendingPollRequestRef.current) {
         pendingPollRequestRef.current = null;
-        setComposerStatusMessage(`could not create poll: ${message}`, "error");
+        setComposerStatusMessage(`That poll didn't go through: ${message}`, "error");
       }
 
-      if (message === "You are already in this room in another tab.") {
+      if (message === "This room is already open in another tab. Pick up where you left off there.") {
         socket.disconnect();
         socketRef.current = null;
         setStage("error");
-        setErrorMsg("This room is already open in another tab. Please use that tab.");
+        setErrorMsg("This room is already open in another tab. Pick up where you left off there.");
         return;
       }
 
@@ -495,34 +501,57 @@ export default function RoomPage() {
         return;
       }
 
+      if (!isValidRoomId(roomId)) {
+        setStage("expired");
+        return;
+      }
+
       setPasswordError("");
       setPasswordGateUnlocked(false);
 
       try {
         const roomRes = await fetch(`${API}/rooms/${roomId}`);
         if (cancelled) return;
-        if (!roomRes.ok) {
-          if (roomRes.status === 404) {
-            setErrorMsg("Room not found.");
-            setStage("error");
-            return;
-          }
-          setErrorMsg("Failed to load room.");
+
+        let roomData: {
+          topic?: string;
+          hasPassword?: boolean;
+          secondsLeft?: number;
+          totalSeconds?: number;
+        } | null = null;
+
+        if (roomRes.ok) {
+          roomData = await roomRes.json();
+          if (cancelled) return;
+        }
+
+        const lookup = resolveRoomLookupOutcome({
+          ok: roomRes.ok,
+          status: roomRes.status,
+          secondsLeft: roomData?.secondsLeft,
+        });
+
+        if (lookup.stage === "expired") {
+          setStage("expired");
+          return;
+        }
+
+        if (lookup.stage === "error") {
+          setErrorMsg(lookup.message || "We couldn't load this room. Try opening it again.");
           setStage("error");
           return;
         }
 
-        const roomData = await roomRes.json();
-        if (cancelled) return;
+        if (!roomData) {
+          setErrorMsg("We couldn't load this room. Try opening it again.");
+          setStage("error");
+          return;
+        }
+
         setTopic(roomData.topic);
         setHasPassword(Boolean(roomData.hasPassword));
         setSecondsLeft(roomData.secondsLeft);
         ttlTotalSecondsRef.current = Math.max(1, roomData.totalSeconds ?? roomData.secondsLeft);
-
-        if (roomData.secondsLeft <= 0) {
-          setStage("expired");
-          return;
-        }
 
         const storedToken = getStoredToken(roomId);
         if (roomData.hasPassword && !storedToken) {
@@ -547,11 +576,12 @@ export default function RoomPage() {
       } catch (err: unknown) {
         if (cancelled) return;
         const e = err as { status?: number; message?: string };
-        if (e.status === 410) {
+        const failureStage = resolveRoomAccessFailureStage(e.status);
+        if (failureStage === "expired") {
           setStage("expired");
           return;
         }
-        setErrorMsg(e.message || "Could not reach server.");
+        setErrorMsg(e.message || "The room server is taking a breather. Try again in a moment.");
         setStage("error");
       }
     };
@@ -572,7 +602,7 @@ export default function RoomPage() {
     setPasswordError("");
     if (!nextPassword) {
       sound.play("error");
-      setPasswordError("Password is required.");
+      setPasswordError("Enter the room password to keep going.");
       return;
     }
 
@@ -582,17 +612,17 @@ export default function RoomPage() {
       await enterJoinedRoom(joinData, { fromPasswordGate: true });
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string };
-      if (e.status === 410) setStage("expired");
+      if (resolveRoomAccessFailureStage(e.status) === "expired") setStage("expired");
       else {
         sound.play("error");
-        setPasswordError(e.message || "Failed to join.");
+        setPasswordError(e.message || "We couldn't get you into the room. Try again.");
       }
     }
   };
 
   const emitPoll = (question: string, options: string[]) => {
     if (!socketRef.current) {
-      appendEvent("error", "socket not connected");
+      appendEvent("error", "You're not connected to the room yet. Try again in a moment.");
       sound.play("error");
       return false;
     }
@@ -605,7 +635,7 @@ export default function RoomPage() {
 
   const sendChatMessage = (message: string) => {
     if (!socketRef.current) {
-      appendEvent("error", "socket not connected");
+      appendEvent("error", "You're not connected to the room yet. Try again in a moment.");
       sound.play("error");
       return;
     }
@@ -633,7 +663,7 @@ export default function RoomPage() {
       setComposerStatusMessage("Room link copied", "accent");
     } catch {
       sound.play("error");
-      setComposerStatusMessage("could not copy share link", "error");
+      setComposerStatusMessage("Couldn't copy the room link just now. Try again?", "error");
     }
   };
 
@@ -660,7 +690,7 @@ export default function RoomPage() {
     } catch {
       sound.play("error");
       setShareCopied(false);
-      setComposerStatusMessage("could not copy share message", "error");
+      setComposerStatusMessage("Couldn't copy the share message just now. Try again?", "error");
     }
   };
 
@@ -673,7 +703,7 @@ export default function RoomPage() {
       setComposerStatusMessage("password copied", "accent");
     } catch {
       sound.play("error");
-      setComposerStatusMessage("could not copy password", "error");
+      setComposerStatusMessage("Couldn't copy the password just now. Try again?", "error");
     }
   };
 
@@ -705,7 +735,7 @@ export default function RoomPage() {
       ]);
     } catch {
       sound.play("error");
-      setComposerStatusMessage("I could not reach the inkog help brain right now.", "error");
+      setComposerStatusMessage("The inkog help brain is taking a breather. Try again in a moment.", "error");
     }
   };
 
@@ -714,7 +744,7 @@ export default function RoomPage() {
 
     if (parsed.type === "invalid") {
       sound.play("error");
-      setComposerStatusMessage(parsed.message ?? "usage: /sound on, /sound off, or /sound status", "error");
+      setComposerStatusMessage(parsed.message ?? "Try /sound on, /sound off, or /sound status.", "error");
       return true;
     }
 
@@ -740,7 +770,7 @@ export default function RoomPage() {
 
     if (!result.ok) {
       sound.play("error");
-      setComposerStatusMessage(result.message ?? "choose 1, 2, 3, 4, 5, or a theme name", "error");
+      setComposerStatusMessage(result.message ?? "Pick a theme from 1 to 5, or type a theme name.", "error");
       return false;
     }
 
@@ -748,7 +778,7 @@ export default function RoomPage() {
     const transcriptMessage = result.transcriptMessage;
     if (!theme || !transcriptMessage) {
       sound.play("error");
-      setComposerStatusMessage("choose 1, 2, 3, 4, 5, or a theme name", "error");
+      setComposerStatusMessage("Pick a theme from 1 to 5, or type a theme name.", "error");
       return false;
     }
 
@@ -816,7 +846,7 @@ export default function RoomPage() {
 
     if (!result.ok) {
       sound.play("error");
-      setComposerStatusMessage(result.message ?? "could not show room password", "error");
+      setComposerStatusMessage(result.message ?? "Couldn't show the room password just now.", "error");
       return;
     }
 
@@ -880,7 +910,7 @@ export default function RoomPage() {
     if (command === "/close") {
       if (!isCreator) {
         sound.play("error");
-        setComposerStatusMessage("only the creator can close this chat", "error");
+      setComposerStatusMessage("Only the room creator can close the chat.", "error");
         return;
       }
       sound.play("press");
@@ -929,14 +959,14 @@ export default function RoomPage() {
 
         if (result.status === "invalid") {
           sound.play("error");
-          setComposerStatusMessage(result.message ?? "poll input is invalid", "error");
+          setComposerStatusMessage(result.message ?? "That poll answer didn't quite fit. Try again.", "error");
           return;
         }
 
         if (result.status === "pending") {
           if (!("state" in result) || !result.state) {
             sound.play("error");
-            setComposerStatusMessage("poll draft could not continue", "error");
+            setComposerStatusMessage("We lost that poll draft. Start a new one?", "error");
             return;
           }
 
@@ -1012,7 +1042,7 @@ export default function RoomPage() {
       case "close":
         if (!isCreator) {
           sound.play("error");
-          setComposerStatusMessage("only the creator can close this room", "error");
+          setComposerStatusMessage("Only the room creator can close the room.", "error");
           return;
         }
         closeRoomWithConfirm();
@@ -1025,7 +1055,7 @@ export default function RoomPage() {
         return;
       case "unknown":
         sound.play("error");
-        setComposerStatusMessage(`command not found: ${command.command}`, "error");
+        setComposerStatusMessage(`That command's new to me: ${command.command}.`, "error");
         return;
     }
   };
@@ -1080,10 +1110,10 @@ export default function RoomPage() {
     return (
       <TerminalState
         action="back"
-        copy="messages are no longer available."
+        copy="This room has wrapped up, so its messages aren't available anymore."
         onAction={() => router.push("/")}
         showPixelBubble
-        title="Room Expired!"
+        title="This room has wrapped up"
       />
     );
   }
@@ -1094,13 +1124,14 @@ export default function RoomPage() {
         action="back"
         copy={errorMsg}
         onAction={() => router.push("/")}
-        title="room error"
+        title="A little room hiccup"
       />
     );
   }
 
   return (
     <main
+      className="room-screen"
       data-route-handoff-phase={routeHandoffState.phase}
       style={styles.roomShell}
       onClick={() => composerRef.current?.focus()}
@@ -1129,11 +1160,11 @@ export default function RoomPage() {
         </div>
       </header>
 
-      {socketError && <div style={{ ...styles.errorToast, ...getRoomPartStyle(roomId, "transcript") }}>error: {socketError}</div>}
+      {socketError && <div style={{ ...styles.errorToast, ...getRoomPartStyle(roomId, "transcript") }}>heads-up: {socketError}</div>}
 
       <section
         aria-label="Room terminal transcript"
-        className={routeHandoffState.phase === "transitioning" ? "room-route-transcript-enter" : undefined}
+        className={`room-chat-transcript${routeHandoffState.phase === "transitioning" ? " room-route-transcript-enter" : ""}`}
         style={{ ...styles.transcript, ...getRoomPartStyle(roomId, "transcript") }}
       >
         <div style={styles.transcriptInner}>
@@ -1305,6 +1336,38 @@ export default function RoomPage() {
                   return;
                 }
 
+                const slashCommandDeletionDirection = event.key === "Backspace"
+                  ? "backward"
+                  : event.key === "Delete"
+                    ? "forward"
+                    : null;
+
+                if (
+                  !isPasswordGate &&
+                  !pendingCommand &&
+                  !passwordReveal &&
+                  slashCommandDeletionDirection &&
+                  !event.altKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey
+                ) {
+                  const input = event.currentTarget;
+                  const deletionRange = getSlashCommandTokenDeletionRange(
+                    input.value,
+                    input.selectionStart,
+                    input.selectionEnd,
+                    slashCommandDeletionDirection,
+                  );
+
+                  if (deletionRange) {
+                    event.preventDefault();
+                    input.setRangeText("", deletionRange.start, deletionRange.end, "start");
+                    setComposerValue(input.value);
+                    setSlashSuggestionIndex(0);
+                    return;
+                  }
+                }
+
                 if (!showSlashSuggestions) return;
 
                 if (event.key === "ArrowDown") {
@@ -1427,7 +1490,7 @@ function RoomGateTranscript({ lines, passwordError }: { lines: string[]; passwor
         </p>
       ))}
       {passwordError ? (
-        <p style={{ ...styles.transcriptLine, color: "var(--red)" }}>error: {passwordError}</p>
+        <p style={{ ...styles.transcriptLine, color: "var(--red)" }}>heads-up: {passwordError}</p>
       ) : null}
     </div>
   );
@@ -1449,7 +1512,7 @@ function TerminalState({
   const sound = useSystemSound();
 
   return (
-    <main style={styles.stateShell}>
+    <main className="room-state-screen" style={styles.stateShell}>
       <section style={styles.statePanel}>
         {showPixelBubble ? <ExpiredRoomPixelBubble /> : null}
         <h1 style={styles.stateTitle}>{title}</h1>
@@ -1474,7 +1537,7 @@ function TerminalState({
 }
 
 function TerminalEventRow({ event }: { event: TerminalEvent }) {
-  const prefix = event.kind === "input" ? "$" : event.kind === "error" ? "error:" : ">";
+  const prefix = event.kind === "input" ? "$" : event.kind === "error" ? "heads-up:" : ">";
   const color =
     event.kind === "input"
       ? "var(--accent)"
@@ -1526,7 +1589,7 @@ function TerminalMessage({
         color: lineColor,
       }}
     >
-      <span aria-hidden="true">{presentation.prefix} </span>
+      <span aria-hidden="true" className="room-chat-sender">{presentation.prefix} </span>
       {message.content}
     </p>
   );
@@ -1737,14 +1800,14 @@ const styles: Record<string, CSSProperties> = {
   roomHeader: {
     borderBottom: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
     flexShrink: 0,
-    padding: "12px clamp(32px, calc(3vw + 16px), 48px)",
+    padding: "var(--room-header-padding, 12px clamp(32px, calc(3vw + 16px), 48px))",
     position: "relative",
     zIndex: 1,
   },
   roomHeaderInner: {
     alignItems: "center",
     display: "flex",
-    gap: "16px",
+    gap: "var(--room-header-gap, 16px)",
     justifyContent: "space-between",
     margin: "0 auto",
     maxWidth: "1200px",
@@ -1760,7 +1823,7 @@ const styles: Record<string, CSSProperties> = {
   brand: {
     color: "var(--text)",
     fontFamily: ROOM_FONT_FAMILY,
-    fontSize: "15px",
+    fontSize: "var(--room-brand-size, 15px)",
     fontWeight: 700,
   },
   headerDivider: {
@@ -1773,7 +1836,7 @@ const styles: Record<string, CSSProperties> = {
   },
   topic: {
     color: "var(--text-muted)",
-    fontSize: "13px",
+    fontSize: "var(--room-meta-size, 13px)",
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -1796,7 +1859,7 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     color: "var(--text-muted)",
     display: "inline-flex",
-    fontSize: "13px",
+    fontSize: "var(--room-meta-size, 13px)",
     gap: "6px",
     whiteSpace: "nowrap",
   },
@@ -1812,13 +1875,13 @@ const styles: Record<string, CSSProperties> = {
     whiteSpace: "nowrap",
   },
   ttlTime: {
-    fontSize: "13px",
+    fontSize: "var(--room-meta-size, 13px)",
     minWidth: "56px",
     textAlign: "right",
   },
   ttlMarker: {
     color: "var(--red)",
-    fontSize: "13px",
+    fontSize: "var(--room-meta-size, 13px)",
   },
   roster: {
     alignItems: "center",
@@ -1836,10 +1899,10 @@ const styles: Record<string, CSSProperties> = {
   rosterAvatar: {
     alignItems: "center",
     background: "color-mix(in srgb, var(--bg-3) 78%, transparent)",
-    border: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
+    border: "1px solid var(--text-muted)",
     borderRadius: "999px",
     boxSizing: "border-box",
-    color: "var(--text)",
+    color: "var(--text-muted)",
     display: "inline-flex",
     fontSize: "12px",
     gap: "0px",
@@ -1855,7 +1918,7 @@ const styles: Record<string, CSSProperties> = {
   },
   rosterAvatarExpanded: {
     background: "color-mix(in srgb, var(--bg-2) 88%, transparent)",
-    borderColor: "color-mix(in srgb, var(--text-muted) 42%, transparent)",
+    borderColor: "var(--text-muted)",
     gap: "8px",
     maxWidth: "220px",
   },
@@ -1900,12 +1963,12 @@ const styles: Record<string, CSSProperties> = {
   transcriptInner: {
     margin: "0 auto",
     maxWidth: "1200px",
-    width: "min(calc(100% - 5rem), 1200px)",
+    width: "min(calc(100% - var(--room-chat-gutters, 5rem)), 1200px)",
   },
   emptyTranscript: {
     color: "var(--text-dim)",
-    fontSize: "14px",
-    lineHeight: "24px",
+    fontSize: "var(--room-body-size, 14px)",
+    lineHeight: "var(--room-body-line-height, 24px)",
     paddingTop: "8vh",
   },
   emptyLine: {
@@ -1913,14 +1976,14 @@ const styles: Record<string, CSSProperties> = {
   },
   gateTranscript: {
     color: "var(--text-muted)",
-    fontSize: "14px",
-    lineHeight: "24px",
+    fontSize: "var(--room-body-size, 14px)",
+    lineHeight: "var(--room-body-line-height, 24px)",
     paddingTop: "8vh",
   },
   transcriptLine: {
     color: "var(--text)",
-    fontSize: "14px",
-    lineHeight: "24px",
+    fontSize: "var(--room-chat-font-size, 14px)",
+    lineHeight: "var(--room-chat-line-height, 24px)",
     margin: 0,
     overflowWrap: "anywhere",
     whiteSpace: "pre-wrap" as const,
@@ -1959,12 +2022,12 @@ const styles: Record<string, CSSProperties> = {
   },
   systemMessageLine: {
     alignItems: "center",
-    color: "color-mix(in srgb, var(--text-dim) 74%, transparent)",
+    color: "color-mix(in srgb, var(--text-dim) var(--room-system-opacity, 74%), transparent)",
     display: "flex",
-    fontSize: "12px",
+    fontSize: "var(--room-system-font-size, 12px)",
     gap: "10px",
-    lineHeight: "20px",
-    margin: "3px 0",
+    lineHeight: "var(--room-system-line-height, 20px)",
+    margin: "var(--room-system-margin, 3px) 0",
     whiteSpace: "nowrap",
   },
   systemMessageRule: {
@@ -1984,16 +2047,16 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: 0,
     boxSizing: "border-box",
     boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--text) 1%, transparent)",
-    margin: "18px 0 12px",
+    margin: "var(--room-poll-margin, 18px 0 12px)",
     maxWidth: "760px",
-    padding: "30px clamp(22px, 4vw, 36px) 24px",
+    padding: "var(--room-poll-padding, 30px clamp(22px, 4vw, 36px) 24px)",
     position: "relative",
     width: "100%",
   },
   pollTitle: {
     background: "color-mix(in srgb, var(--bg) 92%, transparent)",
     color: "color-mix(in srgb, var(--text-dim) 82%, transparent)",
-    fontSize: "14px",
+    fontSize: "var(--room-body-size, 14px)",
     left: "18px",
     lineHeight: "20px",
     padding: "0 10px",
@@ -2003,9 +2066,9 @@ const styles: Record<string, CSSProperties> = {
   },
   pollQuestion: {
     color: "var(--text)",
-    fontSize: "14px",
-    lineHeight: "24px",
-    margin: "0 0 18px",
+    fontSize: "var(--room-body-size, 14px)",
+    lineHeight: "var(--room-body-line-height, 24px)",
+    margin: "0 0 var(--room-poll-question-gap, 18px)",
     overflowWrap: "anywhere",
   },
   pollOptions: {
@@ -2023,9 +2086,9 @@ const styles: Record<string, CSSProperties> = {
     display: "grid",
     gridTemplateColumns: "18px 38px minmax(0, 1fr) clamp(88px, 18vw, 132px) 30px",
     fontFamily: ROOM_FONT_FAMILY,
-    fontSize: "14px",
+    fontSize: "var(--room-body-size, 14px)",
     gap: "8px",
-    lineHeight: "24px",
+    lineHeight: "var(--room-body-line-height, 24px)",
     minHeight: "34px",
     padding: "0 12px",
     textAlign: "left",
@@ -2065,7 +2128,7 @@ const styles: Record<string, CSSProperties> = {
   },
   pollFooter: {
     color: "var(--text-dim)",
-    fontSize: "12px",
+    fontSize: "var(--room-small-size, 12px)",
     lineHeight: "20px",
     margin: "18px 0 0",
   },
@@ -2184,7 +2247,7 @@ const styles: Record<string, CSSProperties> = {
   },
   composerHint: {
     color: "var(--text-dim)",
-    fontSize: "13px",
+    fontSize: "var(--room-meta-size, 13px)",
     lineHeight: "24px",
     marginLeft: "-3px",
     minWidth: 0,
@@ -2215,7 +2278,7 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "center",
     minHeight: "100dvh",
     overflow: "hidden",
-    padding: "24px",
+    padding: "var(--room-state-padding, 24px)",
     position: "relative",
   },
   statePanel: {
@@ -2239,15 +2302,15 @@ const styles: Record<string, CSSProperties> = {
   stateTitle: {
     color: "var(--text)",
     fontFamily: ROOM_FONT_FAMILY,
-    fontSize: "20px",
-    lineHeight: "28px",
-    margin: "0 0 14px",
+    fontSize: "var(--room-state-title-size, 20px)",
+    lineHeight: "var(--room-state-title-line-height, 28px)",
+    margin: "0 0 var(--room-state-title-gap, 14px)",
   },
   mutedLine: {
     color: "var(--text-muted)",
-    fontSize: "14px",
-    lineHeight: "24px",
-    margin: "0 0 16px",
+    fontSize: "var(--room-state-body-size, 14px)",
+    lineHeight: "var(--room-state-body-line-height, 24px)",
+    margin: "0 0 var(--room-state-body-gap, 16px)",
   },
   errorLine: {
     color: "var(--red)",

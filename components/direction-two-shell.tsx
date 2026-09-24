@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useDialKit, type DialConfig } from "dialkit";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
+import { getSlashCommandTokenDeletionRange } from "@/lib/slash-command-token.mjs";
 import {
   completeDirectionTwoCommand,
   completeDirectionTwoCommandArgument,
@@ -35,14 +36,23 @@ import {
   resolveDirectionTwoThemeChoice,
 } from "@/lib/direction-two-shell.mjs";
 import {
-  buildDirectionTwoMarkPattern,
   directionTwoTitleMotionDefaults,
   directionTwoMarkWords,
-  getDirectionTwoFormationDelay,
-  getDirectionTwoMagnetOffset,
   getDirectionTwoScrambleFrame,
-  getDirectionTwoSineShimmerDelay,
 } from "@/lib/direction-two-intro.mjs";
+import {
+  applyDirectionTwoMarkMagnetism,
+  attachDirectionTwoMarkPixelCenters,
+  buildDirectionTwoMarkLayout,
+  drawDirectionTwoMark,
+  parseCssRgbColor,
+  resetDirectionTwoMarkMagnetism,
+  resolveDirectionTwoMarkDpr,
+} from "@/lib/direction-two-mark-canvas.mjs";
+
+type DirectionTwoMarkLayout = ReturnType<typeof buildDirectionTwoMarkLayout>;
+type DirectionTwoMarkMagnetRecord = ReturnType<typeof attachDirectionTwoMarkPixelCenters>["records"][number];
+type DirectionTwoMarkRgb = { r: number; g: number; b: number };
 import {
   formatSystemSoundStatus,
   parseSystemSoundCommand,
@@ -60,19 +70,6 @@ const themeStorageKey = "inkog-theme";
 type DirectionTwoTheme = NonNullable<ReturnType<typeof resolveDirectionTwoThemeChoice>>;
 type DirectionTwoTitlePhase = "forming" | "shimmering" | "interactive";
 type RouteActivity = "create" | "join";
-type MarkPixelRecord = {
-  pixel: HTMLElement;
-  x: number;
-  y: number;
-  offsetX: number;
-  offsetY: number;
-};
-
-const markMagnetGridCellSize = 64;
-
-function getMarkMagnetGridKey(cellX: number, cellY: number) {
-  return `${cellX}:${cellY}`;
-}
 
 type TerminalLine = {
   id: string;
@@ -452,6 +449,8 @@ export function DirectionTwoShell() {
   const passwordRevealTimerRef = useRef<number | null>(null);
   const passwordFinalShimmerTimerRef = useRef<number | null>(null);
   const passwordSubmissionRef = useRef("");
+  const cancelFlowRef = useRef<() => void>(() => {});
+  const focusInputRef = useRef<() => void>(() => {});
   const [inputValue, setInputValue] = useState("");
   const [lines, setLines] = useState<TerminalLine[]>(initialLines);
   const [flow, setFlow] = useState<SessionFlow | null>(null);
@@ -475,14 +474,20 @@ export function DirectionTwoShell() {
   const [isInputNudging, setIsInputNudging] = useState(false);
   const [composerReserveHeight, setComposerReserveHeight] = useState(0);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [hasViewportSync, setHasViewportSync] = useState(false);
   useEffect(() => {
     const mediaQuery = window.matchMedia(mobileViewportMediaQuery);
-    const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+    const updateViewport = () => {
+      setIsMobileViewport(mediaQuery.matches);
+      setHasViewportSync(true);
+    };
 
     updateViewport();
     mediaQuery.addEventListener("change", updateViewport);
     return () => mediaQuery.removeEventListener("change", updateViewport);
   }, []);
+  const showMobileLanding = !hasViewportSync || isMobileViewport;
+  const showDesktopLanding = !hasViewportSync || !isMobileViewport;
   const composerEntranceSettings = useDialKit(
     "Composer entrance",
     directionTwoComposerEntranceDialConfig,
@@ -544,18 +549,23 @@ export function DirectionTwoShell() {
   const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
   const guidedCreateQuestion = isMobileViewport && flow?.type === "create" ? guidedCreateQuestionForStep(flow.step) : null;
+  const mobileComposerMessage = isMobileViewport ? inputFeedbackMessage ?? guidedCreateQuestion : null;
+  const [lastMobileComposerMessage, setLastMobileComposerMessage] = useState("");
+  useEffect(() => {
+    if (mobileComposerMessage) setLastMobileComposerMessage(mobileComposerMessage);
+  }, [mobileComposerMessage]);
   const hasPromptMenu = isSlashMenuOpen;
   const isLandingForegroundHidden = routeHandoffState.phase === "transitioning";
   const routeStatus = routeActivity ? getRouteStatusPresentation(routeActivity) : null;
   const headlineText = useDirectionTwoScrambleText(introHeadline, {
     durationMs: introScrambleDurationMs,
     startDelayMs: introScrambleDelayMs,
-    disabled: prefersReducedMotion,
+    disabled: prefersReducedMotion || (hasViewportSync && isMobileViewport),
   });
   const mobileHeadlineText = useDirectionTwoScrambleText(mobileIntroHeadline, {
     durationMs: introScrambleDurationMs,
     startDelayMs: introScrambleDelayMs,
-    disabled: prefersReducedMotion,
+    disabled: prefersReducedMotion || (hasViewportSync && !isMobileViewport),
   });
 
   const appendLines = (...nextLines: TerminalLine[]) => {
@@ -571,6 +581,7 @@ export function DirectionTwoShell() {
       input.setSelectionRange(input.value.length, input.value.length);
     });
   };
+  focusInputRef.current = focusInput;
 
   const syncInputMirrorScroll = () => {
     requestAnimationFrame(() => {
@@ -608,24 +619,29 @@ export function DirectionTwoShell() {
 
   const rejectInputToTerminal = (message: string) => {
     setInputValue("");
-    setInputFeedbackMessage(null);
     appendLines(line("error", message));
+    if (isMobileViewport) {
+      nudgeInput(message);
+      return;
+    }
+    setInputFeedbackMessage(null);
     sound.play("error");
     setKeyboardStatus(message);
   };
 
   const cancelFlow = () => {
     sound.play("close");
-    if (flow) appendLines(line("system", "cancelled current prompt"));
+    if (flow) appendLines(line("system", "prompt cleared"));
     setFlow(null);
     setGuidedCreateSegments(null);
     setEditingCreateSegment(null);
     setEditingReturnFlow(null);
     setInputValue("");
     setInputFeedbackMessage(null);
-    setKeyboardStatus("Prompt cancelled.");
+    setKeyboardStatus("Prompt cleared.");
     focusInput();
   };
+  cancelFlowRef.current = cancelFlow;
 
   const clearTerminal = () => {
     sound.play("press");
@@ -719,7 +735,7 @@ export function DirectionTwoShell() {
   }, [prefersReducedMotion]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || isMobileViewport) return;
 
     let frame = 0;
     let remainingPasses = 5;
@@ -745,7 +761,7 @@ export function DirectionTwoShell() {
     frame = window.requestAnimationFrame(keepLatestLineAboveComposer);
 
     return () => window.cancelAnimationFrame(frame);
-  }, [composerReserveHeight, lines.length, prefersReducedMotion]);
+  }, [composerReserveHeight, isMobileViewport, lines.length, prefersReducedMotion]);
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -758,7 +774,7 @@ export function DirectionTwoShell() {
 
       if (event.key === "Escape") {
         event.preventDefault();
-        cancelFlow();
+        cancelFlowRef.current();
         return;
       }
 
@@ -769,12 +785,12 @@ export function DirectionTwoShell() {
       setInputFeedbackMessage(null);
       setHistoryIndex(null);
       setInputValue(current => `${current}${event.key}`);
-      focusInput();
+      focusInputRef.current();
     };
 
     document.addEventListener("keydown", handleDocumentKeyDown);
     return () => document.removeEventListener("keydown", handleDocumentKeyDown);
-  });
+  }, []);
 
   const pushHistory = (value: string) => {
     if (!value.trim()) return;
@@ -800,9 +816,9 @@ export function DirectionTwoShell() {
       sound.play("notify");
       setKeyboardStatus("inkog answered.");
     } catch {
-      appendLines(line("error", "I could not reach the inkog help brain right now."));
+      appendLines(line("error", "The inkog help brain is taking a breather. Try again in a moment."));
       sound.play("error");
-      setKeyboardStatus("Help request failed.");
+      setKeyboardStatus("The help request didn't go through.");
     } finally {
       setHelping(false);
     }
@@ -907,7 +923,7 @@ export function DirectionTwoShell() {
   const answerStylePrompt = (rawAnswer: string, inputText = rawAnswer) => {
     const theme = resolveDirectionTwoThemeChoice(rawAnswer);
     if (!theme) {
-      rejectInputInline(inputText, "Theme choice must be 1 through 5.");
+      rejectInputInline(inputText, "Pick a theme from 1 to 5.");
       return;
     }
 
@@ -918,7 +934,7 @@ export function DirectionTwoShell() {
     const id = cleanRoomId(rawRoomId);
 
     if (!id) {
-      rejectInputInline(command, "Missing room id.");
+      rejectInputInline(command, "Add a room ID to join.");
       return;
     }
 
@@ -930,7 +946,7 @@ export function DirectionTwoShell() {
       const roomRes = await fetch(`${API}/rooms/${id}`);
       const roomData = await roomRes.json().catch(() => ({}));
       if (!roomRes.ok) {
-        rejectInputToTerminal(roomData.message || "Room could not be opened.");
+        rejectInputToTerminal(roomData.message || "That room didn't open. Check the link and try again.");
         setRouteActivity(null);
         return;
       }
@@ -940,7 +956,7 @@ export function DirectionTwoShell() {
       router.push(`/room/${id}`);
     } catch {
       setRouteActivity(null);
-      rejectInputToTerminal("Could not reach room server.");
+      rejectInputToTerminal("The room server is taking a breather. Try again in a moment.");
     }
   };
 
@@ -970,7 +986,7 @@ export function DirectionTwoShell() {
 
       if (!res.ok) {
         setRouteActivity(null);
-        rejectInputToTerminal(data.message || "Room creation failed.");
+        rejectInputToTerminal(data.message || "That room didn't come together. Try again in a moment.");
         return;
       }
 
@@ -985,7 +1001,7 @@ export function DirectionTwoShell() {
       router.push(`/room/${data.id}`);
     } catch {
       setRouteActivity(null);
-      rejectInputToTerminal("Could not reach room server.");
+      rejectInputToTerminal("The room server is taking a breather. Try again in a moment.");
     } finally {
       setCreating(false);
       setFlow(null);
@@ -1152,10 +1168,10 @@ export function DirectionTwoShell() {
 
     if (flowState.step === "confirm") {
       if (isNo(answer)) {
-        appendLines(line("input", answer), line("system", "room creation cancelled"));
+        appendLines(line("input", answer), line("system", "room setup cancelled"));
         sound.play("close");
         setFlow(null);
-        setKeyboardStatus("Room creation cancelled.");
+        setKeyboardStatus("Room setup cancelled.");
         return;
       }
 
@@ -1164,7 +1180,7 @@ export function DirectionTwoShell() {
         return;
       }
 
-      rejectInputInline(rawAnswer, "Answer y or n.");
+      rejectInputInline(rawAnswer, "A quick y or n will do.");
     }
   };
 
@@ -1174,7 +1190,7 @@ export function DirectionTwoShell() {
     if (flow.type === "join") {
       const id = cleanRoomId(rawAnswer);
       if (!id) {
-        rejectInputInline(rawAnswer, "Room id cannot be empty.");
+        rejectInputInline(rawAnswer, "Enter a room ID to keep going.");
         return;
       }
 
@@ -1196,7 +1212,7 @@ export function DirectionTwoShell() {
     const parsed = parseSystemSoundCommand(command);
 
     if (parsed.type === "invalid") {
-      rejectInputInline(rawCommand, parsed.message ?? "Use sound on, sound off, or sound status.");
+      rejectInputInline(rawCommand, parsed.message ?? "Try /sound on, /sound off, or /sound status.");
       return;
     }
 
@@ -1250,7 +1266,7 @@ export function DirectionTwoShell() {
     }
 
     if (!command.startsWith("/")) {
-      rejectInputInline(command, `Command not found: ${command}. Try / for commands.`);
+      rejectInputInline(command, `I don't know that command yet: ${command}. Try / for a list of commands.`);
       return;
     }
 
@@ -1274,7 +1290,7 @@ export function DirectionTwoShell() {
       }
 
       if (parsedInlineCommand.usesSlash) {
-        rejectInputInline(command, "Room id cannot be empty.");
+        rejectInputInline(command, "Enter a room ID to keep going.");
         return;
       }
     }
@@ -1301,7 +1317,7 @@ export function DirectionTwoShell() {
       }
 
       if (parsedInlineCommand.usesSlash) {
-        rejectInputInline(command, "Choose 1, 2, 3, 4, or 5.");
+        rejectInputInline(command, "Pick a theme from 1 to 5.");
         return;
       }
     }
@@ -1339,13 +1355,42 @@ export function DirectionTwoShell() {
       return;
     }
 
-    rejectInputInline(command, `Command not found: ${command}.`);
+    rejectInputInline(command, `I don't recognize ${command} yet. Try /help for a few commands.`);
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (creating || passwordRevealIndex !== null) return;
 
     const createEditingStep = !flow ? getDirectionTwoCreateEditingStep(event.currentTarget.value) : null;
+    const slashCommandDeletionDirection = event.key === "Backspace"
+      ? "backward"
+      : event.key === "Delete"
+        ? "forward"
+        : null;
+
+    if (
+      !flow &&
+      slashCommandDeletionDirection &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      const input = event.currentTarget;
+      const deletionRange = getSlashCommandTokenDeletionRange(
+        input.value,
+        input.selectionStart,
+        input.selectionEnd,
+        slashCommandDeletionDirection,
+      );
+
+      if (deletionRange) {
+        event.preventDefault();
+        input.setRangeText("", deletionRange.start, deletionRange.end, "start");
+        handleInputValueChange(input.value);
+        syncInputMirrorScroll();
+        return;
+      }
+    }
 
     if (!flow && createEditingStep === "expiry" && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
       event.preventDefault();
@@ -1355,7 +1400,7 @@ export function DirectionTwoShell() {
       );
 
       if (!nextTimeValue) {
-        nudgeInput("Type a number for total time first.");
+        nudgeInput("Enter a number for the room timer first.");
         return;
       }
 
@@ -1377,7 +1422,7 @@ export function DirectionTwoShell() {
       !/^\d$/.test(event.key)
     ) {
       event.preventDefault();
-      nudgeInput("Total time only accepts numbers.");
+      nudgeInput("Use numbers for the room timer.");
       return;
     }
 
@@ -1606,6 +1651,7 @@ export function DirectionTwoShell() {
         aria-describedby="direction-two-keyboard-shortcuts"
         className="relative z-10 mx-auto flex min-h-[calc(100dvh-2.5rem)] w-full max-w-[1200px] flex-col sm:min-h-[calc(100dvh-5rem)]"
       >
+        {showMobileLanding ? (
         <header
           aria-hidden={isLandingForegroundHidden || undefined}
           className="sm:hidden direction-two-mobile-landing flex flex-col gap-3 pb-2 pt-4"
@@ -1649,7 +1695,9 @@ export function DirectionTwoShell() {
             </div>
           </div>
         </header>
+        ) : null}
 
+        {showDesktopLanding ? (
         <header
           aria-hidden={isLandingForegroundHidden || undefined}
           className="hidden flex-col gap-4 pb-5 pt-5 sm:flex sm:pt-6"
@@ -1691,6 +1739,25 @@ export function DirectionTwoShell() {
             </div>
           </div>
         </header>
+        ) : null}
+
+        {routeStatus && (
+          <div
+            aria-hidden={isLandingForegroundHidden || undefined}
+            className="pt-11 sm:hidden"
+            inert={isLandingForegroundHidden || undefined}
+            style={getLandingPartStyle("terminal")}
+          >
+            <p
+              aria-label={routeStatus.ariaLabel}
+              className="direction-two-route-status break-words text-[13px] leading-[20px]"
+              role="status"
+            >
+              <span aria-hidden="true">&gt; </span>
+              <span data-status-text={routeStatus.text}>{routeStatus.text}</span>
+            </p>
+          </div>
+        )}
 
         <div
           aria-hidden={isLandingForegroundHidden || undefined}
@@ -1756,11 +1823,6 @@ export function DirectionTwoShell() {
           className="direction-two-floating-composer"
           style={{ ...composerStyle, ...getLandingPartStyle("composer"), ...composerMotionStyle }}
         >
-          {guidedCreateQuestion && (
-            <p aria-live="polite" className="sr-only" role="status">
-              {guidedCreateQuestion}
-            </p>
-          )}
             <div
               className={composerMotionActive ? "direction-two-composer-entry" : undefined}
               style={{
@@ -1795,7 +1857,7 @@ export function DirectionTwoShell() {
               >
                 <div
                   aria-label="Slash command suggestions"
-                  className="direction-two-mobile-slash-menu mb-2 flex w-full min-w-0 gap-2 overflow-x-auto pb-2 text-[14px] leading-[18px] sm:hidden"
+                  className="direction-two-mobile-slash-menu mb-2 flex w-full min-w-0 gap-2 overflow-x-auto pb-2 text-[13px] leading-[18px] sm:hidden"
                   role="listbox"
                 >
                   {slashCommandSuggestions.map((item, index) => {
@@ -1886,6 +1948,20 @@ export function DirectionTwoShell() {
                       </button>
                     );
                   })}
+                </div>
+              </div>
+              <div
+                aria-hidden={!mobileComposerMessage}
+                aria-live="polite"
+                className="direction-two-composer-message"
+                data-visible={Boolean(mobileComposerMessage)}
+                id="terminal-mobile-feedback"
+                role="status"
+              >
+                <div className="direction-two-composer-message-inner">
+                  <p className={`px-[4px] text-[13px] leading-[20px] ${inputFeedbackMessage ? "text-[var(--color-dim)]" : "text-[var(--color-signal)]"}`}>
+                    {mobileComposerMessage ?? lastMobileComposerMessage}
+                  </p>
                 </div>
               </div>
               <div className="direction-two-terminal-input-row flex min-w-0 items-center gap-0 pl-[0px]">
@@ -1983,7 +2059,7 @@ export function DirectionTwoShell() {
                 )}
                 {inputFeedbackMessage && (
                   <span
-                    className="pointer-events-none ml-2 shrink-0 whitespace-pre text-[14px] leading-[24px] text-[var(--color-dim)] opacity-80"
+                    className="pointer-events-none ml-2 hidden shrink-0 whitespace-pre text-[14px] leading-[24px] text-[var(--color-dim)] opacity-80 sm:inline"
                     id="terminal-inline-hint"
                   >
                     {inputFeedbackMessage}
@@ -2032,7 +2108,7 @@ export function DirectionTwoShell() {
                 </div>
                 <input
                   ref={inputRef}
-                  aria-describedby={inlineHint ? "terminal-inline-hint" : undefined}
+                  aria-describedby={mobileComposerMessage ? "terminal-mobile-feedback" : inlineHint ? "terminal-inline-hint" : undefined}
                   aria-label={activePrompt}
                   autoCapitalize="off"
                   autoComplete="off"
@@ -2051,7 +2127,7 @@ export function DirectionTwoShell() {
                       /\D/.test(insertedText)
                     ) {
                       event.preventDefault();
-                      nudgeInput(createEditingStep === "expiry" ? "Total time only accepts numbers." : "Member limit only accepts numbers.");
+                      nudgeInput(createEditingStep === "expiry" ? "Use numbers for the room timer." : "Use numbers for the member limit.");
                       return;
                     }
 
@@ -2062,7 +2138,7 @@ export function DirectionTwoShell() {
                       !/^[ynoes]+$/i.test(insertedText)
                     ) {
                       event.preventDefault();
-                      nudgeInput("Answer y or n.");
+                      nudgeInput("A quick y or n will do.");
                     }
                   }}
                   onChange={event => {
@@ -2137,6 +2213,44 @@ function PromptPixelGlyph({ pattern }: { pattern: string[] }) {
   );
 }
 
+function resolveThemeRgb(variableName: string, fallback: DirectionTwoMarkRgb): DirectionTwoMarkRgb {
+  if (typeof document === "undefined") return fallback;
+  const probe = document.createElement("span");
+  probe.style.color = `var(${variableName})`;
+  probe.style.position = "absolute";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  document.body.appendChild(probe);
+  const resolved = parseCssRgbColor(getComputedStyle(probe).color) ?? fallback;
+  probe.remove();
+  return resolved;
+}
+
+function readMarkMetrics(element: HTMLElement) {
+  const probe = document.createElement("div");
+  probe.setAttribute("data-mark-metric-probe", "");
+  probe.style.position = "absolute";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.inset = "0 auto auto 0";
+  element.appendChild(probe);
+
+  const measure = (cssWidth: string, fallback: number) => {
+    probe.style.width = cssWidth;
+    probe.style.height = cssWidth;
+    const size = probe.getBoundingClientRect().width;
+    return Number.isFinite(size) && size > 0 ? size : fallback;
+  };
+
+  const metrics = {
+    cellSize: measure("var(--cell)", 6),
+    gap: measure("var(--gap)", 1),
+    letterGap: measure("var(--letter-gap)", 8),
+  };
+  probe.remove();
+  return metrics;
+}
+
 function InkPatternMark({
   word,
   reducedMotion,
@@ -2149,33 +2263,271 @@ function InkPatternMark({
   titleMotionSettings: typeof directionTwoTitleMotionDefaults;
 }) {
   const markRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const layoutRef = useRef<DirectionTwoMarkLayout | null>(null);
+  const magnetRecordsRef = useRef<DirectionTwoMarkMagnetRecord[]>([]);
+  const magnetGridRef = useRef<Map<string, DirectionTwoMarkMagnetRecord[]>>(new Map());
   const magnetFrameRef = useRef<number | null>(null);
-  const magnetActiveRef = useRef<boolean>(false);
-  const latestPointerRef = useRef<{ x: number; y: number } | null>(null);
-  const markPixelCentersRef = useRef<MarkPixelRecord[]>([]);
-  const markPixelGridRef = useRef<Map<string, MarkPixelRecord[]>>(new Map());
-  const activeMarkPixelRecordsRef = useRef<Set<MarkPixelRecord>>(new Set());
-  const highlightedMarkPixelsRef = useRef<Set<HTMLElement>>(new Set());
+  const drawFrameRef = useRef<number | null>(null);
+  const magnetActiveRef = useRef(false);
+  const latestPointerRef = useRef<{ x: number; y: number; localX: number; localY: number } | null>(null);
+  const returnStartedAtRef = useRef<number | null>(null);
+  const returnOffsetsRef = useRef<Array<{ offsetX: number; offsetY: number; highlighted: boolean }>>([]);
+  const formationStartedAtRef = useRef(0);
+  const shimmerStartedAtRef = useRef(0);
+  const colorsRef = useRef({
+    foreground: { r: 245, g: 245, b: 245 },
+    border: { r: 60, g: 60, b: 60 },
+    signal: { r: 47, g: 125, b: 80 },
+  });
+  const phaseRef = useRef<DirectionTwoTitlePhase>(reducedMotion ? "interactive" : "forming");
+  const titleMotionSettingsRef = useRef(titleMotionSettings);
   const [phase, setPhase] = useState<DirectionTwoTitlePhase>(
     reducedMotion ? "interactive" : "forming",
   );
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const markScaleClass =
     size === "mobile"
       ? "[--cell:clamp(3.8px,1vw,4.3px)] [--gap:1px] [--letter-gap:4px]"
       : "[--cell:clamp(4.4px,0.62vw,7.8px)] [--gap:clamp(1px,0.14vw,2.2px)] [--letter-gap:clamp(5.5px,0.5vw,10px)]";
 
+  titleMotionSettingsRef.current = titleMotionSettings;
+  phaseRef.current = phase;
+
+  const scheduleDraw = () => {
+    if (drawFrameRef.current !== null) return;
+    drawFrameRef.current = window.requestAnimationFrame(drawFrame);
+  };
+
+  function syncColors() {
+    colorsRef.current = {
+      foreground: resolveThemeRgb("--foreground", colorsRef.current.foreground),
+      border: resolveThemeRgb("--color-border", colorsRef.current.border),
+      signal: resolveThemeRgb("--color-signal", colorsRef.current.signal),
+    };
+  }
+
+  function rebuildLayout() {
+    const mark = markRef.current;
+    if (!mark) return;
+
+    const metrics = readMarkMetrics(mark);
+    const padding = titleMotionSettingsRef.current.magnetMaxDisplacement + titleMotionSettingsRef.current.hoverHighlightGlowRadius;
+    const layout = buildDirectionTwoMarkLayout(word, {
+      ...metrics,
+      motionSettings: titleMotionSettingsRef.current,
+    });
+    layoutRef.current = layout;
+    magnetRecordsRef.current = [];
+    magnetGridRef.current.clear();
+    setCanvasSize({
+      width: Math.ceil(layout.width + padding * 2),
+      height: Math.ceil(layout.height + padding * 2),
+    });
+    scheduleDraw();
+  }
+
+  function ensureMagnetIndex() {
+    const mark = markRef.current;
+    const layout = layoutRef.current;
+    if (!mark || !layout || magnetRecordsRef.current.length > 0) return;
+
+    const rect = mark.getBoundingClientRect();
+    const padding = titleMotionSettingsRef.current.magnetMaxDisplacement + titleMotionSettingsRef.current.hoverHighlightGlowRadius;
+    const indexed = attachDirectionTwoMarkPixelCenters(layout, rect.left + padding, rect.top + padding);
+    magnetRecordsRef.current = indexed.records;
+    magnetGridRef.current = indexed.grid;
+  }
+
+  function drawFrame(now: number) {
+    drawFrameRef.current = null;
+    const canvas = canvasRef.current;
+    const layout = layoutRef.current;
+    if (!canvas || !layout) return;
+
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    const settings = titleMotionSettingsRef.current;
+    const padding = settings.magnetMaxDisplacement + settings.hoverHighlightGlowRadius;
+    const dpr = resolveDirectionTwoMarkDpr(window.devicePixelRatio);
+    const cssWidth = layout.width + padding * 2;
+    const cssHeight = layout.height + padding * 2;
+    const pixelWidth = Math.max(1, Math.round(cssWidth * dpr));
+    const pixelHeight = Math.max(1, Math.round(cssHeight * dpr));
+
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.clearRect(0, 0, cssWidth, cssHeight);
+    context.save();
+    context.translate(padding, padding);
+
+    if (returnStartedAtRef.current !== null) {
+      const progress = Math.min(1, (now - returnStartedAtRef.current) / Math.max(1, settings.magnetSpringMs));
+      const eased = 1 - (1 - progress) ** 3;
+      layout.pixels.forEach((pixel, index) => {
+        if (!pixel.active) return;
+        const start = returnOffsetsRef.current[index];
+        if (!start) return;
+        pixel.offsetX = start.offsetX * (1 - eased);
+        pixel.offsetY = start.offsetY * (1 - eased);
+        pixel.highlighted = progress < 1 ? start.highlighted : false;
+      });
+      if (progress >= 1) {
+        returnStartedAtRef.current = null;
+        resetDirectionTwoMarkMagnetism(layout);
+      } else {
+        scheduleDraw();
+      }
+    }
+
+    drawDirectionTwoMark(context, layout, {
+      phase: phaseRef.current,
+      now,
+      formationStartedAt: formationStartedAtRef.current,
+      shimmerStartedAt: shimmerStartedAtRef.current,
+      colors: colorsRef.current,
+      motionSettings: settings,
+    });
+    context.restore();
+
+    if (phaseRef.current === "forming" || phaseRef.current === "shimmering") {
+      scheduleDraw();
+    }
+  }
+
+  function applyMarkMagnetism() {
+    magnetFrameRef.current = null;
+    const pointer = latestPointerRef.current;
+    const layout = layoutRef.current;
+    if (!pointer || !layout || phaseRef.current !== "interactive" || reducedMotion) return;
+
+    ensureMagnetIndex();
+    const changed = applyDirectionTwoMarkMagnetism(
+      magnetRecordsRef.current,
+      magnetGridRef.current,
+      pointer,
+      titleMotionSettingsRef.current,
+    );
+    if (changed || magnetActiveRef.current) scheduleDraw();
+  }
+
+  function resetMarkMagnetism() {
+    latestPointerRef.current = null;
+    magnetActiveRef.current = false;
+    markRef.current?.removeAttribute("data-mark-magnet-active");
+    if (magnetFrameRef.current !== null) {
+      window.cancelAnimationFrame(magnetFrameRef.current);
+      magnetFrameRef.current = null;
+    }
+
+    const layout = layoutRef.current;
+    if (layout) {
+      returnOffsetsRef.current = layout.pixels.map(pixel => ({
+        offsetX: pixel.offsetX,
+        offsetY: pixel.offsetY,
+        highlighted: pixel.highlighted,
+      }));
+      const needsReturn = returnOffsetsRef.current.some(
+        entry => entry.offsetX !== 0 || entry.offsetY !== 0 || entry.highlighted,
+      );
+      returnStartedAtRef.current = needsReturn ? performance.now() : null;
+      if (!needsReturn) resetDirectionTwoMarkMagnetism(layout);
+    }
+
+    magnetRecordsRef.current = [];
+    magnetGridRef.current.clear();
+    scheduleDraw();
+  }
+
+  function handleMarkPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "touch" || phaseRef.current !== "interactive" || reducedMotion) return;
+
+    const mark = markRef.current;
+    if (!mark) return;
+
+    if (!magnetActiveRef.current) {
+      magnetActiveRef.current = true;
+      returnStartedAtRef.current = null;
+      mark.setAttribute("data-mark-magnet-active", "true");
+    }
+
+    const rect = mark.getBoundingClientRect();
+    latestPointerRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      localX: event.clientX - rect.left,
+      localY: event.clientY - rect.top,
+    };
+
+    if (magnetFrameRef.current === null) {
+      magnetFrameRef.current = window.requestAnimationFrame(applyMarkMagnetism);
+    }
+  }
+
+  function handleMarkPointerOut(event: PointerEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    resetMarkMagnetism();
+  }
+
+  useEffect(() => {
+    syncColors();
+    rebuildLayout();
+
+    const mark = markRef.current;
+    if (!mark || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      magnetRecordsRef.current = [];
+      magnetGridRef.current.clear();
+      rebuildLayout();
+    });
+    observer.observe(mark);
+
+    const themeObserver = new MutationObserver(() => {
+      syncColors();
+      scheduleDraw();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributeFilter: ["data-inkog-theme"],
+      attributes: true,
+    });
+
+    return () => {
+      observer.disconnect();
+      themeObserver.disconnect();
+    };
+  }, [word, size, titleMotionSettings.formationSpreadMs, titleMotionSettings.shimmerSpreadMs, titleMotionSettings.shimmerAmplitudeMs, titleMotionSettings.shimmerFrequency, titleMotionSettings.magnetMaxDisplacement, titleMotionSettings.hoverHighlightGlowRadius]);
+
   useEffect(() => {
     if (reducedMotion) {
       setPhase("interactive");
+      phaseRef.current = "interactive";
+      scheduleDraw();
       return;
     }
 
+    const now = performance.now();
+    formationStartedAtRef.current = now;
     setPhase("forming");
+    phaseRef.current = "forming";
+    scheduleDraw();
+
     const formationTimer = window.setTimeout(() => {
+      shimmerStartedAtRef.current = performance.now();
       setPhase("shimmering");
+      phaseRef.current = "shimmering";
+      scheduleDraw();
     }, titleMotionSettings.formationDurationMs + titleMotionSettings.formationSpreadMs);
+
     const interactiveTimer = window.setTimeout(() => {
       setPhase("interactive");
+      phaseRef.current = "interactive";
+      scheduleDraw();
     }, (
       titleMotionSettings.formationDurationMs
       + titleMotionSettings.formationSpreadMs
@@ -2190,6 +2542,7 @@ function InkPatternMark({
     };
   }, [
     reducedMotion,
+    word,
     titleMotionSettings.formationDurationMs,
     titleMotionSettings.formationSpreadMs,
     titleMotionSettings.shimmerDurationMs,
@@ -2207,160 +2560,38 @@ function InkPatternMark({
         window.cancelAnimationFrame(magnetFrameRef.current);
         magnetFrameRef.current = null;
       }
+      if (drawFrameRef.current !== null) {
+        window.cancelAnimationFrame(drawFrameRef.current);
+        drawFrameRef.current = null;
+      }
     };
   }, [phase, reducedMotion]);
 
-  function getActiveMarkPixelCenters() {
-    const records = Array.from(
-      markRef.current?.querySelectorAll<HTMLElement>(".direction-two-mark-pixel-active") ?? [],
-    ).map((pixel) => {
-      const rect = pixel.getBoundingClientRect();
-      return {
-        pixel,
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-        offsetX: 0,
-        offsetY: 0,
-      };
-    });
+  useEffect(() => {
+    if (phase !== "interactive" || reducedMotion) return;
 
-    const grid = new Map<string, MarkPixelRecord[]>();
-    for (const record of records) {
-      const key = getMarkMagnetGridKey(
-        Math.floor(record.x / markMagnetGridCellSize),
-        Math.floor(record.y / markMagnetGridCellSize),
-      );
-      const bucket = grid.get(key);
-      if (bucket) {
-        bucket.push(record);
-      } else {
-        grid.set(key, [record]);
-      }
-    }
-    markPixelGridRef.current = grid;
-    return records;
-  }
+    const invalidateCenters = () => {
+      magnetRecordsRef.current = [];
+      magnetGridRef.current.clear();
+    };
 
-  function getMarkMagnetCandidates(pointerX: number, pointerY: number, radius: number) {
-    const minCellX = Math.floor((pointerX - radius) / markMagnetGridCellSize);
-    const maxCellX = Math.floor((pointerX + radius) / markMagnetGridCellSize);
-    const minCellY = Math.floor((pointerY - radius) / markMagnetGridCellSize);
-    const maxCellY = Math.floor((pointerY + radius) / markMagnetGridCellSize);
-    const candidates: MarkPixelRecord[] = [];
+    window.addEventListener("resize", invalidateCenters);
+    window.addEventListener("scroll", invalidateCenters, { passive: true });
+    return () => {
+      window.removeEventListener("resize", invalidateCenters);
+      window.removeEventListener("scroll", invalidateCenters);
+    };
+  }, [phase, reducedMotion]);
 
-    for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
-      for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
-        const bucket = markPixelGridRef.current.get(getMarkMagnetGridKey(cellX, cellY));
-        if (bucket) candidates.push(...bucket);
-      }
-    }
+  useEffect(() => {
+    scheduleDraw();
+  }, [canvasSize.width, canvasSize.height, phase, titleMotionSettings]);
 
-    return candidates;
-  }
-
-  function clearMarkPixelRecord(record: MarkPixelRecord) {
-    if (record.offsetX !== 0 || record.offsetY !== 0) {
-      record.pixel.style.setProperty("--mark-magnet-x", "0px");
-      record.pixel.style.setProperty("--mark-magnet-y", "0px");
-      record.offsetX = 0;
-      record.offsetY = 0;
-    }
-    if (highlightedMarkPixelsRef.current.has(record.pixel)) {
-      record.pixel.removeAttribute("data-mark-magnet-highlight");
-      highlightedMarkPixelsRef.current.delete(record.pixel);
-    }
-    activeMarkPixelRecordsRef.current.delete(record);
-  }
-
-  function resetMarkMagnetism() {
-    latestPointerRef.current = null;
-    magnetActiveRef.current = false;
-    markRef.current?.removeAttribute("data-mark-magnet-active");
-    if (magnetFrameRef.current !== null) {
-      window.cancelAnimationFrame(magnetFrameRef.current);
-      magnetFrameRef.current = null;
-    }
-
-    for (const record of activeMarkPixelRecordsRef.current) clearMarkPixelRecord(record);
-    activeMarkPixelRecordsRef.current.clear();
-    highlightedMarkPixelsRef.current.clear();
-    markPixelCentersRef.current = [];
-    markPixelGridRef.current.clear();
-  }
-
-  function applyMarkMagnetism() {
-    magnetFrameRef.current = null;
-    const pointer = latestPointerRef.current;
-    if (!pointer || phase !== "interactive" || reducedMotion) return;
-
-    const radius = Math.max(0, titleMotionSettings.magnetRadius);
-    const radiusSquared = radius * radius;
-    const candidates = getMarkMagnetCandidates(pointer.x, pointer.y, radius);
-    const candidateSet = new Set(candidates);
-
-    for (const record of activeMarkPixelRecordsRef.current) {
-      if (!candidateSet.has(record)) clearMarkPixelRecord(record);
-    }
-
-    for (const record of candidates) {
-      const deltaX = pointer.x - record.x;
-      const deltaY = pointer.y - record.y;
-      const distanceSquared = deltaX * deltaX + deltaY * deltaY;
-      if (distanceSquared >= radiusSquared) {
-        clearMarkPixelRecord(record);
-        continue;
-      }
-
-      const offset = getDirectionTwoMagnetOffset(
-        record.x,
-        record.y,
-        pointer.x,
-        pointer.y,
-        titleMotionSettings.magnetRadius,
-        titleMotionSettings.magnetStrength,
-        titleMotionSettings.magnetMaxDisplacement,
-      );
-      if (offset.x !== record.offsetX || offset.y !== record.offsetY) {
-        record.pixel.style.setProperty("--mark-magnet-x", `${offset.x}px`);
-        record.pixel.style.setProperty("--mark-magnet-y", `${offset.y}px`);
-        record.offsetX = offset.x;
-        record.offsetY = offset.y;
-      }
-      const isHighlighted = offset.x !== 0 || offset.y !== 0;
-      if (isHighlighted) {
-        activeMarkPixelRecordsRef.current.add(record);
-        if (!highlightedMarkPixelsRef.current.has(record.pixel)) {
-          record.pixel.setAttribute("data-mark-magnet-highlight", "true");
-          highlightedMarkPixelsRef.current.add(record.pixel);
-        }
-      } else {
-        clearMarkPixelRecord(record);
-      }
-    }
-  }
-
-  function handleMarkPointerMove(event: PointerEvent<HTMLDivElement>) {
-    if (event.pointerType === "touch" || phase !== "interactive" || reducedMotion) return;
-
-    if (markPixelCentersRef.current.length === 0) {
-      markPixelCentersRef.current = getActiveMarkPixelCenters();
-    }
-    if (!magnetActiveRef.current) {
-      magnetActiveRef.current = true;
-      markRef.current?.setAttribute("data-mark-magnet-active", "true");
-    }
-    latestPointerRef.current = { x: event.clientX, y: event.clientY };
-    if (magnetFrameRef.current === null) {
-      magnetFrameRef.current = window.requestAnimationFrame(applyMarkMagnetism);
-    }
-  }
-
-  function handleMarkPointerOut(event: PointerEvent<HTMLDivElement>) {
-    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
-    resetMarkMagnetism();
-  }
-
+  const markCanvasPadding = titleMotionSettings.magnetMaxDisplacement + titleMotionSettings.hoverHighlightGlowRadius;
   const titleMotionStyle = {
+    width: canvasSize.width ? `${canvasSize.width}px` : undefined,
+    height: canvasSize.height ? `${canvasSize.height}px` : undefined,
+    marginLeft: size === "mobile" ? `-${markCanvasPadding}px` : undefined,
     "--direction-two-title-formation-duration": `${titleMotionSettings.formationDurationMs}ms`,
     "--direction-two-title-shimmer-duration": `${titleMotionSettings.shimmerDurationMs}ms`,
     "--direction-two-title-shimmer-color-mix": percent(titleMotionSettings.shimmerColorMixPercent),
@@ -2380,7 +2611,8 @@ function InkPatternMark({
   return (
     <div
       aria-label={word}
-      className={`direction-two-mark relative flex w-fit max-w-full items-start overflow-visible ${markScaleClass}`}
+      className={`direction-two-mark relative max-w-full overflow-visible ${markScaleClass}`}
+      data-mark-canvas=""
       data-mark-phase={phase}
       onPointerLeave={resetMarkMagnetism}
       onPointerMove={handleMarkPointerMove}
@@ -2389,118 +2621,13 @@ function InkPatternMark({
       role="img"
       style={titleMotionStyle}
     >
-      <InkPatternMarkLayer
-        className="direction-two-mark-word"
-        key={word}
-        titleMotionSettings={titleMotionSettings}
-        word={word}
+      <canvas
+        aria-hidden="true"
+        className="direction-two-mark-canvas block h-full w-full"
+        ref={canvasRef}
       />
     </div>
   );
-}
-
-function InkPatternMarkLayer({
-  word,
-  className = "",
-  titleMotionSettings,
-}: {
-  word: string;
-  className?: string;
-  titleMotionSettings: typeof directionTwoTitleMotionDefaults;
-}) {
-  const patterns: string[][] = buildDirectionTwoMarkPattern(word);
-  const density = 2;
-  const shimmerColumnCount = patterns.reduce(
-    (total, pattern) => total + (pattern[0]?.length ?? 0) * density,
-    0,
-  ) + Math.max(patterns.length - 1, 0) * 2;
-
-  return (
-    <div className={`direction-two-mark-layer flex w-fit origin-left items-start gap-[var(--letter-gap)] ${className}`}>
-      {patterns.map((letter, letterIndex) => (
-        <PixelPatternGrid
-          density={density}
-          key={letterIndex}
-          letterIndex={letterIndex}
-          pattern={letter}
-          titleMotionSettings={titleMotionSettings}
-          shimmerColumnCount={shimmerColumnCount}
-        />
-      ))}
-    </div>
-  );
-}
-
-function PixelPatternGrid({
-  density = 1,
-  pattern,
-  letterIndex,
-  titleMotionSettings,
-  shimmerColumnCount,
-}: {
-  density?: number;
-  pattern: string[];
-  letterIndex: number;
-  titleMotionSettings: typeof directionTwoTitleMotionDefaults;
-  shimmerColumnCount: number;
-}) {
-  const densePattern = density > 1 ? createDensePixelPattern(pattern, density) : pattern;
-  const columnCount = densePattern[0]?.length ?? 0;
-  const rowCount = densePattern.length;
-
-  return (
-    <div
-      aria-hidden="true"
-      className="grid shrink-0 gap-[var(--gap)]"
-      style={{
-        gridTemplateColumns: `repeat(${columnCount}, var(--cell))`,
-        gridTemplateRows: `repeat(${rowCount}, var(--cell))`,
-      }}
-    >
-      {densePattern.flatMap((row: string, rowIndex: number) =>
-        [...row].map((cell, columnIndex) => {
-          const active = cell === "1";
-          const shimmerColumn = letterIndex * (columnCount + 2) + columnIndex;
-          const formationDelay = getDirectionTwoFormationDelay(
-            shimmerColumn,
-            shimmerColumnCount,
-            titleMotionSettings.formationSpreadMs,
-          );
-          const shimmerDelay = getDirectionTwoSineShimmerDelay(
-            shimmerColumn,
-            rowIndex,
-            shimmerColumnCount,
-            rowCount,
-            titleMotionSettings.shimmerSpreadMs,
-            titleMotionSettings.shimmerAmplitudeMs,
-            titleMotionSettings.shimmerFrequency,
-          );
-
-          return (
-            <span
-              className={`direction-two-mark-pixel block size-[var(--cell)] ${
-                active ? "direction-two-mark-pixel-active" : "direction-two-mark-pixel-idle"
-              }`}
-              key={`${rowIndex}-${columnIndex}`}
-              style={
-                {
-                  "--mark-formation-delay": `${formationDelay}ms`,
-                  "--mark-shimmer-delay": `${shimmerDelay}ms`,
-                } as CSSProperties
-              }
-            />
-          );
-        }),
-      )}
-    </div>
-  );
-}
-
-function createDensePixelPattern(pattern: string[], density: number) {
-  return pattern.flatMap(row => {
-    const expandedRow = [...row].map(cell => cell.repeat(density)).join("");
-    return Array.from({ length: density }, () => expandedRow);
-  });
 }
 
 function DirectionTwoIntroRow({
@@ -2657,7 +2784,7 @@ function GuidedCreateInputPreview({
 }
 
 function TerminalLine({ kind, text }: TerminalLine) {
-  const prefix = kind === "input" ? "$" : kind === "error" ? "error:" : kind === "system" ? "system:" : ">";
+  const prefix = kind === "input" ? "$" : kind === "error" ? "heads-up:" : kind === "system" ? "system:" : ">";
   const tone =
     kind === "error"
       ? "text-[var(--destructive)]"
