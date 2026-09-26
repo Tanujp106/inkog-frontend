@@ -581,16 +581,72 @@ body::before {
   outline: none;
 }
 @keyframes room-ttl-hourglass-flip {
-  to { transform: rotate(180deg); }
+  0%, 35% { transform: rotate(0deg); }
+  48% { transform: rotate(184deg); }
+  50%, 85% { transform: rotate(180deg); }
+  98% { transform: rotate(364deg); }
+  100% { transform: rotate(360deg); }
 }
 .room-ttl-hourglass {
-  animation: room-ttl-hourglass-flip 1s ease-in-out infinite alternate;
+  animation: room-ttl-hourglass-flip 2s cubic-bezier(0.6, 0, 0.2, 1) infinite;
   display: block;
   flex: none;
   transform-origin: center;
 }
+.room-ttl-hourglass-frame { opacity: 0.85; }
+.room-ttl-hourglass-sand { animation-duration: 2s; animation-iteration-count: infinite; }
+.room-ttl-hourglass-sand-1 { animation-name: room-ttl-hourglass-sand-1; }
+.room-ttl-hourglass-sand-2 { animation-name: room-ttl-hourglass-sand-2; }
+.room-ttl-hourglass-sand-3 { animation-name: room-ttl-hourglass-sand-3; }
+.room-ttl-hourglass-sand-4 { animation-name: room-ttl-hourglass-sand-4; }
+.room-ttl-hourglass-sand-bottom.room-ttl-hourglass-sand-1 { animation-name: room-ttl-hourglass-bottom-1; }
+.room-ttl-hourglass-sand-bottom.room-ttl-hourglass-sand-2 { animation-name: room-ttl-hourglass-bottom-2; }
+.room-ttl-hourglass-sand-bottom.room-ttl-hourglass-sand-3 { animation-name: room-ttl-hourglass-bottom-3; }
+.room-ttl-hourglass-sand-bottom.room-ttl-hourglass-sand-4 { animation-name: room-ttl-hourglass-bottom-4; }
+@keyframes room-ttl-hourglass-sand-1 {
+  0%, 4% { opacity: 1; }
+  5%, 81% { opacity: 0; }
+  82%, 100% { opacity: 1; }
+}
+@keyframes room-ttl-hourglass-sand-2 {
+  0%, 12% { opacity: 1; }
+  13%, 71% { opacity: 0; }
+  72%, 100% { opacity: 1; }
+}
+@keyframes room-ttl-hourglass-sand-3 {
+  0%, 22% { opacity: 1; }
+  23%, 61% { opacity: 0; }
+  62%, 100% { opacity: 1; }
+}
+@keyframes room-ttl-hourglass-sand-4 {
+  0%, 31% { opacity: 1; }
+  32%, 54% { opacity: 0; }
+  55%, 100% { opacity: 1; }
+}
+@keyframes room-ttl-hourglass-bottom-1 {
+  0%, 4% { opacity: 0; }
+  5%, 81% { opacity: 1; }
+  82%, 100% { opacity: 0; }
+}
+@keyframes room-ttl-hourglass-bottom-2 {
+  0%, 12% { opacity: 0; }
+  13%, 71% { opacity: 1; }
+  72%, 100% { opacity: 0; }
+}
+@keyframes room-ttl-hourglass-bottom-3 {
+  0%, 22% { opacity: 0; }
+  23%, 61% { opacity: 1; }
+  62%, 100% { opacity: 0; }
+}
+@keyframes room-ttl-hourglass-bottom-4 {
+  0%, 31% { opacity: 0; }
+  32%, 54% { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .room-ttl-hourglass { animation: none; }
+  .room-ttl-hourglass,
+  .room-ttl-hourglass-sand { animation: none; }
+  .room-ttl-hourglass-sand-bottom { opacity: 0; }
 }
 .room-screen .btn-ghost,
 .room-state-screen .btn-ghost {
