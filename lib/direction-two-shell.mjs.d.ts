@@ -18,6 +18,9 @@ export type DirectionTwoCreateDraft = {
   password: string;
 };
 
+export type DirectionTwoGuidedSegmentId = "command" | "topic" | "expiry" | "limit" | "password-choice" | "password";
+export type DirectionTwoGuidedSegment = { id: DirectionTwoGuidedSegmentId; value: string };
+
 export type DirectionTwoCreateStep = "topic" | "expiry" | "limit" | "password-choice" | "password";
 export type DirectionTwoCreatePromptIcon = "room" | "time" | "people" | "lock" | "key" | "help" | "style" | "sound" | "list" | "enter";
 export type DirectionTwoCreatePromptTone = "accent" | "muted";
@@ -55,6 +58,31 @@ export declare function getDirectionTwoCreateAnswerError(
   rawAnswer: string,
 ): string | null;
 export declare function getDirectionTwoCreateGhostText(value: string): string | null;
+export declare function getDirectionTwoMobileComposerQuestion(input: {
+  flow: { type: "create"; step: DirectionTwoCreateStep | "confirm" } | { type: "join" | "style" } | null;
+  inputValue: string;
+}): string | null;
+export declare function getDirectionTwoMobileComposerMessage(input: {
+  flow: { type: "create"; step: DirectionTwoCreateStep | "confirm" } | { type: "join" | "style" } | null;
+  inputValue: string;
+  feedback: string | null;
+  result: string | null;
+}): string | null;
+export declare function getDirectionTwoGuidedBackspaceAction(input: {
+  step: DirectionTwoCreateStep | "confirm";
+  inputValue: string;
+  editingSegment: Exclude<DirectionTwoGuidedSegmentId, "command"> | null;
+  segments: DirectionTwoGuidedSegment[] | null;
+  draft: DirectionTwoCreateDraft;
+}):
+  | { type: "cancel" }
+  | {
+      type: "previous-step";
+      step: DirectionTwoCreateStep;
+      segments: DirectionTwoGuidedSegment[];
+      draft: DirectionTwoCreateDraft;
+    }
+  | null;
 export declare function getDirectionTwoCreateHint(value: string): string | null;
 export declare function getDirectionTwoInlineFeedbackMessage(message: string): string;
 export declare function getDirectionTwoInlineGhostText(value: string): string | null;

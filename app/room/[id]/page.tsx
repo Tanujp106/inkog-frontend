@@ -1,7 +1,7 @@
 "use client";
 
-import type { CSSProperties } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 
@@ -110,6 +110,240 @@ type TranscriptItem =
   | { type: "poll"; poll: Poll; timestamp: number }
   | { type: "event"; event: TerminalEvent; timestamp: number };
 
+function createWorstCaseRoomScenario() {
+  const now = Date.now();
+  const createdAt = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString();
+  const alias = "Lantern Otter";
+  const longAlias = "RidiculouslyLongAnonymousParticipantWithoutSpaces";
+  const stressAliases = [
+    "ExtraordinarilyLongParticipantAliasWithoutSpacesAndPunctuationForWrapping",
+    "🧑🏽‍🔧✨",
+    "مريم / מרין",
+    "Q",
+    "Élodie — late arrival",
+    ...Array.from({ length: 20 }, (_, index) => `Visitor ${String(index + 1).padStart(2, "0")}`),
+  ];
+  const roomUsers = [
+    alias,
+    "Glowing Pebble",
+    longAlias,
+    "Northstar",
+    "Moss Crew",
+    "Quiet Comet",
+    "Riverglass",
+    "Saffron Cloud",
+    "Pixel Gardener",
+    "Cedar Echo",
+    "Orbital Finch",
+    "Harbor Light",
+    "Tiny Avalanche",
+    "Maple Circuit",
+    "Blue Hour",
+    ...stressAliases,
+  ];
+  const makeMessage = (
+    id: string,
+    sender: string,
+    content: string,
+    minutesAgo: number,
+    isSystem = false,
+  ): Message => ({ id, alias: sender, content, createdAt: createdAt(minutesAgo), isSystem });
+  const makePoll = (
+    pollId: string,
+    question: string,
+    options: string[],
+    votes: Array<[string, number]>,
+    minutesAgo: number,
+    createdByAlias: string,
+  ): Poll => ({
+    pollId,
+    question,
+    options,
+    votesByMember: votes.map(([voterAlias, optionIndex]) => ({ alias: voterAlias, optionIndex })),
+    createdAt: createdAt(minutesAgo),
+    createdByAlias,
+  });
+  const burstParticipants = roomUsers.slice(15, 24);
+  const unbrokenToken = "X".repeat(520);
+  const longParagraph = "The step-free route, rain backup, tool inventory, dietary labels, late arrivals, and cleanup owner all need to stay visible together while the group is still making decisions. ".repeat(6);
+  const longUrl = `https://example.com/neighborhood/repair-weekend/venue-and-accessibility?${"arrival-window-and-accessibility-checklist=".repeat(12)}confirmed`;
+  const burstMessages = burstParticipants.flatMap((sender, participantIndex) => {
+    const contents = [
+      `Update ${participantIndex + 1}: I can take one more task if someone is still waiting for a reply.`,
+      `Follow-up: please keep the step-free entrance clear, and leave a little space around the work tables.\nSecond line: I will confirm the key pickup after lunch.`,
+      `Long catch-up note from the volunteer thread: ${longParagraph}`,
+      `This is the route detail that tends to stretch a narrow transcript: ${longUrl}`,
+      "Mixed script check: café déjà vu · Ελληνικά · 日本語 · العربية · שלום · 👋🏽🧰✅",
+      `Unbroken label stress ${participantIndex + 1}: ${unbrokenToken}`,
+    ];
+
+    return contents.map((content, messageIndex) => {
+      const offsetSeconds = participantIndex * contents.length + messageIndex + 1;
+      return makeMessage(
+        `stress-message-burst-${String(participantIndex + 1).padStart(2, "0")}-${messageIndex + 1}`,
+        sender,
+        content,
+        3 - offsetSeconds / 60,
+      );
+    });
+  });
+  const balancedRosterVotes: Array<[string, number]> = roomUsers.map((participant, index) => [participant, index % 4] as [string, number]);
+  const highParticipationVotes: Array<[string, number]> = roomUsers.map((participant, index) => [participant, index % 3] as [string, number]);
+
+  return {
+    topic: "Neighborhood repair weekend",
+    alias,
+    roomUsers,
+    secondsLeft: 3_599,
+    totalSeconds: 3_600,
+    messages: [
+      makeMessage("stress-message-01", "system", `joined as ${alias}`, 49, true),
+      makeMessage("stress-message-02", "system", "Glowing Pebble joined", 48, true),
+      makeMessage("stress-message-03", "system", `${longAlias} joined`, 47, true),
+      makeMessage("stress-message-04", "system", "37 more participants joined", 46, true),
+      makeMessage("stress-message-05", alias, "Quick sanity check: can everybody see the plan, and can we keep decisions in this room?", 44),
+      makeMessage("stress-message-06", "Glowing Pebble", "Yep. I can see it on my phone too.", 43),
+      makeMessage(
+        "stress-message-07",
+        "Northstar",
+        "Here is the full context before we decide: the community garden workday moved because the original site is closed, the second venue has limited covered space, and a few people can only arrive after lunch. Please keep the tool pickup, accessibility route, food plan, and rain backup together so nobody has to reconstruct the decision from twenty separate replies.",
+        42,
+      ),
+      makeMessage("stress-message-08", "Quiet Comet", "ok", 41),
+      makeMessage("stress-message-09", "Quiet Comet", "One more thing", 41),
+      makeMessage("stress-message-10", "Quiet Comet", "I can bring the folding tables", 40),
+      makeMessage(
+        "stress-message-11",
+        "Riverglass",
+        "The venue details are here if the link wraps badly on a narrow screen: https://example.com/neighborhood/repair-weekend/venue-and-accessibility?source=room-invitation&view=all-locations&arrival=late",
+        39,
+      ),
+      makeMessage("stress-message-12", longAlias, "I can bring the toolboxes, extension leads, labelled bins, spare gloves, and the sign-in sheets. Please tag me if the equipment list changes again.", 37),
+      makeMessage("stress-message-13", "system", "Blue Hour left", 36, true),
+      makeMessage("stress-message-14", "system", "Blue Hour rejoined", 35, true),
+      makeMessage("stress-message-15", "Moss Crew", "雨なら屋根のある場所に変更できます。 / If it rains, we can move under the covered area.", 33),
+      makeMessage("stress-message-16", alias, "Adding a poll for the venue now.", 32),
+      makeMessage("stress-message-17", "Saffron Cloud", "I voted, but I may need to leave fifteen minutes early.", 29),
+      makeMessage("stress-message-18", "Pixel Gardener", "Please count the step-free route as a hard requirement, not a tie-breaker.", 27),
+      makeMessage("stress-message-19", "system", "Maple Circuit joined", 25, true),
+      makeMessage("stress-message-20", "Maple Circuit", "For anyone catching up: the first vote is about venue only. Food and start time are separate.", 23),
+      makeMessage("stress-message-21", "Harbor Light", "The forecast changed again. I pasted the short version below, and the full details are in the link above.", 20),
+      makeMessage("stress-message-22", alias, "Can we settle the time before I send the final checklist?", 17),
+      makeMessage("stress-message-23", "Tiny Avalanche", "08:30 is difficult for people taking the first bus; 10:00 is much safer.", 14),
+      makeMessage("stress-message-24", "Cedar Echo", "I have one vote on the second poll. The first poll still has enough answers to compare.", 11),
+      makeMessage("stress-message-25", "Orbital Finch", "Final reminder: bring water, label anything you leave behind, and post schedule changes here.", 7),
+      makeMessage("stress-message-26", alias, "Thanks — I’ll pin the final plan after the last two votes come in.", 2),
+      ...burstMessages,
+    ],
+    polls: [
+      makePoll(
+        "stress-poll-venue",
+        "Which step-free venue should host the neighborhood repair weekend if the forecast keeps changing?",
+        [
+          "North garden pavilion with covered work tables",
+          "Library community room near the accessible entrance",
+          "School courtyard if the rain holds off until afternoon",
+          "Keep the original site and move tools under the east awning",
+        ],
+        [
+          [alias, 1], ["Glowing Pebble", 1], [longAlias, 0], ["Northstar", 2],
+          ["Moss Crew", 1], ["Quiet Comet", 0], ["Riverglass", 1], ["Saffron Cloud", 3],
+          ["Pixel Gardener", 1], ["Cedar Echo", 2], ["Orbital Finch", 1], ["Harbor Light", 3],
+        ],
+        31,
+        alias,
+      ),
+      makePoll(
+        "stress-poll-food",
+        "What should we order for lunch? This poll has long option labels and no votes yet.",
+        [
+          "Vegetarian rice bowls with sauces packed separately",
+          "Sandwiches with gluten-free and dairy-free choices clearly labelled",
+          "Bring-your-own lunch and a shared table for snacks",
+          "Order after arrival once we know the final head count",
+        ],
+        [],
+        22,
+        "Glowing Pebble",
+      ),
+      makePoll(
+        "stress-poll-time",
+        "Pick a start time that still works for late arrivals and the first bus.",
+        ["08:30 — early setup, fewer buses", "10:00 — later start, easier arrival", "11:30 — lunch first, shorter work block", "Keep the time flexible until Friday"],
+        [
+          [alias, 1], ["Glowing Pebble", 1], [longAlias, 0], ["Northstar", 1],
+          ["Moss Crew", 3], ["Quiet Comet", 0], ["Riverglass", 1], ["Saffron Cloud", 2],
+          ["Pixel Gardener", 1], ["Cedar Echo", 2], ["Orbital Finch", 0], ["Harbor Light", 3],
+          ["Tiny Avalanche", 1], ["Maple Circuit", 1], ["Blue Hour", 2],
+        ],
+        16,
+        "Tiny Avalanche",
+      ),
+      makePoll(
+        "stress-poll-tools",
+        "Who can bring the remaining equipment?",
+        ["Folding tables", "Extension leads", "Gloves and labels", "I can cover more than one item"],
+        [[alias, 3]],
+        5,
+        "Cedar Echo",
+      ),
+      makePoll(
+        "stress-poll-accessibility",
+        "Which accessibility and weather plan should we publish as the single source of truth for everyone arriving at different times?",
+        [
+          "Use the library room, keep the step-free entrance unlocked, and move all tools inside before rain starts",
+          "Use the garden pavilion only if the covered route is clear and the accessible drop-off stays open",
+          "Split setup between both venues and post a live update whenever the forecast changes",
+          "Wait until the final head count, then assign one volunteer to confirm the route with each late arrival",
+        ],
+        balancedRosterVotes,
+        28,
+        stressAliases[0],
+      ),
+      makePoll(
+        "stress-poll-supply-check",
+        "Which supply handoff can you personally confirm before the deadline?",
+        [
+          "I can bring labelled bins and a complete inventory",
+          "I can bring tools but need someone else to carry them",
+          "I can meet the first bus and help unload",
+          "I can take the overflow task after the venue is chosen",
+        ],
+        highParticipationVotes,
+        19,
+        stressAliases[2],
+      ),
+      makePoll(
+        "stress-poll-lunch-overflow",
+        "Choose a lunch plan that still works if the group grows, dietary notes arrive late, and deliveries are split across two entrances.",
+        [
+          "Order individually labelled vegetarian, vegan, gluten-free, and dairy-free meals with sauces packed separately",
+          "Collect dietary details in the room, confirm quantities twice, then place one order for the accessible entrance",
+          "Bring-your-own lunch and reserve a clearly marked shared table for snacks, water, and allergy-safe items",
+          "Delay the order until arrival and ask a volunteer to check every package against the final participant list",
+        ],
+        [],
+        12,
+        "Élodie — late arrival",
+      ),
+      makePoll(
+        "stress-poll-last-minute",
+        "Should we keep the cleanup team for one more hour?",
+        [
+          "Yes, keep the covered room until every borrowed item is checked back in",
+          "No, finish on time and leave the final inventory with the venue host",
+        ],
+        [[alias, 0], [roomUsers[roomUsers.length - 1], 1], [roomUsers[roomUsers.length - 2], 0]],
+        4,
+        "Q",
+      ),
+    ],
+    events: [
+      { id: "stress-event-03", kind: "error", content: "Make each poll option a little different.", createdAt: createdAt(9) },
+    ] satisfies TerminalEvent[],
+  };
+}
+
 function getStoredToken(roomId: string) {
   if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") return undefined;
   return window.localStorage.getItem(`token_${roomId}`) || undefined;
@@ -168,6 +402,7 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
   const [terminalEvents, setTerminalEvents] = useState<TerminalEvent[]>([]);
+  const [isWorstCaseScenario, setIsWorstCaseScenario] = useState(false);
   const [composerValue, setComposerValue] = useState("");
   const [socketError, setSocketError] = useState("");
   const [isRealtimeReady, setIsRealtimeReady] = useState(false);
@@ -180,7 +415,8 @@ export default function RoomPage() {
 
   const socketRef = useRef<Socket | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const transcriptViewportRef = useRef<HTMLElement | null>(null);
+  const shouldFollowTranscriptRef = useRef(true);
   const soundRef = useRef(sound);
   const composerStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shareCopiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -272,14 +508,11 @@ export default function RoomPage() {
   }, [stage, secondsLeft]);
 
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript]);
+    const transcriptViewport = transcriptViewportRef.current;
+    if (!transcriptViewport || !shouldFollowTranscriptRef.current) return;
 
-  useEffect(() => {
-    if (isRoomComposerInteractive(stage, isRealtimeReady)) {
-      requestAnimationFrame(() => composerRef.current?.focus());
-    }
-  }, [isRealtimeReady, stage]);
+    transcriptViewport.scrollTo({ top: transcriptViewport.scrollHeight, behavior: "smooth" });
+  }, [transcript]);
 
   useEffect(() => {
     if (stage !== "joined") {
@@ -308,6 +541,8 @@ export default function RoomPage() {
   }, [secondsLeft, stage]);
 
   useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
     const interval = setInterval(() => {
       setCursorVisible(current => !current);
     }, 530);
@@ -477,7 +712,7 @@ export default function RoomPage() {
   };
 
   useEffect(() => {
-    if (stage === "joined" && isRealtimeReady) {
+    if (stage === "joined") {
       markRoomReady(roomId);
       return;
     }
@@ -490,12 +725,37 @@ export default function RoomPage() {
     if (stage === "expired" || stage === "error") {
       cancelRoomHandoff();
     }
-  }, [cancelRoomHandoff, isRealtimeReady, markRoomReady, roomId, stage]);
+  }, [cancelRoomHandoff, markRoomReady, roomId, stage]);
 
   useEffect(() => {
     let cancelled = false;
 
     const run = async () => {
+      const requestedScenario = new URLSearchParams(window.location.search).get("uiScenario");
+      if (requestedScenario === "worst-case") {
+        if (process.env.NODE_ENV === "production") {
+          setStage("expired");
+          return;
+        }
+
+        const scenario = createWorstCaseRoomScenario();
+        setIsWorstCaseScenario(true);
+        setTopic(scenario.topic);
+        setAlias(scenario.alias);
+        setRoomUsers(scenario.roomUsers);
+        setOnlineCount(scenario.roomUsers.length);
+        setSecondsLeft(scenario.secondsLeft);
+        ttlTotalSecondsRef.current = scenario.totalSeconds;
+        setMessages(scenario.messages);
+        setPolls(scenario.polls);
+        setTerminalEvents(scenario.events);
+        setIsCreator(true);
+        setHasPassword(false);
+        setIsRealtimeReady(true);
+        setStage("joined");
+        return;
+      }
+
       if (isExpiredRoomPreview({ nodeEnv: process.env.NODE_ENV, search: window.location.search })) {
         setStage("expired");
         return;
@@ -542,7 +802,7 @@ export default function RoomPage() {
           return;
         }
 
-        if (!roomData) {
+        if (!roomData || typeof roomData.topic !== "string" || typeof roomData.secondsLeft !== "number") {
           setErrorMsg("We couldn't load this room. Try opening it again.");
           setStage("error");
           return;
@@ -621,6 +881,19 @@ export default function RoomPage() {
   };
 
   const emitPoll = (question: string, options: string[]) => {
+    if (isWorstCaseScenario) {
+      setPolls(current => [...current, {
+        pollId: makeId(),
+        question,
+        options,
+        votesByMember: [],
+        createdAt: new Date().toISOString(),
+        createdByAlias: alias,
+      }]);
+      sound.play("pollCreated");
+      return true;
+    }
+
     if (!socketRef.current) {
       appendEvent("error", "You're not connected to the room yet. Try again in a moment.");
       sound.play("error");
@@ -634,6 +907,17 @@ export default function RoomPage() {
   };
 
   const sendChatMessage = (message: string) => {
+    if (isWorstCaseScenario) {
+      setMessages(current => [...current, {
+        id: makeId(),
+        alias,
+        content: message,
+        createdAt: new Date().toISOString(),
+      }]);
+      sound.play("messageSent");
+      return;
+    }
+
     if (!socketRef.current) {
       appendEvent("error", "You're not connected to the room yet. Try again in a moment.");
       sound.play("error");
@@ -717,6 +1001,11 @@ export default function RoomPage() {
   };
 
   const askProjectHelp = async (question: string) => {
+    if (isWorstCaseScenario) {
+      setComposerStatusMessage("Help replies are disabled in this local UI scenario.", "muted");
+      return;
+    }
+
     setComposerStatusMessage("asking inkog...", "muted");
 
     try {
@@ -983,7 +1272,10 @@ export default function RoomPage() {
 
         setPendingCommand(null);
         if (!emitPoll(result.payload.question, result.payload.options)) return;
-        setComposerStatusMessage(`creating poll: ${result.payload.question}`, "muted");
+        setComposerStatusMessage(
+          isWorstCaseScenario ? `poll added to local scenario: ${result.payload.question}` : `creating poll: ${result.payload.question}`,
+          isWorstCaseScenario ? "accent" : "muted",
+        );
         return;
       }
     }
@@ -1008,7 +1300,10 @@ export default function RoomPage() {
         return;
       case "poll-inline":
         if (!emitPoll(command.question, command.options)) return;
-        setComposerStatusMessage(`creating poll: ${command.question}`, "muted");
+        setComposerStatusMessage(
+          isWorstCaseScenario ? `poll added to local scenario: ${command.question}` : `creating poll: ${command.question}`,
+          isWorstCaseScenario ? "accent" : "muted",
+        );
         return;
       case "message":
         sendChatMessage(command.text);
@@ -1062,6 +1357,19 @@ export default function RoomPage() {
 
   const votePoll = (pollId: string, optionIndex: number) => {
     sound.play("pollVoted");
+    if (isWorstCaseScenario) {
+      setPolls(current => current.map(poll => poll.pollId === pollId
+        ? {
+            ...poll,
+            votesByMember: [
+              ...poll.votesByMember.filter(vote => vote.alias !== alias),
+              { alias, optionIndex },
+            ],
+          }
+        : poll));
+      return;
+    }
+
     socketRef.current?.emit("vote_poll", { pollId, optionIndex });
   };
 
@@ -1070,7 +1378,6 @@ export default function RoomPage() {
   const myVote = (poll: Poll) => poll.votesByMember.find(v => v.alias === alias)?.optionIndex ?? -1;
   const isRoomBooting = stage === "loading";
   const isPasswordGate = stage === "password";
-  const usersTitle = roomUsers.length ? roomUsers.join("\n") : "No users online";
   const roster = getRoomRoster(roomUsers);
   const pollInlinePrompt = !isRoomBooting && !isPasswordGate && pendingCommand?.type === "poll" ? getRoomPollInlinePrompt(pendingCommand) : null;
   const showIdleCursor = composerValue.length === 0 && !pollInlinePrompt;
@@ -1097,7 +1404,7 @@ export default function RoomPage() {
     composerStatus?.tone === "error"
       ? "var(--red)"
       : composerStatus?.tone === "accent"
-        ? "var(--accent)"
+        ? "var(--room-accent-text)"
         : "var(--text-muted)";
   useEffect(() => {
     setSlashSuggestionIndex(index => {
@@ -1134,18 +1441,19 @@ export default function RoomPage() {
       className="room-screen"
       data-route-handoff-phase={routeHandoffState.phase}
       style={styles.roomShell}
-      onClick={() => composerRef.current?.focus()}
     >
       <header style={{ ...styles.roomHeader, ...getRoomPartStyle(roomId, "header") }}>
         <div style={styles.roomHeaderInner}>
           <div style={styles.headerIdentity}>
-            <span style={styles.brand}>inkog</span>
-            <span style={styles.headerDivider}>/</span>
-            <span style={styles.topic} title={topic}>{topic}</span>
+            <h1 style={styles.roomName} title={`inkog / ${topic}`}>
+              <span style={styles.roomBrand}>inkog</span>
+              <span style={styles.roomNameDivider}>/</span>
+              <span style={styles.roomTopic}>{topic}</span>
+            </h1>
           </div>
           <div style={styles.headerMeta}>
             <button
-              aria-label={shareCopied ? "copied!" : "share room link"}
+              aria-label="Copy room link"
               className="btn-ghost"
               onClick={() => void copyShareLinkFromButton()}
               onMouseEnter={() => sound.play("hover")}
@@ -1154,17 +1462,23 @@ export default function RoomPage() {
             >
               {shareCopied ? "copied!" : "share"}
             </button>
-            <AvatarRoster roster={roster} usersTitle={usersTitle} viewerAlias={alias} />
+            {shareCopied ? <span aria-live="polite" role="status" style={styles.srOnly}>Room link copied.</span> : null}
+            <AvatarRoster roster={roster} roomUsers={roomUsers} viewerAlias={alias} />
             <RoomTtlMeter meter={ttlMeter} />
           </div>
         </div>
       </header>
 
-      {socketError && <div style={{ ...styles.errorToast, ...getRoomPartStyle(roomId, "transcript") }}>heads-up: {socketError}</div>}
+      {socketError && <div role="alert" style={{ ...styles.errorToast, ...getRoomPartStyle(roomId, "transcript") }}>heads-up: {socketError}</div>}
 
       <section
         aria-label="Room terminal transcript"
         className={`room-chat-transcript${routeHandoffState.phase === "transitioning" ? " room-route-transcript-enter" : ""}`}
+        onScroll={event => {
+          const viewport = event.currentTarget;
+          shouldFollowTranscriptRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 96;
+        }}
+        ref={transcriptViewportRef}
         style={{ ...styles.transcript, ...getRoomPartStyle(roomId, "transcript") }}
       >
         <div style={styles.transcriptInner}>
@@ -1177,7 +1491,10 @@ export default function RoomPage() {
               <p style={styles.emptyLine}>system: type a message</p>
             </div>
           ) : (
-            transcript.map(item => {
+            transcript.map((item, index) => {
+              const previousItem = transcript[index - 1];
+              const nextItem = transcript[index + 1];
+
               if (item.type === "event") {
                 return <TerminalEventRow event={item.event} key={item.event.id} />;
               }
@@ -1195,17 +1512,32 @@ export default function RoomPage() {
                 );
               }
 
+              const sameSenderBefore = previousItem?.type === "message"
+                && !previousItem.message.isSystem
+                && !item.message.isSystem
+                && previousItem.message.alias === item.message.alias;
+              const sameSenderAfter = nextItem?.type === "message"
+                && !nextItem.message.isSystem
+                && !item.message.isSystem
+                && nextItem.message.alias === item.message.alias;
+              const showSenderLabel = item.message.isSystem || !sameSenderBefore;
+              const messageMarginBottom = sameSenderAfter
+                ? sameSenderBefore ? 4 : 0
+                : sameSenderBefore ? 0 : 24;
+
               return (
                 <TerminalMessage
                   alias={alias}
                   key={item.message.id}
                   message={item.message}
+                  messageMarginBottom={messageMarginBottom}
                   peerColorMap={peerColorMap}
+                  senderGroupEnd={sameSenderBefore && !sameSenderAfter}
+                  showSenderLabel={showSenderLabel}
                 />
               );
             })
           )}
-          <div ref={transcriptEndRef} />
         </div>
       </section>
 
@@ -1218,12 +1550,19 @@ export default function RoomPage() {
       >
         <div
           data-route-composer="room"
+          onClick={event => {
+            if (event.target instanceof Element && event.target.closest('input, [role="option"]')) return;
+            composerRef.current?.focus();
+          }}
           style={{
             ...styles.composerFrame,
           }}
         >
           <div
             aria-hidden={!showSlashSuggestions}
+            aria-label="Room command suggestions"
+            id="room-slash-command-suggestions"
+            role="listbox"
             style={{
               ...styles.slashCommandMenu,
               maxHeight: showSlashSuggestions ? "220px" : "0px",
@@ -1237,9 +1576,11 @@ export default function RoomPage() {
               const selected = slashSuggestionIndex === index;
 
               return (
-                <button
+                <div
+                  aria-selected={selected}
                   key={item.command}
-                  onPointerDown={event => event.preventDefault()}
+                  id={`room-slash-option-${index}`}
+                  onMouseDown={event => event.preventDefault()}
                   onClick={() => runSlashSuggestion(item.command)}
                   onMouseEnter={() => {
                     setSlashSuggestionIndex(index);
@@ -1248,14 +1589,14 @@ export default function RoomPage() {
                   style={{
                     ...styles.slashCommandItem,
                     background: selected ? "color-mix(in srgb, var(--accent) 7%, transparent)" : "transparent",
-                    color: selected ? "var(--accent)" : "var(--text)",
+                    color: selected ? "var(--room-accent-text)" : "var(--text)",
                   }}
-                  type="button"
+                  role="option"
                 >
                   <span aria-hidden="true" style={styles.slashCommandMarker}>{selected ? ">" : ""}</span>
                   <span style={styles.slashCommandName}>{item.command}</span>
                   <span style={styles.slashCommandDescription}>{item.label}</span>
-                </button>
+                </div>
               );
             }) : null}
           </div>
@@ -1279,7 +1620,9 @@ export default function RoomPage() {
             />
           ) : null}
           <div style={styles.composerRow}>
-            <label htmlFor="room-terminal-input" style={styles.srOnly}>room command</label>
+            <label htmlFor="room-terminal-input" style={styles.srOnly}>
+              {isPasswordGate ? "Room password" : "Chat message or room command"}
+            </label>
             <span aria-hidden="true" style={styles.composerPrompt}>$</span>
             {pollInlinePrompt ? (
               <span aria-hidden="true" style={styles.composerPollPrefix}>
@@ -1309,7 +1652,11 @@ export default function RoomPage() {
               autoCapitalize="off"
               autoComplete="off"
               autoCorrect="off"
+              aria-activedescendant={showSlashSuggestions ? `room-slash-option-${slashSuggestionIndex}` : undefined}
+              aria-autocomplete={isPasswordGate ? undefined : "list"}
               aria-describedby="room-composer-status"
+              aria-expanded={isPasswordGate ? undefined : showSlashSuggestions}
+              aria-controls={isPasswordGate ? undefined : "room-slash-command-suggestions"}
               id="room-terminal-input"
               onChange={event => {
                 setComposerValue(event.target.value);
@@ -1361,8 +1708,8 @@ export default function RoomPage() {
 
                   if (deletionRange) {
                     event.preventDefault();
-                    input.setRangeText("", deletionRange.start, deletionRange.end, "start");
-                    setComposerValue(input.value);
+                    setComposerValue(input.value.slice(0, deletionRange.start) + input.value.slice(deletionRange.end));
+                    requestAnimationFrame(() => composerRef.current?.setSelectionRange(deletionRange.start, deletionRange.start));
                     setSlashSuggestionIndex(0);
                     return;
                   }
@@ -1396,13 +1743,14 @@ export default function RoomPage() {
               }}
               ref={composerRef}
               spellCheck={false}
-              disabled={!isRoomComposerInteractive(stage, isRealtimeReady)}
-              placeholder={!isRoomComposerInteractive(stage, isRealtimeReady) ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
+              disabled={stage !== "joined" && stage !== "password"}
+              placeholder={isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
               style={{
                 ...styles.composerInput,
                 caretColor: showIdleCursor ? "transparent" : "var(--text)",
-                color: pollInlinePrompt ? "var(--accent)" : "var(--text)",
+                color: "var(--room-message-text)",
               }}
+              role={isPasswordGate ? undefined : "combobox"}
               type={isPasswordGate ? "password" : "text"}
               value={composerValue}
             />
@@ -1421,11 +1769,14 @@ function RoomPasswordReveal({
   password: string;
 }) {
   const [displayedPassword, setDisplayedPassword] = useState(() => getPasswordCipherText(password, 0));
+  const [isPasswordRevealed, setIsPasswordRevealed] = useState(false);
 
   useEffect(() => {
+    setIsPasswordRevealed(false);
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     if (mediaQuery.matches) {
       setDisplayedPassword(password);
+      setIsPasswordRevealed(true);
       return;
     }
 
@@ -1440,6 +1791,7 @@ function RoomPasswordReveal({
       setDisplayedPassword(getPasswordCipherText(password, revealedCharacters));
 
       if (progress < 1) animationFrame = requestAnimationFrame(reveal);
+      else setIsPasswordRevealed(true);
     };
 
     animationFrame = requestAnimationFrame(reveal);
@@ -1447,7 +1799,10 @@ function RoomPasswordReveal({
   }, [password]);
 
   return (
-    <div aria-live="polite" style={styles.passwordRevealLine}>
+    <div style={styles.passwordRevealLine}>
+      <span aria-atomic="true" aria-live="polite" style={styles.srOnly}>
+        {isPasswordRevealed ? `Room password: ${password}` : ""}
+      </span>
       <style>{`
         @keyframes room-password-shimmer {
           from { background-position: 140% 0; }
@@ -1458,7 +1813,7 @@ function RoomPasswordReveal({
         }
       `}</style>
       <span style={styles.passwordRevealLabel}>password:</span>
-      <span className="room-password-shimmer" style={styles.passwordRevealValue}>
+      <span aria-hidden="true" className="room-password-shimmer" style={styles.passwordRevealValue}>
         {displayedPassword}
       </span>
       <span style={styles.passwordRevealHint}>{hint}</span>
@@ -1477,20 +1832,20 @@ function getPasswordCipherText(password: string, revealedCharacters: number) {
 
 function RoomGateTranscript({ lines, passwordError }: { lines: string[]; passwordError?: string }) {
   return (
-    <div style={styles.gateTranscript}>
+    <div aria-label="Room access instructions" aria-live="polite" role="status" style={styles.gateTranscript}>
       {lines.map(line => (
         <p
           key={line}
           style={{
             ...styles.transcriptLine,
-            color: line === "--------" ? "var(--text-dim)" : line.includes("password accepted") ? "var(--accent)" : "var(--text-muted)",
+            color: line === "--------" ? "var(--text-dim)" : line.includes("password accepted") ? "var(--room-accent-text)" : "var(--text-muted)",
           }}
         >
           {line}
         </p>
       ))}
       {passwordError ? (
-        <p style={{ ...styles.transcriptLine, color: "var(--red)" }}>heads-up: {passwordError}</p>
+        <p role="alert" style={{ ...styles.transcriptLine, color: "var(--red)" }}>heads-up: {passwordError}</p>
       ) : null}
     </div>
   );
@@ -1540,7 +1895,7 @@ function TerminalEventRow({ event }: { event: TerminalEvent }) {
   const prefix = event.kind === "input" ? "$" : event.kind === "error" ? "heads-up:" : ">";
   const color =
     event.kind === "input"
-      ? "var(--accent)"
+      ? "var(--room-accent-text)"
       : event.kind === "error"
         ? "var(--red)"
         : "var(--text-muted)";
@@ -1556,26 +1911,29 @@ function TerminalEventRow({ event }: { event: TerminalEvent }) {
 function TerminalMessage({
   alias,
   message,
+  messageMarginBottom,
   peerColorMap,
+  senderGroupEnd,
+  showSenderLabel,
 }: {
   alias: string;
   message: Message;
+  messageMarginBottom: number;
   peerColorMap: Record<string, string>;
+  senderGroupEnd: boolean;
+  showSenderLabel: boolean;
 }) {
   const presentation = classifyRoomMessage(message, alias);
-  const lineColor =
-    presentation.kind === "incoming"
-      ? peerColorMap[message.alias] ?? "var(--accent)"
-      : presentation.kind === "outgoing"
-        ? "var(--text-muted)"
-        : "var(--text-dim)";
+  const senderColor = message.alias === alias
+    ? "var(--room-accent-text)"
+    : peerColorMap[message.alias] ?? "var(--text-muted)";
 
   if (presentation.kind === "system") {
     return (
       <p style={styles.systemMessageLine}>
         <span aria-hidden="true" style={styles.systemMessageRule} />
         <span style={styles.systemMessageText}>
-          {presentation.prefix} {message.content}
+          {message.content}
         </span>
         <span aria-hidden="true" style={styles.systemMessageRule} />
       </p>
@@ -1586,81 +1944,174 @@ function TerminalMessage({
     <p
       style={{
         ...styles.transcriptLine,
-        color: lineColor,
+        color: "var(--text)",
+        margin: `0 0 ${messageMarginBottom}px`,
       }}
     >
-      <span aria-hidden="true" className="room-chat-sender">{presentation.prefix} </span>
-      {message.content}
+      {showSenderLabel ? (
+        <span className="room-chat-sender" style={{ color: senderColor }}>
+          {presentation.kind === "outgoing" ? "you" : message.alias}
+        </span>
+      ) : null}
+      <span
+        className="room-chat-message-content"
+        style={{
+          marginTop: 0,
+          marginRight: 0,
+          marginBottom: senderGroupEnd ? 24 : 0,
+          marginLeft: 0,
+        }}
+      >
+        {message.content}
+      </span>
     </p>
   );
 }
 
 function AvatarRoster({
   roster,
-  usersTitle,
+  roomUsers,
   viewerAlias,
 }: {
   roster: RoomRoster;
-  usersTitle: string;
+  roomUsers: string[];
   viewerAlias: string;
 }) {
   const [activeAlias, setActiveAlias] = useState<string | null>(null);
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null);
+  const rosterRef = useRef<HTMLDivElement | null>(null);
+  const positionPopover = useCallback(() => {
+    const bounds = rosterRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+
+    const width = Math.min(360, Math.max(0, window.innerWidth - 32));
+    const maxLeft = Math.max(16, window.innerWidth - width - 16);
+    setPopoverPosition({
+      left: Math.max(16, Math.min(bounds.right - width, maxLeft)),
+      top: bounds.bottom + 10,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isPopoverOpen) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rosterRef.current?.contains(event.target as Node)) setIsPopoverOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsPopoverOpen(false);
+        setActiveAlias(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", positionPopover);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", positionPopover);
+    };
+  }, [isPopoverOpen, positionPopover]);
+
+  const togglePopover = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    positionPopover();
+    setActiveAlias(null);
+    setIsPopoverOpen(open => !open);
+  };
 
   return (
-    <div aria-label={`${roster.visible.length + roster.overflow} online`} style={styles.roster}>
+    <div
+      aria-label={`${roomUsers.length} participants`}
+      onClick={event => event.stopPropagation()}
+      ref={rosterRef}
+      role="group"
+      style={styles.roster}
+    >
       {roster.visible.map((member, index) => {
         const active = activeAlias === member.alias;
         const label = member.alias === viewerAlias ? `${member.alias} (you)` : member.alias;
 
         return (
-          <span
+          <button
+            aria-expanded={isPopoverOpen}
+            aria-label={`Show all room participants. ${label}`}
+            className="room-roster-trigger"
             key={member.alias}
             onBlur={() => setActiveAlias(null)}
+            onClick={togglePopover}
             onFocus={() => setActiveAlias(member.alias)}
+            onKeyDown={event => {
+              if (event.key === "Escape") {
+                setIsPopoverOpen(false);
+                setActiveAlias(null);
+              }
+            }}
             onMouseEnter={() => setActiveAlias(member.alias)}
             onMouseLeave={() => setActiveAlias(null)}
             style={{
               ...styles.rosterMember,
-              marginLeft: index === 0 ? 0 : active ? "-2px" : "-8px",
+              marginLeft: index === 0 ? 0 : "-8px",
               zIndex: active ? roster.visible.length + 1 : roster.visible.length - index,
             }}
-            tabIndex={0}
-            title={label}
+            type="button"
+            aria-controls="room-participants-popover"
           >
-            <span
-              aria-label={label}
-              style={{
-                ...styles.rosterAvatar,
-                ...(active ? styles.rosterAvatarExpanded : null),
-              }}
-            >
+            <span style={styles.rosterAvatar}>
               <span style={styles.rosterInitials}>{member.initials}</span>
-              <span
-                aria-hidden={!active}
-                style={{
-                  ...styles.rosterName,
-                  maxWidth: active ? "150px" : "0px",
-                  opacity: active ? 1 : 0,
-                }}
-              >
-                {label}
-              </span>
             </span>
-          </span>
+            {active && !isPopoverOpen ? <span role="tooltip" style={styles.rosterTooltip}>{label}</span> : null}
+          </button>
         );
       })}
       {roster.overflow > 0 && (
-        <span
-          style={{
-            ...styles.rosterAvatar,
-            ...styles.rosterOverflow,
-            marginLeft: roster.visible.length > 0 ? "-8px" : 0,
+        <button
+          aria-expanded={isPopoverOpen}
+          aria-label={`Show all ${roomUsers.length} room participants`}
+          className="room-roster-trigger"
+          onClick={togglePopover}
+          onFocus={() => setActiveAlias("__overflow__")}
+          onKeyDown={event => {
+            if (event.key === "Escape") {
+              setIsPopoverOpen(false);
+              setActiveAlias(null);
+            }
           }}
-          title={usersTitle}
+          onMouseEnter={() => setActiveAlias("__overflow__")}
+          onMouseLeave={() => setActiveAlias(null)}
+          style={{
+            ...styles.rosterMember,
+            ...styles.rosterOverflowMember,
+            marginLeft: roster.visible.length > 0 ? "-8px" : 0,
+            zIndex: activeAlias === "__overflow__" ? roster.visible.length + 1 : 0,
+          }}
+          type="button"
+          aria-controls="room-participants-popover"
         >
-          +{roster.overflow}
-        </span>
+          <span style={{ ...styles.rosterAvatar, ...styles.rosterOverflow }}>+{roster.overflow}</span>
+          {activeAlias === "__overflow__" && !isPopoverOpen ? (
+            <span role="tooltip" style={styles.rosterTooltip}>{`${roster.overflow} more participants`}</span>
+          ) : null}
+        </button>
       )}
+      {isPopoverOpen ? (
+        <div
+          aria-label="Room participants"
+          aria-live="polite"
+          id="room-participants-popover"
+          role="region"
+          style={{
+            ...styles.rosterPopover,
+            left: popoverPosition?.left ?? 16,
+            top: popoverPosition?.top ?? 0,
+          }}
+        >
+          {roomUsers.length ? roomUsers.join(", ") : "No users online"}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1671,25 +2122,102 @@ function RoomTtlMeter({
   meter: ReturnType<typeof getRoomTtlMeter>;
 }) {
   const meterColor = meter.warning ? "var(--red)" : "var(--accent)";
+  const timeColor = meter.warning ? "var(--red)" : "var(--room-accent-text)";
+  const [showTimeBar, setShowTimeBar] = useState(false);
+  const timeoutRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+  }, []);
+
+  const toggleTimeBar = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+
+    if (showTimeBar) {
+      setShowTimeBar(false);
+      return;
+    }
+
+    setShowTimeBar(true);
+    timeoutRef.current = window.setTimeout(() => {
+      setShowTimeBar(false);
+      timeoutRef.current = null;
+    }, 3000);
+  };
 
   return (
-    <span
-      aria-label={`room expires in ${meter.time}`}
+    <button
+      aria-label={`Room expires in ${meter.time}. Tap to toggle the remaining time bar, which hides after three seconds.`}
+      aria-pressed={showTimeBar}
+      className="room-ttl-trigger"
+      onClick={toggleTimeBar}
       style={{
         ...styles.ttlMeter,
-        color: meter.warning ? "var(--red)" : "var(--text-muted)",
+        color: timeColor,
       }}
+      type="button"
     >
-      <span
-        style={{
-          ...styles.ttlTime,
-          color: meterColor,
-        }}
+      <svg
+        aria-hidden="true"
+        className="room-ttl-hourglass"
+        fill="currentColor"
+        focusable="false"
+        height="18"
+        shapeRendering="crispEdges"
+        viewBox="0 0 29 33"
+        width="16"
+        xmlns="http://www.w3.org/2000/svg"
       >
-        {meter.time}
-      </span>
+        <g className="room-ttl-hourglass-frame">
+          {[
+            ...Array.from({ length: 7 }, (_, column) => [column, 0]),
+            [1, 1], [5, 1], [2, 2], [4, 2], [3, 3], [3, 4],
+            [2, 5], [4, 5], [1, 6], [5, 6],
+            ...Array.from({ length: 7 }, (_, column) => [column, 7]),
+          ].map(([column, row]) => (
+            <rect height="3" key={`${column}-${row}`} width="3" x={1 + column * 4} y={1 + row * 4} />
+          ))}
+        </g>
+        {[[3, 2], [2, 1], [4, 1], [3, 1]].map(([column, row], index) => (
+          <rect
+            className={`room-ttl-hourglass-sand room-ttl-hourglass-sand-${index + 1}`}
+            height="3"
+            key={`top-${column}-${row}`}
+            width="3"
+            x={1 + column * 4}
+            y={1 + row * 4}
+          />
+        ))}
+        {[[3, 6], [2, 6], [4, 6], [3, 5]].map(([column, row], index) => (
+          <rect
+            className={`room-ttl-hourglass-sand room-ttl-hourglass-sand-${index + 1} room-ttl-hourglass-sand-bottom`}
+            height="3"
+            key={`bottom-${column}-${row}`}
+            width="3"
+            x={1 + column * 4}
+            y={1 + row * 4}
+          />
+        ))}
+      </svg>
+      {showTimeBar ? (
+        <span
+          aria-label="Room time remaining"
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={meter.percent}
+          aria-valuetext={`${meter.percent}% remaining, ${meter.time} left`}
+          role="meter"
+          style={styles.ttlBarTrack}
+        >
+          <span style={{ ...styles.ttlBarFill, background: meterColor, width: `${meter.percent}%` }} />
+        </span>
+      ) : (
+        <span style={{ ...styles.ttlTime, color: timeColor }}>{meter.time}</span>
+      )}
       {meter.marker ? <span aria-hidden="true" style={styles.ttlMarker}>{meter.marker}</span> : null}
-    </span>
+    </button>
   );
 }
 
@@ -1710,11 +2238,12 @@ function TerminalPoll({
   const [hoveredOption, setHoveredOption] = useState<number | null>(null);
   const meterSlots = 16;
   const creator = poll.createdByAlias?.trim();
+  const questionId = `room-poll-question-${poll.pollId}`;
 
   return (
-    <div style={styles.pollBlock}>
-      <span aria-hidden="true" style={styles.pollTitle}>poll --active{creator ? ` by ${creator}` : ""}</span>
-      <p style={styles.pollQuestion}>{poll.question}</p>
+    <div aria-labelledby={questionId} role="group" style={styles.pollBlock}>
+      <span style={styles.pollTitle}>poll --active{creator ? ` by ${creator}` : ""}</span>
+      <p id={questionId} style={styles.pollQuestion}>{poll.question}</p>
       <div style={styles.pollOptions}>
         {poll.options.map((option, index) => {
           const count = votesFor(poll, index);
@@ -1726,6 +2255,8 @@ function TerminalPoll({
 
           return (
             <button
+              aria-label={`${option}, ${count} vote${count === 1 ? "" : "s"}`}
+              aria-pressed={selected}
               key={option}
               onBlur={() => setHoveredOption(null)}
               onFocus={() => setHoveredOption(index)}
@@ -1737,20 +2268,24 @@ function TerminalPoll({
               onMouseLeave={() => setHoveredOption(null)}
               style={{
                 ...styles.pollOption,
+                border: selected
+                  ? "1px solid color-mix(in srgb, var(--accent) 55%, var(--text) 45%)"
+                  : "1px solid transparent",
                 backgroundColor: selected
                   ? "color-mix(in srgb, var(--accent) 12%, transparent)"
                   : hovered
                     ? "color-mix(in srgb, var(--text) 6%, transparent)"
                     : "color-mix(in srgb, var(--text) 3%, transparent)",
-                color: selected || hovered ? "var(--accent)" : "var(--text)",
+                color: "var(--text)",
               }}
               type="button"
             >
               <span aria-hidden="true" style={styles.pollOptionMarker}>{selected || hovered ? ">" : ""}</span>
               <span
+                aria-hidden="true"
                 style={{
                   ...styles.pollOptionIndex,
-                  color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
+                  color: selected ? "var(--room-accent-text)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
                 }}
               >
                 {String(index + 1).padStart(2, "0")}
@@ -1769,7 +2304,7 @@ function TerminalPoll({
               <span
                 style={{
                   ...styles.pollStat,
-                  color: selected ? "var(--accent)" : hovered ? "var(--text)" : "var(--text-muted)",
+                  color: hovered ? "var(--text)" : "var(--text-muted)",
                 }}
               >
                 {count}
@@ -1802,7 +2337,7 @@ const styles: Record<string, CSSProperties> = {
     flexShrink: 0,
     padding: "var(--room-header-padding, 12px clamp(32px, calc(3vw + 16px), 48px))",
     position: "relative",
-    zIndex: 1,
+    zIndex: 10,
   },
   roomHeaderInner: {
     alignItems: "center",
@@ -1820,23 +2355,30 @@ const styles: Record<string, CSSProperties> = {
     gap: "10px",
     minWidth: 0,
   },
-  brand: {
-    color: "var(--text)",
+  roomName: {
+    fontSize: "var(--room-meta-size, 13px)",
     fontFamily: ROOM_FONT_FAMILY,
+    fontWeight: 400,
+    alignItems: "center",
+    display: "flex",
+    gap: "8px",
+    margin: 0,
+    minWidth: 0,
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+  },
+  roomBrand: {
+    color: "var(--text)",
+    flexShrink: 0,
     fontSize: "var(--room-brand-size, 15px)",
     fontWeight: 700,
   },
-  headerDivider: {
+  roomNameDivider: {
     color: "var(--text-dim)",
+    flexShrink: 0,
   },
-  roomId: {
-    color: "var(--accent)",
-    fontSize: "12px",
-    whiteSpace: "nowrap",
-  },
-  topic: {
+  roomTopic: {
     color: "var(--text-muted)",
-    fontSize: "var(--room-meta-size, 13px)",
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -1851,8 +2393,12 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "flex-end",
   },
   headerShareButton: {
+    background: "color-mix(in srgb, var(--accent) 20%, var(--bg-2))",
     borderRadius: 0,
-    fontSize: "11px",
+    color: "var(--text)",
+    fontSize: "12px",
+    lineHeight: "22px",
+    minHeight: "32px",
     padding: "4px 8px",
   },
   metaItem: {
@@ -1864,13 +2410,19 @@ const styles: Record<string, CSSProperties> = {
     whiteSpace: "nowrap",
   },
   ttlMeter: {
+    appearance: "none",
     alignItems: "center",
-    cursor: "default",
+    background: "transparent",
+    border: 0,
+    color: "inherit",
+    cursor: "pointer",
     display: "inline-flex",
+    font: "inherit",
     gap: "6px",
-    height: "18px",
+    height: "32px",
+    justifyContent: "center",
     minWidth: "56px",
-    outline: "none",
+    padding: 0,
     position: "relative",
     whiteSpace: "nowrap",
   },
@@ -1878,6 +2430,20 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "var(--room-meta-size, 13px)",
     minWidth: "56px",
     textAlign: "right",
+  },
+  ttlBarTrack: {
+    background: "var(--bg-3)",
+    border: "1px solid var(--text-dim)",
+    boxSizing: "border-box",
+    display: "block",
+    height: "8px",
+    overflow: "hidden",
+    width: "56px",
+  },
+  ttlBarFill: {
+    display: "block",
+    height: "100%",
+    transition: "width 180ms ease",
   },
   ttlMarker: {
     color: "var(--red)",
@@ -1888,54 +2454,81 @@ const styles: Record<string, CSSProperties> = {
     display: "inline-flex",
     marginRight: "6px",
     minHeight: "32px",
+    position: "relative",
   },
   rosterMember: {
     alignItems: "center",
+    appearance: "none",
+    background: "transparent",
+    border: 0,
+    color: "inherit",
+    cursor: "pointer",
     display: "inline-flex",
-    outline: "none",
+    font: "inherit",
+    padding: 0,
     position: "relative",
-    transition: "margin-left 180ms cubic-bezier(0.23, 1, 0.32, 1), z-index 0ms linear",
   },
   rosterAvatar: {
     alignItems: "center",
-    background: "color-mix(in srgb, var(--bg-3) 78%, transparent)",
+    background: "var(--bg-3)",
     border: "1px solid var(--text-muted)",
     borderRadius: "999px",
     boxSizing: "border-box",
     color: "var(--text-muted)",
     display: "inline-flex",
     fontSize: "12px",
-    gap: "0px",
     height: "32px",
     justifyContent: "center",
     lineHeight: 1,
     minWidth: "32px",
-    overflow: "hidden",
     padding: "0 9px",
-    position: "relative",
-    transition: "max-width 190ms cubic-bezier(0.23, 1, 0.32, 1), border-color 140ms ease, background-color 140ms ease, gap 190ms cubic-bezier(0.23, 1, 0.32, 1)",
-    maxWidth: "32px",
-  },
-  rosterAvatarExpanded: {
-    background: "color-mix(in srgb, var(--bg-2) 88%, transparent)",
-    borderColor: "var(--text-muted)",
-    gap: "8px",
-    maxWidth: "220px",
+    transition: "border-color 140ms ease, background-color 140ms ease",
   },
   rosterInitials: {
     flexShrink: 0,
     minWidth: "14px",
     textAlign: "center",
   },
-  rosterName: {
+  rosterTooltip: {
+    background: "var(--bg-2)",
+    border: "1px solid var(--text-dim)",
+    boxSizing: "border-box",
+    boxShadow: "0 8px 20px rgba(0, 0, 0, 0.28)",
     color: "var(--text-muted)",
-    display: "inline-block",
+    left: "auto",
+    lineHeight: 1.5,
+    maxWidth: "min(240px, calc(100vw - 32px))",
+    padding: "5px 8px",
+    pointerEvents: "none",
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    right: 0,
+    transform: "none",
     fontSize: "12px",
-    lineHeight: "16px",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    transition: "max-width 190ms cubic-bezier(0.23, 1, 0.32, 1), opacity 120ms ease",
-    whiteSpace: "nowrap",
+    overflowWrap: "anywhere",
+    whiteSpace: "normal",
+    width: "max-content",
+    zIndex: 21,
+  },
+  rosterPopover: {
+    background: "var(--bg)",
+    border: "1px solid var(--text-dim)",
+    boxShadow: "0 12px 28px rgba(0, 0, 0, 0.34)",
+    boxSizing: "border-box",
+    color: "var(--text)",
+    fontFamily: ROOM_FONT_FAMILY,
+    fontSize: "12px",
+    lineHeight: 1.65,
+    maxHeight: "min(60vh, 420px)",
+    overflowY: "auto",
+    overflowWrap: "anywhere",
+    padding: "12px 14px",
+    position: "fixed",
+    width: "min(360px, calc(100vw - 32px))",
+    zIndex: 20,
+  },
+  rosterOverflowMember: {
+    flexShrink: 0,
   },
   rosterOverflow: {
     background: "var(--bg)",
@@ -1956,23 +2549,25 @@ const styles: Record<string, CSSProperties> = {
     flex: 1,
     gap: "6px",
     overflowY: "auto",
-    padding: "24px 0",
+    padding: "24px 0 12px",
     position: "relative",
     zIndex: 1,
   },
   transcriptInner: {
+    backgroundColor: "transparent",
+    backdropFilter: "none",
     margin: "0 auto",
     maxWidth: "1200px",
     width: "min(calc(100% - var(--room-chat-gutters, 5rem)), 1200px)",
   },
   emptyTranscript: {
-    color: "var(--text-dim)",
-    fontSize: "var(--room-body-size, 14px)",
+    color: "var(--text-muted)",
+    fontSize: "12px",
     lineHeight: "var(--room-body-line-height, 24px)",
     paddingTop: "8vh",
   },
   emptyLine: {
-    margin: "0 0 4px",
+    margin: "0 0 8px",
   },
   gateTranscript: {
     color: "var(--text-muted)",
@@ -1982,8 +2577,8 @@ const styles: Record<string, CSSProperties> = {
   },
   transcriptLine: {
     color: "var(--text)",
-    fontSize: "var(--room-chat-font-size, 14px)",
-    lineHeight: "var(--room-chat-line-height, 24px)",
+    fontSize: "var(--room-chat-font-size, 15px)",
+    lineHeight: "var(--room-chat-line-height, 26px)",
     margin: 0,
     overflowWrap: "anywhere",
     whiteSpace: "pre-wrap" as const,
@@ -2005,7 +2600,7 @@ const styles: Record<string, CSSProperties> = {
   },
   passwordRevealValue: {
     animation: "room-password-shimmer 760ms linear 360ms 1 both",
-    backgroundImage: "linear-gradient(100deg, var(--accent) 0%, var(--accent) 43%, color-mix(in srgb, var(--text) 88%, var(--accent)) 50%, var(--accent) 57%, var(--accent) 100%)",
+    backgroundImage: "linear-gradient(100deg, var(--room-accent-text) 0%, var(--room-accent-text) 43%, var(--text) 50%, var(--room-accent-text) 57%, var(--room-accent-text) 100%)",
     backgroundPosition: "140% 0",
     backgroundSize: "220% 100%",
     color: "transparent",
@@ -2022,47 +2617,59 @@ const styles: Record<string, CSSProperties> = {
   },
   systemMessageLine: {
     alignItems: "center",
-    color: "color-mix(in srgb, var(--text-dim) var(--room-system-opacity, 74%), transparent)",
+    backgroundColor: "transparent",
+    backdropFilter: "none",
+    color: "color-mix(in srgb, var(--text-muted) 88%, var(--text-dim) 12%)",
     display: "flex",
-    fontSize: "var(--room-system-font-size, 12px)",
+    fontSize: "var(--room-system-font-size, 14px)",
     gap: "10px",
     lineHeight: "var(--room-system-line-height, 20px)",
-    margin: "var(--room-system-margin, 3px) 0",
+    margin: "var(--room-system-margin, 16px) 0",
     whiteSpace: "nowrap",
   },
   systemMessageRule: {
-    borderTop: "1px solid color-mix(in srgb, var(--text-dim) 18%, transparent)",
-    flex: "0 1 36px",
-    minWidth: "18px",
+    backgroundImage: "repeating-linear-gradient(90deg, color-mix(in srgb, var(--text-dim) 68%, transparent) 0 2px, transparent 2px 8px)",
+    flex: "1 1 72px",
+    height: "2px",
+    minWidth: "24px",
   },
   systemMessageText: {
     flex: "0 1 auto",
     minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    overflow: "visible",
+    overflowWrap: "anywhere",
+    textOverflow: "clip",
+    whiteSpace: "normal",
   },
   pollBlock: {
-    background: "color-mix(in srgb, var(--bg-2) 34%, transparent)",
-    border: "1px solid color-mix(in srgb, var(--text-dim) 30%, transparent)",
+    backgroundColor: "transparent",
+    backgroundImage: [
+      "repeating-linear-gradient(90deg, color-mix(in srgb, var(--text-dim) 68%, transparent) 0 2px, transparent 2px 8px)",
+      "repeating-linear-gradient(90deg, color-mix(in srgb, var(--text-dim) 68%, transparent) 0 2px, transparent 2px 8px)",
+      "repeating-linear-gradient(0deg, color-mix(in srgb, var(--text-dim) 68%, transparent) 0 2px, transparent 2px 8px)",
+      "repeating-linear-gradient(0deg, color-mix(in srgb, var(--text-dim) 68%, transparent) 0 2px, transparent 2px 8px)",
+    ].join(", "),
+    backgroundPosition: "left top, left bottom, left top, right top",
+    backgroundRepeat: "repeat-x, repeat-x, repeat-y, repeat-y",
+    backgroundSize: "100% 2px, 100% 2px, 2px 100%, 2px 100%",
+    backgroundOrigin: "border-box",
+    border: "2px solid transparent",
     borderRadius: 0,
     boxSizing: "border-box",
-    boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--text) 1%, transparent)",
-    margin: "var(--room-poll-margin, 18px 0 12px)",
+    boxShadow: "none",
+    margin: "var(--room-poll-margin, 36px 0 32px)",
     maxWidth: "760px",
-    padding: "var(--room-poll-padding, 30px clamp(22px, 4vw, 36px) 24px)",
+    padding: "var(--room-poll-padding, 10px clamp(18px, 3vw, 28px) 16px)",
     position: "relative",
     width: "100%",
   },
   pollTitle: {
-    background: "color-mix(in srgb, var(--bg) 92%, transparent)",
-    color: "color-mix(in srgb, var(--text-dim) 82%, transparent)",
+    background: "transparent",
+    color: "var(--text-muted)",
     fontSize: "var(--room-body-size, 14px)",
-    left: "18px",
     lineHeight: "20px",
-    padding: "0 10px",
-    position: "absolute",
-    top: "-11px",
-    whiteSpace: "nowrap",
+    margin: "0 0 8px",
+    overflowWrap: "anywhere",
   },
   pollQuestion: {
     color: "var(--text)",
@@ -2096,10 +2703,11 @@ const styles: Record<string, CSSProperties> = {
     width: "100%",
   },
   pollOptionLabel: {
+    boxSizing: "border-box",
     minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflowWrap: "anywhere",
+    paddingLeft: "8px",
+    whiteSpace: "normal",
   },
   pollOptionMarker: {
     color: "var(--accent)",
@@ -2142,8 +2750,9 @@ const styles: Record<string, CSSProperties> = {
     zIndex: 1,
   },
   composerFrame: {
-    background: "var(--color-panel)",
-    border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--background) 76%)",
+    background: "color-mix(in srgb, var(--color-panel) 92%, transparent)",
+    backdropFilter: "blur(8px)",
+    border: "1px solid var(--color-composer-border)",
     borderRadius: 0,
     boxSizing: "border-box",
     display: "flex",
@@ -2265,7 +2874,6 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "14px",
     lineHeight: "24px",
     minWidth: 0,
-    outline: "none",
     padding: "0 0 0 4px",
   },
   stateShell: {
@@ -2324,7 +2932,7 @@ const styles: Record<string, CSSProperties> = {
   passwordInput: {
     background: "transparent",
     border: 0,
-    borderBottom: "1px solid var(--border)",
+    borderBottom: "1px solid var(--color-composer-border)",
     borderRadius: 0,
     color: "var(--text)",
     fontFamily: ROOM_FONT_FAMILY,

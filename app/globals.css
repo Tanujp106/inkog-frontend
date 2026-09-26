@@ -16,6 +16,7 @@
   --color-panel-raised: #16161a;
   --color-border: #2a2a32;
   --color-border-strong: #3a3a46;
+  --color-composer-border: color-mix(in srgb, var(--color-text) 38%, var(--color-panel) 62%);
   --color-text: #e8e8f0;
   --color-muted: #b8b8c4;
   --color-dim: #8f8f9e;
@@ -40,6 +41,8 @@
   --accent: var(--color-signal);
   --accent-dim: var(--color-signal-dim);
   --accent-glow: var(--color-signal-glow);
+  --room-message-text: color-mix(in srgb, var(--color-text) 92%, var(--color-signal) 8%);
+  --room-accent-text: color-mix(in srgb, var(--color-text) 76%, var(--color-signal) 24%);
   --red: var(--color-danger);
   --blue: var(--color-info);
   --purple: var(--color-private);
@@ -452,7 +455,7 @@ body::before {
 
   .direction-two-composer-message[data-visible="true"] {
     grid-template-rows: 1fr;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     opacity: 1;
   }
 
@@ -460,10 +463,18 @@ body::before {
     min-height: 0;
     overflow: hidden;
     overflow-wrap: anywhere;
+    visibility: hidden;
+  }
+
+  .direction-two-composer-message[data-visible="true"] .direction-two-composer-message-inner {
+    visibility: visible;
   }
 
   .direction-two-composer-message p {
     margin: 0;
+    max-height: 120px;
+    overflow-y: auto;
+    white-space: pre-wrap;
   }
 }
 .direction-two-composer-entry {
@@ -542,6 +553,48 @@ body::before {
 }
 .room-route-transcript-enter > div {
   animation: room-route-terminal-decode 320ms steps(7, end) 360ms both;
+}
+.room-chat-transcript .room-chat-message-content {
+  color: var(--room-message-text);
+  display: block;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.room-chat-transcript .room-chat-sender {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.room-screen :where(button, input, textarea, select, a[href], [tabindex]):focus-visible,
+.room-state-screen :where(button, input, textarea, select, a[href], [tabindex]):focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+.room-screen [data-route-composer="room"]:has(input:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--text);
+}
+.room-screen [data-route-composer="room"] input:focus-visible {
+  outline: none;
+}
+@keyframes room-ttl-hourglass-flip {
+  to { transform: rotate(180deg); }
+}
+.room-ttl-hourglass {
+  animation: room-ttl-hourglass-flip 1s ease-in-out infinite alternate;
+  display: block;
+  flex: none;
+  transform-origin: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .room-ttl-hourglass { animation: none; }
+}
+.room-screen .btn-ghost,
+.room-state-screen .btn-ghost {
+  border-color: var(--color-composer-border);
 }
 .direction-two-highlight-icon {
   transform-origin: center;
@@ -1066,8 +1119,8 @@ input::placeholder, textarea::placeholder {
     --room-small-size: 11px;
     --room-header-padding: 10px 16px;
     --room-header-gap: 10px;
-    --room-poll-margin: 14px 0 10px;
-    --room-poll-padding: 26px 16px 18px;
+    --room-poll-margin: 24px 0 20px;
+    --room-poll-padding: 10px 14px 14px;
     --room-poll-question-gap: 14px;
   }
 
@@ -1119,16 +1172,17 @@ input::placeholder, textarea::placeholder {
 
   .room-chat-transcript {
     --room-chat-gutters: 2rem;
-    --room-chat-font-size: 13px;
-    --room-chat-line-height: 20px;
-    --room-system-font-size: 11px;
-    --room-system-line-height: 17px;
-    --room-system-margin: 1px;
-    --room-system-opacity: 58%;
+    --room-chat-font-size: 14px;
+    --room-chat-line-height: 22px;
+    --room-system-font-size: 14px;
+    --room-system-line-height: 20px;
+    --room-system-margin: 16px;
+    --room-system-opacity: 84%;
   }
 
   .room-chat-transcript .room-chat-sender {
     font-size: 12px;
-    white-space: nowrap;
+    line-height: 17px;
+    white-space: normal;
   }
 }

@@ -19,6 +19,8 @@ import {
   getDirectionTwoCreateHint,
   getDirectionTwoInlineFeedbackMessage,
   getDirectionTwoInlineGhostText,
+  getDirectionTwoGuidedBackspaceAction,
+  getDirectionTwoMobileComposerMessage,
   getDirectionTwoPasswordMask,
   getDirectionTwoSlashCommandSuggestions,
   getDirectionTwoCreateTimeArrowValue,
@@ -245,34 +247,6 @@ const directionTwoComposerGlowDialConfig = {
   easingY2: [1, 0, 1],
 } satisfies DialConfig;
 
-const directionTwoTitleAnimationDialConfig = {
-  formationDurationMs: [directionTwoTitleMotionDefaults.formationDurationMs, 120, 900, 10],
-  formationSpreadMs: [directionTwoTitleMotionDefaults.formationSpreadMs, 120, 1200, 10],
-  shimmerDurationMs: [directionTwoTitleMotionDefaults.shimmerDurationMs, 240, 1600, 10],
-  shimmerSpreadMs: [directionTwoTitleMotionDefaults.shimmerSpreadMs, 120, 1400, 10],
-  shimmerAmplitudeMs: [directionTwoTitleMotionDefaults.shimmerAmplitudeMs, 0, 240, 2],
-  shimmerFrequency: [directionTwoTitleMotionDefaults.shimmerFrequency, 0.25, 3, 0.05],
-  shimmerColorMixPercent: [directionTwoTitleMotionDefaults.shimmerColorMixPercent, 0, 100, 1],
-  shimmerPeakOpacity: [directionTwoTitleMotionDefaults.shimmerPeakOpacity, 0, 1, 0.05],
-} satisfies DialConfig;
-
-const directionTwoTitleHoverDialConfig = {
-  radius: [directionTwoTitleMotionDefaults.magnetRadius, 24, 180, 2],
-  strength: [directionTwoTitleMotionDefaults.magnetStrength, 0.1, 2, 0.05],
-  maxDisplacement: [directionTwoTitleMotionDefaults.magnetMaxDisplacement, 0, 16, 0.5],
-  returnDurationMs: [directionTwoTitleMotionDefaults.magnetSpringMs, 60, 500, 10],
-  colorMixPercent: [directionTwoTitleMotionDefaults.hoverHighlightColorMixPercent, 0, 100, 1],
-  brightness: [directionTwoTitleMotionDefaults.hoverHighlightBrightness, 1, 2.5, 0.05],
-  glowRadius: [directionTwoTitleMotionDefaults.hoverHighlightGlowRadius, 0, 32, 1],
-  glowOpacity: [directionTwoTitleMotionDefaults.hoverHighlightGlowOpacity, 0, 100, 1],
-  hoverShimmerDurationMs: [directionTwoTitleMotionDefaults.hoverShimmerDurationMs, 240, 1800, 10],
-  hoverShimmerMaxDelayMs: [directionTwoTitleMotionDefaults.hoverShimmerMaxDelayMs, 0, 240, 4],
-  easingX1: [directionTwoTitleMotionDefaults.hoverEasingX1, 0, 1, 0.01],
-  easingY1: [directionTwoTitleMotionDefaults.hoverEasingY1, 0, 1, 0.01],
-  easingX2: [directionTwoTitleMotionDefaults.hoverEasingX2, 0, 1, 0.01],
-  easingY2: [directionTwoTitleMotionDefaults.hoverEasingY2, 0, 1, 0.01],
-} satisfies DialConfig;
-
 function percent(value: number) {
   return `${value}%`;
 }
@@ -401,23 +375,6 @@ const guidedCreateSegmentStep: Record<Exclude<GuidedCreateSegmentId, "command">,
   password: "password",
 };
 
-function guidedCreateQuestionForStep(step: CreateFlow["step"]) {
-  switch (step) {
-    case "topic":
-      return "What should be the room name?";
-    case "expiry":
-      return "What should be the time?";
-    case "limit":
-      return "How many people can join?";
-    case "password-choice":
-      return "Add a password? (y/n)";
-    case "password":
-      return "What should be the password?";
-    case "confirm":
-      return null;
-  }
-}
-
 function guidedCreateSegmentLabel(segmentId: Exclude<GuidedCreateSegmentId, "command">) {
   if (segmentId === "topic") return "room name";
   if (segmentId === "expiry") return "time";
@@ -466,6 +423,8 @@ export function DirectionTwoShell() {
   const [helping, setHelping] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
   const [inputFeedbackMessage, setInputFeedbackMessage] = useState<string | null>(null);
+  const [mobileResultMessage, setMobileResultMessage] = useState<string | null>(null);
+  const mobileResultRequestRef = useRef(0);
   const [passwordRevealIndex, setPasswordRevealIndex] = useState<number | null>(null);
   const [passwordFinalShimmer, setPasswordFinalShimmer] = useState(false);
   const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
@@ -498,16 +457,6 @@ export function DirectionTwoShell() {
     directionTwoComposerGlowDialConfig,
     { id: "inkog-composer-glow" },
   );
-  const titleAnimationSettings = useDialKit(
-    "INKOG title animation",
-    directionTwoTitleAnimationDialConfig,
-    { id: "inkog-title-animation" },
-  );
-  const titleHoverSettings = useDialKit(
-    "INKOG title hover",
-    directionTwoTitleHoverDialConfig,
-    { id: "inkog-title-hover" },
-  );
   const shimmerSettings: DirectionTwoShimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
   const composerMotionStyle = {
@@ -522,34 +471,12 @@ export function DirectionTwoShell() {
     "--direction-two-composer-glow-easing": `cubic-bezier(${composerGlowSettings.easingX1}, ${composerGlowSettings.easingY1}, ${composerGlowSettings.easingX2}, ${composerGlowSettings.easingY2})`,
   } as CSSProperties;
   const composerMotionActive = isTerminalVisible && !prefersReducedMotion;
-  const titleMotionSettings: typeof directionTwoTitleMotionDefaults = {
-    formationDurationMs: titleAnimationSettings.formationDurationMs,
-    formationSpreadMs: titleAnimationSettings.formationSpreadMs,
-    shimmerDurationMs: titleAnimationSettings.shimmerDurationMs,
-    shimmerSpreadMs: titleAnimationSettings.shimmerSpreadMs,
-    shimmerAmplitudeMs: titleAnimationSettings.shimmerAmplitudeMs,
-    shimmerFrequency: titleAnimationSettings.shimmerFrequency,
-    shimmerColorMixPercent: titleAnimationSettings.shimmerColorMixPercent,
-    shimmerPeakOpacity: titleAnimationSettings.shimmerPeakOpacity,
-    hoverHighlightColorMixPercent: titleHoverSettings.colorMixPercent,
-    hoverHighlightBrightness: titleHoverSettings.brightness,
-    hoverHighlightGlowRadius: titleHoverSettings.glowRadius,
-    hoverHighlightGlowOpacity: titleHoverSettings.glowOpacity,
-    magnetRadius: titleHoverSettings.radius,
-    magnetStrength: titleHoverSettings.strength,
-    magnetMaxDisplacement: titleHoverSettings.maxDisplacement,
-    magnetSpringMs: titleHoverSettings.returnDurationMs,
-    hoverShimmerDurationMs: titleHoverSettings.hoverShimmerDurationMs,
-    hoverShimmerMaxDelayMs: titleHoverSettings.hoverShimmerMaxDelayMs,
-    hoverEasingX1: titleHoverSettings.easingX1,
-    hoverEasingY1: titleHoverSettings.easingY1,
-    hoverEasingX2: titleHoverSettings.easingX2,
-    hoverEasingY2: titleHoverSettings.easingY2,
-  };
+  const titleMotionSettings: typeof directionTwoTitleMotionDefaults = directionTwoTitleMotionDefaults;
   const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
-  const guidedCreateQuestion = isMobileViewport && flow?.type === "create" ? guidedCreateQuestionForStep(flow.step) : null;
-  const mobileComposerMessage = isMobileViewport ? inputFeedbackMessage ?? guidedCreateQuestion : null;
+  const mobileComposerMessage = isMobileViewport
+    ? getDirectionTwoMobileComposerMessage({ flow, inputValue, feedback: inputFeedbackMessage, result: mobileResultMessage })
+    : null;
   const [lastMobileComposerMessage, setLastMobileComposerMessage] = useState("");
   useEffect(() => {
     if (mobileComposerMessage) setLastMobileComposerMessage(mobileComposerMessage);
@@ -608,6 +535,7 @@ export function DirectionTwoShell() {
     });
 
     sound.play("error");
+    setMobileResultMessage(null);
     setInputFeedbackMessage(getDirectionTwoInlineFeedbackMessage(message));
     setKeyboardStatus(message);
   };
@@ -631,6 +559,7 @@ export function DirectionTwoShell() {
 
   const cancelFlow = () => {
     sound.play("close");
+    mobileResultRequestRef.current += 1;
     if (flow) appendLines(line("system", "prompt cleared"));
     setFlow(null);
     setGuidedCreateSegments(null);
@@ -638,6 +567,7 @@ export function DirectionTwoShell() {
     setEditingReturnFlow(null);
     setInputValue("");
     setInputFeedbackMessage(null);
+    setMobileResultMessage(null);
     setKeyboardStatus("Prompt cleared.");
     focusInput();
   };
@@ -645,12 +575,14 @@ export function DirectionTwoShell() {
 
   const clearTerminal = () => {
     sound.play("press");
+    mobileResultRequestRef.current += 1;
     setFlow(null);
     setGuidedCreateSegments(null);
     setEditingCreateSegment(null);
     setEditingReturnFlow(null);
     setInputValue("");
     setInputFeedbackMessage(null);
+    setMobileResultMessage(null);
     setLines(initialLines);
     setKeyboardStatus("Terminal cleared.");
     focusInput();
@@ -803,20 +735,26 @@ export function DirectionTwoShell() {
       line("input", command),
       ...directionTwoCommandReferenceLines.map(referenceLine => line("output", referenceLine)),
     );
+    if (isMobileViewport) setMobileResultMessage("Use /create, /join, /style, or /sound. Ask about Inkog with /help / your question.");
     setKeyboardStatus("Command list printed.");
   };
 
   const askProjectHelp = async (command: string, question: string) => {
+    const requestId = ++mobileResultRequestRef.current;
     setHelping(true);
     appendLines(line("input", command), line("output", "asking inkog..."));
+    if (isMobileViewport) setMobileResultMessage("asking inkog...");
 
     try {
       const result = await askInkogHelp(API, question);
       appendLines(line("output", result.answer));
+      if (isMobileViewport && requestId === mobileResultRequestRef.current) setMobileResultMessage(result.answer);
       sound.play("notify");
       setKeyboardStatus("inkog answered.");
     } catch {
-      appendLines(line("error", "The inkog help brain is taking a breather. Try again in a moment."));
+      const message = "The inkog help brain is taking a breather. Try again in a moment.";
+      appendLines(line("error", message));
+      if (isMobileViewport && requestId === mobileResultRequestRef.current) setMobileResultMessage(message);
       sound.play("error");
       setKeyboardStatus("The help request didn't go through.");
     } finally {
@@ -915,6 +853,7 @@ export function DirectionTwoShell() {
       line("output", source === "surprise" ? `theme set: ${theme.label} (surprise me)` : `theme set: ${theme.label}`),
     );
     setFlow(null);
+    if (isMobileViewport) setMobileResultMessage(`Theme set: ${theme.label}.`);
     sound.play("success");
     setKeyboardStatus(`Theme set: ${theme.label}.`);
     focusInput();
@@ -1219,6 +1158,7 @@ export function DirectionTwoShell() {
     if (parsed.type === "status") {
       const status = formatSystemSoundStatus(sound.muted);
       appendLines(line("input", transcriptCommand), line("output", status));
+      if (isMobileViewport) setMobileResultMessage(status);
       sound.play("notify");
       setKeyboardStatus(status);
       return;
@@ -1231,6 +1171,7 @@ export function DirectionTwoShell() {
     sound.setMuted(nextMuted);
     const status = formatSystemSoundStatus(nextMuted);
     appendLines(line("input", transcriptCommand), line("output", status));
+    if (isMobileViewport) setMobileResultMessage(status);
     setKeyboardStatus(status);
   };
 
@@ -1251,6 +1192,7 @@ export function DirectionTwoShell() {
 
     setInputValue("");
     setInputFeedbackMessage(null);
+    setMobileResultMessage(null);
 
     if (flow) {
       submitFlowAnswer(command);
@@ -1361,12 +1303,52 @@ export function DirectionTwoShell() {
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (creating || passwordRevealIndex !== null) return;
 
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelFlow();
+      return;
+    }
+
     const createEditingStep = !flow ? getDirectionTwoCreateEditingStep(event.currentTarget.value) : null;
     const slashCommandDeletionDirection = event.key === "Backspace"
       ? "backward"
       : event.key === "Delete"
         ? "forward"
         : null;
+
+    if (
+      isMobileViewport &&
+      flow?.type === "create" &&
+      guidedCreateSegments &&
+      event.key === "Backspace" &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      const backspaceAction = getDirectionTwoGuidedBackspaceAction({
+        step: flow.step,
+        inputValue: event.currentTarget.value,
+        editingSegment: editingCreateSegment,
+        segments: guidedCreateSegments,
+        draft: flow.draft,
+      });
+
+      if (backspaceAction) {
+        event.preventDefault();
+        if (backspaceAction.type === "cancel") {
+          cancelFlow();
+        } else {
+          setGuidedCreateSegments(backspaceAction.segments);
+          setFlow({ type: "create", step: backspaceAction.step, draft: backspaceAction.draft });
+          setInputValue("");
+          setInputFeedbackMessage(null);
+          setKeyboardStatus(`Editing ${guidedCreateSegmentLabel(backspaceAction.step)}.`);
+          focusInput();
+        }
+        return;
+      }
+    }
 
     if (
       !flow &&
@@ -1385,8 +1367,8 @@ export function DirectionTwoShell() {
 
       if (deletionRange) {
         event.preventDefault();
-        input.setRangeText("", deletionRange.start, deletionRange.end, "start");
-        handleInputValueChange(input.value);
+        handleInputValueChange(input.value.slice(0, deletionRange.start) + input.value.slice(deletionRange.end));
+        requestAnimationFrame(() => inputRef.current?.setSelectionRange(deletionRange.start, deletionRange.start));
         syncInputMirrorScroll();
         return;
       }
@@ -1519,6 +1501,8 @@ export function DirectionTwoShell() {
 
     setInputValue(nextValue);
     setInputFeedbackMessage(null);
+    mobileResultRequestRef.current += 1;
+    setMobileResultMessage(null);
     setHistoryIndex(null);
   };
 
@@ -1574,6 +1558,8 @@ export function DirectionTwoShell() {
   };
 
   const handleSlashCommandSuggestionTap = (command: string) => {
+    mobileResultRequestRef.current += 1;
+    setMobileResultMessage(null);
     if (slashMenuImmediateCommands.has(command)) {
       executeCommand(command);
       focusInput();
@@ -1832,8 +1818,9 @@ export function DirectionTwoShell() {
             <div
               className={`direction-two-terminal-frame ${isInputNudging ? "direction-two-input-nudge " : ""}flex min-w-0 flex-col gap-0 pl-[12px] pr-[12px] text-[length:var(--route-composer-font-size)] leading-[var(--route-composer-line-height)] text-[var(--foreground)]`}
               style={{
-                background: "var(--color-panel)",
-                border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--background) 76%)",
+                background: "color-mix(in srgb, var(--color-panel) 92%, transparent)",
+                backdropFilter: "blur(8px)",
+                border: "1px solid var(--color-composer-border)",
                 borderRadius: 0,
                 padding: "var(--route-composer-frame-padding)",
                 paddingLeft: "12px",
@@ -1959,7 +1946,7 @@ export function DirectionTwoShell() {
                 role="status"
               >
                 <div className="direction-two-composer-message-inner">
-                  <p className={`px-[4px] text-[13px] leading-[20px] ${inputFeedbackMessage ? "text-[var(--color-dim)]" : "text-[var(--color-signal)]"}`}>
+                  <p className="px-[4px] text-[13px] leading-[20px] text-[var(--color-dim)]">
                     {mobileComposerMessage ?? lastMobileComposerMessage}
                   </p>
                 </div>
