@@ -415,6 +415,8 @@ export default function RoomPage() {
 
   const socketRef = useRef<Socket | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
+  const tabFocusPendingRef = useRef(false);
+  const [isComposerTabFocused, setIsComposerTabFocused] = useState(false);
   const transcriptViewportRef = useRef<HTMLElement | null>(null);
   const shouldFollowTranscriptRef = useRef(true);
   const soundRef = useRef(sound);
@@ -429,10 +431,61 @@ export default function RoomPage() {
       const input = composerRef.current;
       if (!input) return;
 
+      tabFocusPendingRef.current = false;
+      setIsComposerTabFocused(false);
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
     });
   };
+
+  useEffect(() => {
+    const trackTabNavigation = (event: KeyboardEvent) => {
+      tabFocusPendingRef.current = event.key === "Tab";
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Tab" || stage !== "joined" || event.defaultPrevented || event.isComposing) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
+
+      const target = event.target;
+      const isEditableTarget = target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || (target instanceof HTMLElement && target.isContentEditable)
+        || (target instanceof Element && Boolean(target.closest('[role="textbox"]')));
+      if (isEditableTarget) return;
+
+      const isInteractiveTarget = target instanceof Element
+        && Boolean(target.closest('button, a[href], [role="button"], [role="link"]'));
+      if (event.key === " " && isInteractiveTarget) return;
+
+      const input = composerRef.current;
+      if (!input || input.disabled) return;
+
+      event.preventDefault();
+      setIsComposerTabFocused(false);
+      setComposerValue(current => `${current}${event.key}`);
+      input.focus();
+      requestAnimationFrame(() => {
+        const currentInput = composerRef.current;
+        currentInput?.setSelectionRange(currentInput.value.length, currentInput.value.length);
+      });
+    };
+
+    const handlePointerDown = () => {
+      tabFocusPendingRef.current = false;
+      setIsComposerTabFocused(false);
+    };
+
+    document.addEventListener("keydown", trackTabNavigation, true);
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      document.removeEventListener("keydown", trackTabNavigation, true);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [stage]);
 
   useEffect(() => {
     soundRef.current = sound;
@@ -1464,7 +1517,7 @@ export default function RoomPage() {
             </button>
             {shareCopied ? <span aria-live="polite" role="status" style={styles.srOnly}>Room link copied.</span> : null}
             <AvatarRoster roster={roster} roomUsers={roomUsers} viewerAlias={alias} />
-            <RoomTtlMeter meter={ttlMeter} />
+            <RoomTtlMeter meter={ttlMeter} secondsLeft={secondsLeft} totalSeconds={ttlTotalSecondsRef.current} />
           </div>
         </div>
       </header>
@@ -1550,8 +1603,11 @@ export default function RoomPage() {
       >
         <div
           data-route-composer="room"
+          data-tab-focused={isComposerTabFocused ? "true" : undefined}
           onClick={event => {
             if (event.target instanceof Element && event.target.closest('input, [role="option"]')) return;
+            tabFocusPendingRef.current = false;
+            setIsComposerTabFocused(false);
             composerRef.current?.focus();
           }}
           style={{
@@ -1658,9 +1714,14 @@ export default function RoomPage() {
               aria-expanded={isPasswordGate ? undefined : showSlashSuggestions}
               aria-controls={isPasswordGate ? undefined : "room-slash-command-suggestions"}
               id="room-terminal-input"
+              onBlur={() => setIsComposerTabFocused(false)}
               onChange={event => {
                 setComposerValue(event.target.value);
                 setSlashSuggestionIndex(0);
+              }}
+              onFocus={() => {
+                setIsComposerTabFocused(tabFocusPendingRef.current);
+                tabFocusPendingRef.current = false;
               }}
               onKeyDown={event => {
                 if (event.key === "Escape" && passwordReveal) {
@@ -2118,11 +2179,19 @@ function AvatarRoster({
 
 function RoomTtlMeter({
   meter,
+  secondsLeft,
+  totalSeconds,
 }: {
   meter: ReturnType<typeof getRoomTtlMeter>;
+  secondsLeft: number;
+  totalSeconds: number;
 }) {
   const meterColor = meter.warning ? "var(--red)" : "var(--accent)";
   const timeColor = meter.warning ? "var(--red)" : "var(--room-accent-text)";
+  const remainingSeconds = Math.max(0, Math.floor(secondsLeft));
+  const turns = Math.max(0, Math.ceil(Math.max(totalSeconds, remainingSeconds) / 6) - Math.ceil(remainingSeconds / 6));
+  const isInverted = turns % 2 === 1;
+  const movedSand = Math.min(4, (6 - remainingSeconds % 6) % 6);
   const [showTimeBar, setShowTimeBar] = useState(false);
   const timeoutRef = useRef<number | null>(null);
 
@@ -2166,7 +2235,10 @@ function RoomTtlMeter({
         focusable="false"
         height="18"
         shapeRendering="crispEdges"
-        style={{ color: meter.warning ? "var(--red)" : "var(--text)" }}
+        style={{
+          color: timeColor,
+          transform: `rotate(${turns * 180}deg)`,
+        }}
         viewBox="0 0 29 33"
         width="16"
         xmlns="http://www.w3.org/2000/svg"
@@ -2178,14 +2250,26 @@ function RoomTtlMeter({
             [2, 5], [4, 5], [1, 6], [5, 6],
             ...Array.from({ length: 7 }, (_, column) => [column, 7]),
           ].map(([column, row]) => (
-            <rect height="3" key={`${column}-${row}`} width="3" x={1 + column * 4} y={1 + row * 4} />
+            <rect
+              className="room-ttl-hourglass-pixel"
+              height="3"
+              key={`${column}-${row}`}
+              style={{ "--highlight-shimmer-delay": `${column * 10 + row * 6}ms` } as CSSProperties}
+              width="3"
+              x={1 + column * 4}
+              y={1 + row * 4}
+            />
           ))}
         </g>
         {[[3, 2], [2, 1], [4, 1], [3, 1]].map(([column, row], index) => (
           <rect
-            className={`room-ttl-hourglass-sand room-ttl-hourglass-sand-${index + 1}`}
+            className="room-ttl-hourglass-pixel room-ttl-hourglass-sand"
             height="3"
             key={`top-${column}-${row}`}
+            style={{
+              opacity: isInverted ? Number(index >= 4 - movedSand) : Number(index >= movedSand),
+              "--highlight-shimmer-delay": `${column * 10 + row * 6}ms`,
+            } as CSSProperties}
             width="3"
             x={1 + column * 4}
             y={1 + row * 4}
@@ -2193,9 +2277,13 @@ function RoomTtlMeter({
         ))}
         {[[3, 6], [2, 6], [4, 6], [3, 5]].map(([column, row], index) => (
           <rect
-            className={`room-ttl-hourglass-sand room-ttl-hourglass-sand-${index + 1} room-ttl-hourglass-sand-bottom`}
+            className="room-ttl-hourglass-pixel room-ttl-hourglass-sand"
             height="3"
             key={`bottom-${column}-${row}`}
+            style={{
+              opacity: isInverted ? Number(index < 4 - movedSand) : Number(index < movedSand),
+              "--highlight-shimmer-delay": `${column * 10 + row * 6}ms`,
+            } as CSSProperties}
             width="3"
             x={1 + column * 4}
             y={1 + row * 4}
@@ -2419,7 +2507,7 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     display: "inline-flex",
     font: "inherit",
-    gap: "6px",
+    gap: "3px",
     height: "32px",
     justifyContent: "center",
     minWidth: "56px",
@@ -2430,7 +2518,7 @@ const styles: Record<string, CSSProperties> = {
   ttlTime: {
     fontSize: "var(--room-meta-size, 13px)",
     minWidth: "56px",
-    textAlign: "right",
+    textAlign: "left",
   },
   ttlBarTrack: {
     background: "var(--bg-3)",

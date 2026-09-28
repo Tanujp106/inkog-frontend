@@ -114,6 +114,51 @@ const initialDraft: CreateDraft = {
 };
 
 const initialLines: TerminalLine[] = [];
+
+// Disposable home-page stress fixture. Remove this and the uiScenario branches below after design review.
+function createWorstCaseHomeScenario() {
+  const draft: CreateDraft = {
+    topic: "Neighborhood repair weekend — supplies, accessible routes, volunteers & last-minute changes 🛠️",
+    expiry: 180,
+    roomLimit: 30,
+    password: "",
+  };
+  const entries: Array<[TerminalLine["kind"], string]> = [
+    ["system", "preview: crowded home terminal with mixed command states"],
+    ["input", "/help"],
+    ...directionTwoCommandReferenceLines.map(text => ["output", text] as [TerminalLine["kind"], string]),
+    ["input", "/join abc123"],
+    ["error", "That room didn't open. Check the link and try again."],
+    ["input", "/create / Neighborhood repair weekend — supplies, accessible routes, volunteers & last-minute changes 🛠️ / 180 / 30 / y"],
+    ["output", "starting private room setup"],
+    ["output", "topic saved"],
+    ["output", "expires in 180m"],
+    ["output", "member limit set: 30"],
+    ["system", "prompt cleared"],
+    ["input", "/help / What if a room fills while someone is choosing a theme or entering a long invite link?"],
+    ["output", "A full room cannot accept another participant. Share a fresh invite or create another temporary space."],
+    ["input", "/join https://inkog.example/room/averylongunbrokenroomidentifierthatshouldwrapwithoutcoveringthecomposer"],
+    ["error", "That room didn't open. Check the link and try again."],
+    ["input", "/style"],
+    ["output", "pick a theme by number or tap an option below"],
+    ["input", "/create"],
+    ["output", "starting private room setup"],
+    ["output", `room name: ${draft.topic}`],
+    ["output", `expires in ${draft.expiry}m · maximum ${draft.roomLimit} participants`],
+    ["output", "add a password? y / n"],
+  ];
+
+  return {
+    draft,
+    lines: entries.map(([kind, text], index) => ({ id: `home-worst-case-${index}`, kind, text })),
+    segments: [
+      { id: "command", value: "/create" },
+      { id: "topic", value: draft.topic },
+      { id: "expiry", value: String(draft.expiry) },
+      { id: "limit", value: String(draft.roomLimit) },
+    ] satisfies GuidedCreateSegment[],
+  };
+}
 const introHeadline = "Create a temporary room where friends can speak honestly, vote quickly, and disappear without leaving identity trails behind.";
 const mobileIntroHeadline = "Create a temporary room for honest chats, quick votes, and no identity trail.";
 const introScrambleDelayMs = 140;
@@ -276,10 +321,10 @@ function setStoredToken(roomId: string, token: string) {
   window.localStorage.setItem(`token_${roomId}`, token);
 }
 
-function applyTheme(themeId: DirectionTwoTheme["id"]) {
+function applyTheme(themeId: DirectionTwoTheme["id"], persist = true) {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-inkog-theme", themeId);
-  if (typeof window !== "undefined" && typeof window.localStorage?.setItem === "function") {
+  if (persist && typeof window !== "undefined" && typeof window.localStorage?.setItem === "function") {
     window.localStorage.setItem(themeStorageKey, themeId);
   }
 }
@@ -428,6 +473,8 @@ export function DirectionTwoShell() {
   const [passwordRevealIndex, setPasswordRevealIndex] = useState<number | null>(null);
   const [passwordFinalShimmer, setPasswordFinalShimmer] = useState(false);
   const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
+  const [isWorstCasePreview, setIsWorstCasePreview] = useState(false);
+  const [previewMuted, setPreviewMuted] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [isTerminalVisible, setIsTerminalVisible] = useState(false);
   const [isInputNudging, setIsInputNudging] = useState(false);
@@ -447,6 +494,18 @@ export function DirectionTwoShell() {
   }, []);
   const showMobileLanding = !hasViewportSync || isMobileViewport;
   const showDesktopLanding = !hasViewportSync || !isMobileViewport;
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" || new URLSearchParams(window.location.search).get("uiScenario") !== "worst-case") return;
+
+    const scenario = createWorstCaseHomeScenario();
+    setIsWorstCasePreview(true);
+    setPreviewMuted(sound.muted);
+    setLines(scenario.lines);
+    setFlow({ type: "create", step: "password-choice", draft: scenario.draft });
+    setGuidedCreateSegments(scenario.segments);
+    setKeyboardStatus("Home worst-case preview. Choose whether to add a password.");
+  }, []);
   const composerEntranceSettings = useDialKit(
     "Composer entrance",
     directionTwoComposerEntranceDialConfig,
@@ -633,7 +692,8 @@ export function DirectionTwoShell() {
     if (!savedTheme) return;
 
     setActiveThemeId(savedTheme.id);
-    applyTheme(savedTheme.id);
+    const isPreview = process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("uiScenario") === "worst-case";
+    applyTheme(savedTheme.id, !isPreview);
   }, []);
 
   useEffect(() => {
@@ -697,6 +757,7 @@ export function DirectionTwoShell() {
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       const target = event.target;
       const isEditableTarget =
         target instanceof HTMLInputElement ||
@@ -710,6 +771,7 @@ export function DirectionTwoShell() {
         return;
       }
 
+      if (routeHandoffState.phase !== "idle") return;
       if (event.metaKey || event.ctrlKey || event.altKey || isEditableTarget) return;
       if (event.key.length !== 1) return;
 
@@ -722,7 +784,7 @@ export function DirectionTwoShell() {
 
     document.addEventListener("keydown", handleDocumentKeyDown);
     return () => document.removeEventListener("keydown", handleDocumentKeyDown);
-  }, []);
+  }, [routeHandoffState.phase]);
 
   const pushHistory = (value: string) => {
     if (!value.trim()) return;
@@ -740,6 +802,14 @@ export function DirectionTwoShell() {
   };
 
   const askProjectHelp = async (command: string, question: string) => {
+    if (isWorstCasePreview) {
+      const answer = `Preview answer for “${question}”: rooms are temporary, invite links can expire, and full rooms need a new space.`;
+      appendLines(line("input", command), line("output", answer));
+      if (isMobileViewport) setMobileResultMessage(answer);
+      setKeyboardStatus("Preview help answered locally.");
+      return;
+    }
+
     const requestId = ++mobileResultRequestRef.current;
     setHelping(true);
     appendLines(line("input", command), line("output", "asking inkog..."));
@@ -846,7 +916,7 @@ export function DirectionTwoShell() {
   };
 
   const commitThemeSelection = (theme: DirectionTwoTheme, inputText: string, source = "manual") => {
-    applyTheme(theme.id);
+    applyTheme(theme.id, !isWorstCasePreview);
     setActiveThemeId(theme.id);
     appendLines(
       line("input", inputText),
@@ -877,6 +947,16 @@ export function DirectionTwoShell() {
       return;
     }
 
+    if (isWorstCasePreview) {
+      const message = `Preview only: /room/${id} was not opened. No live room was contacted.`;
+      appendLines(line("input", command), line("output", message));
+      if (isMobileViewport) setMobileResultMessage(message);
+      setFlow(null);
+      setGuidedCreateSegments(null);
+      setKeyboardStatus(message);
+      return;
+    }
+
     setRouteActivity("join");
     setKeyboardStatus(`Joining room ${id}.`);
     appendLines(line("input", command));
@@ -901,6 +981,16 @@ export function DirectionTwoShell() {
 
   const createRoom = async (draft: CreateDraft, options: { confirmInput?: string | null } = {}) => {
     const confirmInput = options.confirmInput === undefined ? "y" : options.confirmInput;
+
+    if (isWorstCasePreview) {
+      const message = `Preview only: “${draft.topic}” would open for ${draft.expiry}m with up to ${draft.roomLimit} people. No room was created.`;
+      appendLines(...(confirmInput ? [line("input", confirmInput)] : []), line("output", message));
+      if (isMobileViewport) setMobileResultMessage(message);
+      setFlow(null);
+      setGuidedCreateSegments(null);
+      setKeyboardStatus("Preview room creation completed locally.");
+      return;
+    }
 
     setCreating(true);
     setRouteActivity("create");
@@ -1152,6 +1242,16 @@ export function DirectionTwoShell() {
 
     if (parsed.type === "invalid") {
       rejectInputInline(rawCommand, parsed.message ?? "Try /sound on, /sound off, or /sound status.");
+      return;
+    }
+
+    if (isWorstCasePreview) {
+      const nextMuted = parsed.type === "status" ? previewMuted : parsed.muted === true;
+      if (parsed.type !== "status") setPreviewMuted(nextMuted);
+      const status = formatSystemSoundStatus(nextMuted);
+      appendLines(line("input", transcriptCommand), line("output", status));
+      if (isMobileViewport) setMobileResultMessage(status);
+      setKeyboardStatus(status);
       return;
     }
 
