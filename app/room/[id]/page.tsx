@@ -62,6 +62,114 @@ const API = getInkogApiBaseUrl();
 const SOCKET_URL = getInkogSocketBaseUrl();
 const ROOM_FONT_FAMILY = '"Departure Mono", monospace';
 
+const ROOM_HEADER_CSS = `
+.room-header-pixel-icon {
+  display: block;
+  flex: none;
+  fill: currentColor;
+  height: 17px;
+  width: 17px;
+}
+.room-header-roster {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--room-meta-size, 13px);
+  gap: 7px;
+  min-height: 34px;
+  padding: 0;
+  white-space: nowrap;
+}
+.room-header-roster:hover { color: var(--text); }
+.room-header-pill,
+.room-header-exit {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-2));
+  border: 1px solid var(--color-composer-border);
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: var(--text-muted);
+  display: inline-flex;
+  font-family: inherit;
+  font-size: var(--room-meta-size, 13px);
+  min-height: 34px;
+  white-space: nowrap;
+}
+.room-header-pill {
+  cursor: pointer;
+  gap: 7px;
+  padding: 0 12px;
+}
+.room-header-pill--invite {
+  background: color-mix(in srgb, var(--accent) 19%, var(--bg-2));
+  color: var(--text);
+}
+.room-header-pill:hover,
+.room-header-exit:hover {
+  background: color-mix(in srgb, var(--accent) 25%, var(--bg-2));
+  color: var(--text);
+}
+.room-header-exit { position: relative; }
+.room-header-exit-primary,
+.room-header-exit-menu-trigger {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  min-height: 32px;
+}
+.room-header-exit-primary { gap: 7px; padding: 0 12px; }
+.room-header-exit-menu-trigger {
+  border-left: 1px solid var(--color-composer-border);
+  justify-content: center;
+  padding: 0 6px;
+}
+.room-header-exit-menu-trigger .room-header-pixel-icon {
+  height: 14px;
+  width: 14px;
+}
+.room-header-exit-menu {
+  background: var(--bg-2);
+  border: 1px solid var(--color-composer-border);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
+  min-width: 190px;
+  padding: 5px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 30;
+}
+.room-header-end-action {
+  background: transparent;
+  border: 0;
+  color: var(--red);
+  cursor: pointer;
+  font: inherit;
+  padding: 9px 10px;
+  text-align: left;
+  width: 100%;
+}
+.room-header-end-action:hover { background: var(--bg-3); }
+@media (max-width: 640px) {
+  .room-screen {
+    --room-header-columns: minmax(0, 1fr) auto;
+    --room-header-divider-display: none;
+    --room-header-actions-column: 1 / -1;
+    --room-header-action-gap: 8px;
+    --room-header-status-gap: 6px;
+  }
+}
+`;
+
 interface Message {
   id: string;
   alias: string;
@@ -1501,6 +1609,7 @@ export default function RoomPage() {
       data-route-handoff-phase={routeHandoffState.phase}
       style={styles.roomShell}
     >
+      <style>{ROOM_HEADER_CSS}</style>
       <header style={{ ...styles.roomHeader, ...getRoomPartStyle(roomId, "header") }}>
         <div style={styles.roomHeaderInner}>
           <div style={styles.headerIdentity}>
@@ -2054,7 +2163,17 @@ const roomHeaderPixelPatterns = {
 
 function RoomHeaderPixelIcon({ kind }: { kind: keyof typeof roomHeaderPixelPatterns }) {
   return (
-    <svg aria-hidden="true" className="room-header-pixel-icon" focusable="false" shapeRendering="crispEdges" viewBox="0 0 29 29">
+    <svg
+      aria-hidden="true"
+      className="room-header-pixel-icon"
+      fill="currentColor"
+      focusable="false"
+      height="17"
+      shapeRendering="crispEdges"
+      viewBox="0 0 29 29"
+      width="17"
+      xmlns="http://www.w3.org/2000/svg"
+    >
       {roomHeaderPixelPatterns[kind].flatMap((row, y) =>
         [...row].map((pixel, x) => pixel === "#" ? (
           <rect className="room-header-pixel" height="3" key={`${x}-${y}`} width="3" x={1 + x * 4} y={1 + y * 4} />
