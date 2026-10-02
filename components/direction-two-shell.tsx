@@ -2,7 +2,6 @@
 
 import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useDialKit, type DialConfig } from "dialkit";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
 import { getSlashCommandTokenDeletionRange } from "@/lib/slash-command-token.mjs";
@@ -272,26 +271,26 @@ const defaultDirectionTwoShimmerSettings: DirectionTwoShimmerSettings = {
   easingY2: 1,
 };
 
-const directionTwoComposerEntranceDialConfig = {
-  distancePx: [8, 0, 24],
-  durationMs: [260, 100, 600],
-  startOpacity: [0, 0, 1],
-  easingX1: [0.22, 0, 1],
-  easingY1: [1, 0, 1],
-  easingX2: [0.36, 0, 1],
-  easingY2: [1, 0, 1],
-} satisfies DialConfig;
+const directionTwoComposerEntranceSettings = {
+  distancePx: 8,
+  durationMs: 260,
+  startOpacity: 0,
+  easingX1: 0.22,
+  easingY1: 1,
+  easingX2: 0.36,
+  easingY2: 1,
+};
 
-const directionTwoComposerGlowDialConfig = {
-  delayMs: [250, 0, 900],
-  durationMs: [830, 250, 1200],
-  opacity: [0.3, 0, 0.9],
-  blurPx: [8, 0, 24],
-  easingX1: [0.22, 0, 1],
-  easingY1: [1, 0, 1],
-  easingX2: [0.36, 0, 1],
-  easingY2: [1, 0, 1],
-} satisfies DialConfig;
+const directionTwoComposerGlowSettings = {
+  delayMs: 250,
+  durationMs: 830,
+  opacity: 0.3,
+  blurPx: 8,
+  easingX1: 0.22,
+  easingY1: 1,
+  easingX2: 0.36,
+  easingY2: 1,
+};
 
 function percent(value: number) {
   return `${value}%`;
@@ -506,35 +505,25 @@ export function DirectionTwoShell() {
     setGuidedCreateSegments(scenario.segments);
     setKeyboardStatus("Home worst-case preview. Choose whether to add a password.");
   }, []);
-  const composerEntranceSettings = useDialKit(
-    "Composer entrance",
-    directionTwoComposerEntranceDialConfig,
-    { id: "inkog-composer-entrance" },
-  );
-  const composerGlowSettings = useDialKit(
-    "Composer glow",
-    directionTwoComposerGlowDialConfig,
-    { id: "inkog-composer-glow" },
-  );
   const shimmerSettings: DirectionTwoShimmerSettings = defaultDirectionTwoShimmerSettings;
   const shimmerStyle = buildDirectionTwoShimmerStyle(shimmerSettings);
   const composerMotionStyle = {
-    "--direction-two-composer-entry-distance": `${composerEntranceSettings.distancePx}px`,
-    "--direction-two-composer-entry-duration": `${composerEntranceSettings.durationMs}ms`,
-    "--direction-two-composer-entry-opacity": composerEntranceSettings.startOpacity,
-    "--direction-two-composer-entry-easing": `cubic-bezier(${composerEntranceSettings.easingX1}, ${composerEntranceSettings.easingY1}, ${composerEntranceSettings.easingX2}, ${composerEntranceSettings.easingY2})`,
-    "--direction-two-composer-glow-delay": `${composerGlowSettings.delayMs}ms`,
-    "--direction-two-composer-glow-duration": `${composerGlowSettings.durationMs}ms`,
-    "--direction-two-composer-glow-opacity": composerGlowSettings.opacity,
-    "--direction-two-composer-glow-blur": `${composerGlowSettings.blurPx}px`,
-    "--direction-two-composer-glow-easing": `cubic-bezier(${composerGlowSettings.easingX1}, ${composerGlowSettings.easingY1}, ${composerGlowSettings.easingX2}, ${composerGlowSettings.easingY2})`,
+    "--direction-two-composer-entry-distance": `${directionTwoComposerEntranceSettings.distancePx}px`,
+    "--direction-two-composer-entry-duration": `${directionTwoComposerEntranceSettings.durationMs}ms`,
+    "--direction-two-composer-entry-opacity": directionTwoComposerEntranceSettings.startOpacity,
+    "--direction-two-composer-entry-easing": `cubic-bezier(${directionTwoComposerEntranceSettings.easingX1}, ${directionTwoComposerEntranceSettings.easingY1}, ${directionTwoComposerEntranceSettings.easingX2}, ${directionTwoComposerEntranceSettings.easingY2})`,
+    "--direction-two-composer-glow-delay": `${directionTwoComposerGlowSettings.delayMs}ms`,
+    "--direction-two-composer-glow-duration": `${directionTwoComposerGlowSettings.durationMs}ms`,
+    "--direction-two-composer-glow-opacity": directionTwoComposerGlowSettings.opacity,
+    "--direction-two-composer-glow-blur": `${directionTwoComposerGlowSettings.blurPx}px`,
+    "--direction-two-composer-glow-easing": `cubic-bezier(${directionTwoComposerGlowSettings.easingX1}, ${directionTwoComposerGlowSettings.easingY1}, ${directionTwoComposerGlowSettings.easingX2}, ${directionTwoComposerGlowSettings.easingY2})`,
   } as CSSProperties;
   const composerMotionActive = isTerminalVisible && !prefersReducedMotion;
   const titleMotionSettings: typeof directionTwoTitleMotionDefaults = directionTwoTitleMotionDefaults;
   const slashCommandSuggestions = !flow && !inputFeedbackMessage && !routeActivity ? getDirectionTwoSlashCommandSuggestions(inputValue) : [];
   const isSlashMenuOpen = slashCommandSuggestions.length > 0;
   const mobileComposerMessage = isMobileViewport
-    ? getDirectionTwoMobileComposerMessage({ flow, inputValue, feedback: inputFeedbackMessage, result: mobileResultMessage })
+    ? getDirectionTwoMobileComposerMessage({ flow, inputValue, feedback: inputFeedbackMessage })
     : null;
   const [lastMobileComposerMessage, setLastMobileComposerMessage] = useState("");
   useEffect(() => {

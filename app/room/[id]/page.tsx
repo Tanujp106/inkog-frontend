@@ -21,7 +21,7 @@ import {
   inkogThemeChoices,
 } from "@/lib/inkog-theme.mjs";
 import { roomThemeBackground } from "@/lib/room-background.mjs";
-import { buildRoomShareMessage, getRoomRoster, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
+import { buildRoomShareMessage, getRoomTtlMeter } from "@/lib/room-header-ui.mjs";
 import { getRoomCountdownNotification } from "@/lib/room-notifications.mjs";
 import {
   createEmptyRoomPollDraft,
@@ -98,7 +98,6 @@ interface JoinRoomData {
 }
 
 type Stage = "loading" | "password" | "joined" | "expired" | "error";
-type RoomRoster = { visible: { alias: string; initials: string }[]; overflow: number };
 type ComposerStatus = { tone: "muted" | "accent" | "error"; message: string };
 type PasswordReveal = { password: string; hint: string };
 type PendingComposerCommand =
@@ -200,7 +199,7 @@ function createWorstCaseRoomScenario() {
       makeMessage("stress-message-01", "system", `joined as ${alias}`, 49, true),
       makeMessage("stress-message-02", "system", "Glowing Pebble joined", 48, true),
       makeMessage("stress-message-03", "system", `${longAlias} joined`, 47, true),
-      makeMessage("stress-message-04", "system", "37 more participants joined", 46, true),
+      makeMessage("stress-message-04", "system", "37 more people joined", 46, true),
       makeMessage("stress-message-05", alias, "Quick sanity check: can everybody see the plan, and can we keep decisions in this room?", 44),
       makeMessage("stress-message-06", "Glowing Pebble", "Yep. I can see it on my phone too.", 43),
       makeMessage(
@@ -1439,7 +1438,6 @@ export default function RoomPage() {
   const myVote = (poll: Poll) => poll.votesByMember.find(v => v.alias === alias)?.optionIndex ?? -1;
   const isRoomBooting = stage === "loading";
   const isPasswordGate = stage === "password";
-  const roster = getRoomRoster(roomUsers);
   const pollInlinePrompt = !isRoomBooting && !isPasswordGate && pendingCommand?.type === "poll" ? getRoomPollInlinePrompt(pendingCommand) : null;
   const showIdleCursor = composerValue.length === 0 && !pollInlinePrompt;
   const composerChrome = getRoomComposerChrome({
@@ -1512,20 +1510,30 @@ export default function RoomPage() {
               <span style={styles.roomTopic}>{topic}</span>
             </h1>
           </div>
-          <div style={styles.headerMeta}>
+          <div style={styles.headerStatus}>
+            <RoomTtlMeter meter={ttlMeter} secondsLeft={secondsLeft} totalSeconds={ttlTotalSecondsRef.current} />
+            <span aria-hidden="true" style={styles.headerSeparator}>·</span>
+            <RoomRosterCount roomUsers={roomUsers} />
+          </div>
+          <span aria-hidden="true" style={styles.headerDivider} />
+          <div style={styles.headerActions}>
             <button
-              aria-label="Copy room link"
-              className="btn-ghost"
+              aria-label="Copy room invite"
+              className="room-header-pill room-header-pill--invite"
               onClick={() => void copyShareLinkFromButton()}
               onMouseEnter={() => sound.play("hover")}
-              style={styles.headerShareButton}
               type="button"
             >
-              {shareCopied ? "copied!" : "share"}
+              <RoomHeaderPixelIcon kind="invite" />
+              <span>{shareCopied ? "copied!" : "Invite"}</span>
             </button>
             {shareCopied ? <span aria-live="polite" role="status" style={styles.srOnly}>Room link copied.</span> : null}
-            <AvatarRoster roster={roster} roomUsers={roomUsers} viewerAlias={alias} />
-            <RoomTtlMeter meter={ttlMeter} secondsLeft={secondsLeft} totalSeconds={ttlTotalSecondsRef.current} />
+            <RoomExitActions
+              isCreator={isCreator}
+              onEndRoom={closeRoomWithConfirm}
+              onHover={() => sound.play("hover")}
+              onLeave={handleLeave}
+            />
           </div>
         </div>
       </header>
@@ -2037,16 +2045,26 @@ function TerminalMessage({
   );
 }
 
-function AvatarRoster({
-  roster,
-  roomUsers,
-  viewerAlias,
-}: {
-  roster: RoomRoster;
-  roomUsers: string[];
-  viewerAlias: string;
-}) {
-  const [activeAlias, setActiveAlias] = useState<string | null>(null);
+const roomHeaderPixelPatterns = {
+  people: [".#...#.", "###.###", ".#...#.", ".......", "###.###", "#.#.#.#", "#.#.#.#"],
+  invite: ["...##..", "..#..#.", ".#....#", ".#.##.#", "#....#.", ".#..#..", "..##..."],
+  leave: ["#####..", "#...#..", "#...###", "#.....#", "#...###", "#...#..", "#####.."],
+  chevron: [".......", ".......", ".#...#.", "..#.#..", "...#...", ".......", "......."],
+} as const;
+
+function RoomHeaderPixelIcon({ kind }: { kind: keyof typeof roomHeaderPixelPatterns }) {
+  return (
+    <svg aria-hidden="true" className="room-header-pixel-icon" focusable="false" shapeRendering="crispEdges" viewBox="0 0 29 29">
+      {roomHeaderPixelPatterns[kind].flatMap((row, y) =>
+        [...row].map((pixel, x) => pixel === "#" ? (
+          <rect className="room-header-pixel" height="3" key={`${x}-${y}`} width="3" x={1 + x * 4} y={1 + y * 4} />
+        ) : null)
+      )}
+    </svg>
+  );
+}
+
+function RoomRosterCount({ roomUsers }: { roomUsers: string[] }) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null);
   const rosterRef = useRef<HTMLDivElement | null>(null);
@@ -2064,15 +2082,11 @@ function AvatarRoster({
 
   useEffect(() => {
     if (!isPopoverOpen) return;
-
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (!rosterRef.current?.contains(event.target as Node)) setIsPopoverOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsPopoverOpen(false);
-        setActiveAlias(null);
-      }
+      if (event.key === "Escape") setIsPopoverOpen(false);
     };
 
     document.addEventListener("pointerdown", closeOnOutsidePointer);
@@ -2085,92 +2099,29 @@ function AvatarRoster({
     };
   }, [isPopoverOpen, positionPopover]);
 
-  const togglePopover = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    positionPopover();
-    setActiveAlias(null);
-    setIsPopoverOpen(open => !open);
-  };
-
+  const countLabel = `${roomUsers.length} ${roomUsers.length === 1 ? "person" : "people"}`;
   return (
-    <div
-      aria-label={`${roomUsers.length} participants`}
-      onClick={event => event.stopPropagation()}
-      ref={rosterRef}
-      role="group"
-      style={styles.roster}
-    >
-      {roster.visible.map((member, index) => {
-        const active = activeAlias === member.alias;
-        const label = member.alias === viewerAlias ? `${member.alias} (you)` : member.alias;
-
-        return (
-          <button
-            aria-expanded={isPopoverOpen}
-            aria-label={`Show all room participants. ${label}`}
-            className="room-roster-trigger"
-            key={member.alias}
-            onBlur={() => setActiveAlias(null)}
-            onClick={togglePopover}
-            onFocus={() => setActiveAlias(member.alias)}
-            onKeyDown={event => {
-              if (event.key === "Escape") {
-                setIsPopoverOpen(false);
-                setActiveAlias(null);
-              }
-            }}
-            onMouseEnter={() => setActiveAlias(member.alias)}
-            onMouseLeave={() => setActiveAlias(null)}
-            style={{
-              ...styles.rosterMember,
-              marginLeft: index === 0 ? 0 : "-8px",
-              zIndex: active ? roster.visible.length + 1 : roster.visible.length - index,
-            }}
-            type="button"
-            aria-controls="room-participants-popover"
-          >
-            <span style={styles.rosterAvatar}>
-              <span style={styles.rosterInitials}>{member.initials}</span>
-            </span>
-            {active && !isPopoverOpen ? <span role="tooltip" style={styles.rosterTooltip}>{label}</span> : null}
-          </button>
-        );
-      })}
-      {roster.overflow > 0 && (
-        <button
-          aria-expanded={isPopoverOpen}
-          aria-label={`Show all ${roomUsers.length} room participants`}
-          className="room-roster-trigger"
-          onClick={togglePopover}
-          onFocus={() => setActiveAlias("__overflow__")}
-          onKeyDown={event => {
-            if (event.key === "Escape") {
-              setIsPopoverOpen(false);
-              setActiveAlias(null);
-            }
-          }}
-          onMouseEnter={() => setActiveAlias("__overflow__")}
-          onMouseLeave={() => setActiveAlias(null)}
-          style={{
-            ...styles.rosterMember,
-            ...styles.rosterOverflowMember,
-            marginLeft: roster.visible.length > 0 ? "-8px" : 0,
-            zIndex: activeAlias === "__overflow__" ? roster.visible.length + 1 : 0,
-          }}
-          type="button"
-          aria-controls="room-participants-popover"
-        >
-          <span style={{ ...styles.rosterAvatar, ...styles.rosterOverflow }}>+{roster.overflow}</span>
-          {activeAlias === "__overflow__" && !isPopoverOpen ? (
-            <span role="tooltip" style={styles.rosterTooltip}>{`${roster.overflow} more participants`}</span>
-          ) : null}
-        </button>
-      )}
+    <div ref={rosterRef}>
+      <button
+        aria-controls="room-people-popover"
+        aria-expanded={isPopoverOpen}
+        aria-label={`Show people in room: ${countLabel}`}
+        className="room-header-roster"
+        onClick={event => {
+          event.stopPropagation();
+          positionPopover();
+          setIsPopoverOpen(open => !open);
+        }}
+        type="button"
+      >
+        <RoomHeaderPixelIcon kind="people" />
+        <span>{countLabel}</span>
+      </button>
       {isPopoverOpen ? (
         <div
-          aria-label="Room participants"
+          aria-label="People in room"
           aria-live="polite"
-          id="room-participants-popover"
+          id="room-people-popover"
           role="region"
           style={{
             ...styles.rosterPopover,
@@ -2178,8 +2129,83 @@ function AvatarRoster({
             top: popoverPosition?.top ?? 0,
           }}
         >
-          {roomUsers.length ? roomUsers.join(", ") : "No users online"}
+          {roomUsers.length ? roomUsers.join(", ") : "No one here yet"}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RoomExitActions({
+  isCreator,
+  onEndRoom,
+  onHover,
+  onLeave,
+}: {
+  isCreator: boolean;
+  onEndRoom: () => void;
+  onHover: () => void;
+  onLeave: () => void;
+}) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setIsMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setIsMenuOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isMenuOpen]);
+
+  return (
+    <div className="room-header-exit" ref={menuRef}>
+      <button aria-label="Leave room" className="room-header-exit-primary" onClick={onLeave} onMouseEnter={onHover} type="button">
+        <RoomHeaderPixelIcon kind="leave" />
+        <span>Leave</span>
+      </button>
+      {isCreator ? (
+        <>
+          <button
+            aria-controls="room-exit-menu"
+            aria-expanded={isMenuOpen}
+            aria-haspopup="menu"
+            aria-label="Room options"
+            className="room-header-exit-menu-trigger"
+            onClick={() => setIsMenuOpen(open => !open)}
+            onMouseEnter={onHover}
+            ref={triggerRef}
+            type="button"
+          >
+            <RoomHeaderPixelIcon kind="chevron" />
+          </button>
+          {isMenuOpen ? (
+            <div className="room-header-exit-menu" id="room-exit-menu" role="menu">
+              <button
+                className="room-header-end-action"
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  onEndRoom();
+                }}
+                role="menuitem"
+                type="button"
+              >
+                End room for everyone
+              </button>
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -2438,12 +2464,13 @@ const styles: Record<string, CSSProperties> = {
   },
   roomHeaderInner: {
     alignItems: "center",
-    display: "flex",
-    gap: "var(--room-header-gap, 16px)",
-    justifyContent: "space-between",
+    columnGap: "var(--room-header-gap, 24px)",
+    display: "grid",
+    gridTemplateColumns: "var(--room-header-columns, minmax(0, 1fr) auto 1px auto)",
     margin: "0 auto",
     maxWidth: "1200px",
     minHeight: "40px",
+    rowGap: "10px",
     width: "100%",
   },
   headerIdentity: {
@@ -2481,22 +2508,31 @@ const styles: Record<string, CSSProperties> = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
-  headerMeta: {
+  headerStatus: {
     alignItems: "center",
-    display: "flex",
-    flexShrink: 0,
-    flexWrap: "wrap",
-    gap: "10px",
-    justifyContent: "flex-end",
+    display: "inline-flex",
+    gap: "var(--room-header-status-gap, 12px)",
+    whiteSpace: "nowrap",
   },
-  headerShareButton: {
-    background: "color-mix(in srgb, var(--accent) 20%, var(--bg-2))",
-    borderRadius: 0,
-    color: "var(--text)",
-    fontSize: "12px",
-    lineHeight: "22px",
-    minHeight: "32px",
-    padding: "4px 8px",
+  headerSeparator: {
+    color: "var(--text-dim)",
+    fontSize: "20px",
+    lineHeight: 1,
+  },
+  headerDivider: {
+    alignSelf: "center",
+    background: "var(--text-dim)",
+    display: "var(--room-header-divider-display, block)",
+    height: "28px",
+    opacity: 0.65,
+    width: "1px",
+  },
+  headerActions: {
+    alignItems: "center",
+    display: "inline-flex",
+    gap: "var(--room-header-action-gap, 12px)",
+    gridColumn: "var(--room-header-actions-column, auto)",
+    justifySelf: "end",
   },
   metaItem: {
     alignItems: "center",
@@ -2546,67 +2582,6 @@ const styles: Record<string, CSSProperties> = {
     color: "var(--red)",
     fontSize: "var(--room-meta-size, 13px)",
   },
-  roster: {
-    alignItems: "center",
-    display: "inline-flex",
-    marginRight: "6px",
-    minHeight: "32px",
-    position: "relative",
-  },
-  rosterMember: {
-    alignItems: "center",
-    appearance: "none",
-    background: "transparent",
-    border: 0,
-    color: "inherit",
-    cursor: "pointer",
-    display: "inline-flex",
-    font: "inherit",
-    padding: 0,
-    position: "relative",
-  },
-  rosterAvatar: {
-    alignItems: "center",
-    background: "var(--bg-3)",
-    border: "1px solid var(--text-muted)",
-    borderRadius: "999px",
-    boxSizing: "border-box",
-    color: "var(--text-muted)",
-    display: "inline-flex",
-    fontSize: "12px",
-    height: "32px",
-    justifyContent: "center",
-    lineHeight: 1,
-    minWidth: "32px",
-    padding: "0 9px",
-    transition: "border-color 140ms ease, background-color 140ms ease",
-  },
-  rosterInitials: {
-    flexShrink: 0,
-    minWidth: "14px",
-    textAlign: "center",
-  },
-  rosterTooltip: {
-    background: "var(--bg-2)",
-    border: "1px solid var(--text-dim)",
-    boxSizing: "border-box",
-    boxShadow: "0 8px 20px rgba(0, 0, 0, 0.28)",
-    color: "var(--text-muted)",
-    left: "auto",
-    lineHeight: 1.5,
-    maxWidth: "min(240px, calc(100vw - 32px))",
-    padding: "5px 8px",
-    pointerEvents: "none",
-    position: "absolute",
-    top: "calc(100% + 8px)",
-    right: 0,
-    transform: "none",
-    fontSize: "12px",
-    overflowWrap: "anywhere",
-    whiteSpace: "normal",
-    width: "max-content",
-    zIndex: 21,
-  },
   rosterPopover: {
     background: "var(--bg)",
     border: "1px solid var(--text-dim)",
@@ -2623,13 +2598,6 @@ const styles: Record<string, CSSProperties> = {
     position: "fixed",
     width: "min(360px, calc(100vw - 32px))",
     zIndex: 20,
-  },
-  rosterOverflowMember: {
-    flexShrink: 0,
-  },
-  rosterOverflow: {
-    background: "var(--bg)",
-    color: "var(--text-muted)",
   },
   errorToast: {
     background: "rgba(255, 87, 87, 0.12)",
