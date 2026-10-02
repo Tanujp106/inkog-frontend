@@ -354,6 +354,11 @@ function setStoredToken(roomId: string, token: string) {
   window.localStorage.setItem(`token_${roomId}`, token);
 }
 
+function clearStoredToken(roomId: string) {
+  if (typeof window === "undefined" || typeof window.localStorage?.removeItem !== "function") return;
+  window.localStorage.removeItem(`token_${roomId}`);
+}
+
 function makeId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `${Date.now()}-${Math.random()}`;
@@ -868,7 +873,8 @@ export default function RoomPage() {
 
         const storedToken = getStoredToken(roomId);
         if (roomData.hasPassword && !storedToken) {
-          setStage("password");
+          cancelRoomHandoff();
+          router.replace(`/?join=${encodeURIComponent(roomId)}`);
           return;
         }
 
@@ -878,7 +884,9 @@ export default function RoomPage() {
         } catch (err: unknown) {
           const e = err as { status?: number; message?: string };
           if (roomData.hasPassword && e.status === 403) {
-            setStage("password");
+            clearStoredToken(roomId);
+            cancelRoomHandoff();
+            router.replace(`/?join=${encodeURIComponent(roomId)}`);
             return;
           }
           throw err;

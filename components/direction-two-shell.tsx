@@ -65,9 +65,9 @@ import { setStoredRoomPassword } from "@/lib/room-password-command.mjs";
 import { getInkogApiBaseUrl } from "@/lib/api-config.mjs";
 import { getRouteStatusPresentation } from "@/lib/route-handoff.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
+import { parseRoomId } from "@/lib/room-lookup.mjs";
 
 const API = getInkogApiBaseUrl();
-const roomIdPattern = /([a-z0-9]{6})$/i;
 const themeStorageKey = "inkog-theme";
 type DirectionTwoTheme = NonNullable<ReturnType<typeof resolveDirectionTwoThemeChoice>>;
 type DirectionTwoTitlePhase = "forming" | "shimmering" | "interactive";
@@ -100,7 +100,8 @@ type SessionFlow =
   | { type: "create"; step: "password"; draft: CreateDraft }
   | { type: "create"; step: "confirm"; draft: CreateDraft }
   | { type: "style"; step: "choice" }
-  | { type: "join"; step: "room" };
+  | { type: "join"; step: "room" }
+  | { type: "join"; step: "password"; roomId: string; topic: string };
 
 type GuidedCreateSegmentId = "command" | "topic" | "expiry" | "limit" | "password-choice" | "password";
 type GuidedCreateSegment = { id: GuidedCreateSegmentId; value: string };
@@ -321,6 +322,11 @@ function setStoredToken(roomId: string, token: string) {
   window.localStorage.setItem(`token_${roomId}`, token);
 }
 
+function getStoredToken(roomId: string) {
+  if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") return undefined;
+  return window.localStorage.getItem(`token_${roomId}`) || undefined;
+}
+
 function applyTheme(themeId: DirectionTwoTheme["id"], persist = true) {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-inkog-theme", themeId);
@@ -337,12 +343,6 @@ function line(kind: TerminalLine["kind"], text: string): TerminalLine {
   };
 }
 
-function cleanRoomId(rawValue: string) {
-  const trimmed = rawValue.trim();
-  const match = trimmed.match(roomIdPattern);
-  return match ? match[1] : trimmed;
-}
-
 function isYes(value: string) {
   return ["y", "yes"].includes(value.trim().toLowerCase());
 }
@@ -353,7 +353,7 @@ function isNo(value: string) {
 
 function promptFor(flow: SessionFlow | null) {
   if (!flow) return "$";
-  if (flow.type === "join") return "room id";
+  if (flow.type === "join") return flow.step === "password" ? "room password" : "room id";
   if (flow.type === "style") return "style";
 
   switch (flow.step) {
@@ -374,7 +374,7 @@ function promptFor(flow: SessionFlow | null) {
 
 function placeholderFor(flow: SessionFlow | null) {
   if (!flow) return "write '/' to start";
-  if (flow.type === "join") return "abc123 or room link";
+  if (flow.type === "join") return flow.step === "password" ? "write password" : "abc123 or room link";
   if (flow.type === "style") return "1, 2, 3, 4, or 5";
 
   switch (flow.step) {
@@ -447,6 +447,7 @@ export function DirectionTwoShell() {
   const terminalOutputRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const slashMenuRef = useRef<HTMLDivElement | null>(null);
+  const joinLinkHandledRef = useRef(false);
   const inputNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const passwordRevealTimerRef = useRef<number | null>(null);
   const passwordFinalShimmerTimerRef = useRef<number | null>(null);
@@ -468,8 +469,7 @@ export function DirectionTwoShell() {
   const [helping, setHelping] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
   const [inputFeedbackMessage, setInputFeedbackMessage] = useState<string | null>(null);
-  const [mobileResultMessage, setMobileResultMessage] = useState<string | null>(null);
-  const mobileResultRequestRef = useRef(0);
+  const helpRequestIdRef = useRef(0);
   const [passwordRevealIndex, setPasswordRevealIndex] = useState<number | null>(null);
   const [passwordFinalShimmer, setPasswordFinalShimmer] = useState(false);
   const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
@@ -594,7 +594,6 @@ export function DirectionTwoShell() {
     });
 
     sound.play("error");
-    setMobileResultMessage(null);
     setInputFeedbackMessage(getDirectionTwoInlineFeedbackMessage(message));
     setKeyboardStatus(message);
   };
@@ -618,7 +617,7 @@ export function DirectionTwoShell() {
 
   const cancelFlow = () => {
     sound.play("close");
-    mobileResultRequestRef.current += 1;
+    helpRequestIdRef.current += 1;
     if (flow) appendLines(line("system", "prompt cleared"));
     setFlow(null);
     setGuidedCreateSegments(null);
@@ -626,7 +625,6 @@ export function DirectionTwoShell() {
     setEditingReturnFlow(null);
     setInputValue("");
     setInputFeedbackMessage(null);
-    setMobileResultMessage(null);
     setKeyboardStatus("Prompt cleared.");
     focusInput();
   };
@@ -634,14 +632,13 @@ export function DirectionTwoShell() {
 
   const clearTerminal = () => {
     sound.play("press");
-    mobileResultRequestRef.current += 1;
+    helpRequestIdRef.current += 1;
     setFlow(null);
     setGuidedCreateSegments(null);
     setEditingCreateSegment(null);
     setEditingReturnFlow(null);
     setInputValue("");
     setInputFeedbackMessage(null);
-    setMobileResultMessage(null);
     setLines(initialLines);
     setKeyboardStatus("Terminal cleared.");
     focusInput();
@@ -727,7 +724,7 @@ export function DirectionTwoShell() {
   }, [prefersReducedMotion]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || isMobileViewport) return;
+    if (typeof window === "undefined") return;
 
     let frame = 0;
     let remainingPasses = 5;
@@ -797,7 +794,6 @@ export function DirectionTwoShell() {
       line("input", command),
       ...directionTwoCommandReferenceLines.map(referenceLine => line("output", referenceLine)),
     );
-    if (isMobileViewport) setMobileResultMessage("Use /create, /join, /style, or /sound. Ask about Inkog with /help / your question.");
     setKeyboardStatus("Command list printed.");
   };
 
@@ -805,26 +801,24 @@ export function DirectionTwoShell() {
     if (isWorstCasePreview) {
       const answer = `Preview answer for “${question}”: rooms are temporary, invite links can expire, and full rooms need a new space.`;
       appendLines(line("input", command), line("output", answer));
-      if (isMobileViewport) setMobileResultMessage(answer);
       setKeyboardStatus("Preview help answered locally.");
       return;
     }
 
-    const requestId = ++mobileResultRequestRef.current;
+    const requestId = ++helpRequestIdRef.current;
     setHelping(true);
     appendLines(line("input", command), line("output", "asking inkog..."));
-    if (isMobileViewport) setMobileResultMessage("asking inkog...");
 
     try {
       const result = await askInkogHelp(API, question);
+      if (requestId !== helpRequestIdRef.current) return;
       appendLines(line("output", result.answer));
-      if (isMobileViewport && requestId === mobileResultRequestRef.current) setMobileResultMessage(result.answer);
       sound.play("notify");
       setKeyboardStatus("inkog answered.");
     } catch {
+      if (requestId !== helpRequestIdRef.current) return;
       const message = "The inkog help brain is taking a breather. Try again in a moment.";
       appendLines(line("error", message));
-      if (isMobileViewport && requestId === mobileResultRequestRef.current) setMobileResultMessage(message);
       sound.play("error");
       setKeyboardStatus("The help request didn't go through.");
     } finally {
@@ -877,6 +871,10 @@ export function DirectionTwoShell() {
 
   const beginCreate = (command = "/create") => {
     if (isMobileViewport) {
+      appendLines(
+        line("input", command),
+        line("output", "starting private room setup"),
+      );
       setGuidedCreateSegments(createDirectionTwoGuidedCommandSegments(command) as GuidedCreateSegment[]);
       setEditingCreateSegment(null);
       setEditingReturnFlow(null);
@@ -923,7 +921,6 @@ export function DirectionTwoShell() {
       line("output", source === "surprise" ? `theme set: ${theme.label} (surprise me)` : `theme set: ${theme.label}`),
     );
     setFlow(null);
-    if (isMobileViewport) setMobileResultMessage(`Theme set: ${theme.label}.`);
     sound.play("success");
     setKeyboardStatus(`Theme set: ${theme.label}.`);
     focusInput();
@@ -940,17 +937,16 @@ export function DirectionTwoShell() {
   };
 
   const openRoom = async (rawRoomId: string, command = `join ${rawRoomId}`) => {
-    const id = cleanRoomId(rawRoomId);
+    const id = parseRoomId(rawRoomId);
 
     if (!id) {
-      rejectInputInline(command, "Add a room ID to join.");
+      rejectInputInline(command, "Add a room ID or a valid /room/ link to join.");
       return;
     }
 
     if (isWorstCasePreview) {
       const message = `Preview only: /room/${id} was not opened. No live room was contacted.`;
       appendLines(line("input", command), line("output", message));
-      if (isMobileViewport) setMobileResultMessage(message);
       setFlow(null);
       setGuidedCreateSegments(null);
       setKeyboardStatus(message);
@@ -970,6 +966,25 @@ export function DirectionTwoShell() {
         return;
       }
 
+      if (roomData.hasPassword && !getStoredToken(id)) {
+        appendLines(
+          line("output", `room found: ${typeof roomData.topic === "string" ? roomData.topic : id}`),
+          line("output", "password required to join"),
+        );
+        setInputValue("");
+        setInputFeedbackMessage(null);
+        setRouteActivity(null);
+        setFlow({
+          type: "join",
+          step: "password",
+          roomId: id,
+          topic: typeof roomData.topic === "string" ? roomData.topic : "",
+        });
+        setKeyboardStatus("This room has a password. Enter it to continue.");
+        focusInput();
+        return;
+      }
+
       sound.play("success");
       beginRoomHandoff(id);
       router.push(`/room/${id}`);
@@ -979,13 +994,79 @@ export function DirectionTwoShell() {
     }
   };
 
+  const submitJoinPassword = async (joinFlow: Extract<SessionFlow, { type: "join"; step: "password" }>, rawPassword: string) => {
+    const password = rawPassword.trim();
+    if (!password) {
+      rejectInputInline(rawPassword, "Enter the room password to continue.");
+      return;
+    }
+
+    setInputValue("");
+    setRouteActivity("join");
+    setKeyboardStatus(`Joining room ${joinFlow.roomId}.`);
+
+    try {
+      const joinRes = await fetch(`${API}/rooms/${joinFlow.roomId}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const joinData = await joinRes.json().catch(() => ({}));
+
+      if (!joinRes.ok) {
+        setRouteActivity(null);
+        rejectInputToTerminal(joinData.message || "That password didn't open the room. Try again.");
+        if (joinRes.status !== 403) setFlow(null);
+        return;
+      }
+
+      if (typeof joinData.anonToken !== "string" || !joinData.anonToken) {
+        setRouteActivity(null);
+        rejectInputToTerminal("The room server couldn't finish joining. Try the link again.");
+        return;
+      }
+
+      setStoredToken(joinFlow.roomId, joinData.anonToken);
+      appendLines(line("output", "password accepted; opening the room"));
+      sound.play("success");
+      beginRoomHandoff(joinFlow.roomId);
+      router.push(`/room/${joinFlow.roomId}`);
+    } catch {
+      setRouteActivity(null);
+      rejectInputToTerminal("The room server is taking a breather. Try again in a moment.");
+    }
+  };
+
+  useEffect(() => {
+    if (!hasViewportSync || joinLinkHandledRef.current) return;
+
+    const requestedRoom = new URLSearchParams(window.location.search).get("join");
+    if (!requestedRoom) return;
+
+    joinLinkHandledRef.current = true;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("join");
+    router.replace(`${url.pathname}${url.search}${url.hash}`);
+
+    const id = parseRoomId(requestedRoom);
+    if (!id) {
+      appendLines(line("error", "That room link doesn't look right. Check it and try again."));
+      setKeyboardStatus("The room link could not be read.");
+      return;
+    }
+
+    setFlow({ type: "join", step: "room" });
+    void openRoom(id, `/join / ${id}`);
+    // The ref makes this one-shot effect safe across strict-mode reruns.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasViewportSync, router]);
+
   const createRoom = async (draft: CreateDraft, options: { confirmInput?: string | null } = {}) => {
     const confirmInput = options.confirmInput === undefined ? "y" : options.confirmInput;
 
     if (isWorstCasePreview) {
       const message = `Preview only: “${draft.topic}” would open for ${draft.expiry}m with up to ${draft.roomLimit} people. No room was created.`;
       appendLines(...(confirmInput ? [line("input", confirmInput)] : []), line("output", message));
-      if (isMobileViewport) setMobileResultMessage(message);
       setFlow(null);
       setGuidedCreateSegments(null);
       setKeyboardStatus("Preview room creation completed locally.");
@@ -1119,8 +1200,9 @@ export function DirectionTwoShell() {
 
     if (flowState.step === "topic") {
       const nextDraft = { ...flowState.draft, topic: answer };
-      if (isMobileViewport && commitGuidedCreateSegment("topic", answer, nextDraft)) return;
-      if (!isMobileViewport) appendLines(line("input", answer), line("output", "topic saved"));
+      const edited = isMobileViewport && commitGuidedCreateSegment("topic", answer, nextDraft);
+      appendLines(line("input", answer), line("output", "topic saved"));
+      if (edited) return;
       sound.play("success");
       setFlow({ type: "create", step: "expiry", draft: nextDraft });
       setKeyboardStatus("How many minutes should the room stay open?");
@@ -1131,8 +1213,9 @@ export function DirectionTwoShell() {
       const expiry = Number(answer);
 
       const nextDraft = { ...flowState.draft, expiry };
-      if (isMobileViewport && commitGuidedCreateSegment("expiry", answer, nextDraft)) return;
-      if (!isMobileViewport) appendLines(line("input", answer), line("output", `expires in ${expiry}m`));
+      const edited = isMobileViewport && commitGuidedCreateSegment("expiry", answer, nextDraft);
+      appendLines(line("input", answer), line("output", `expires in ${expiry}m`));
+      if (edited) return;
       sound.play("success");
       setFlow({ type: "create", step: "limit", draft: nextDraft });
       setKeyboardStatus("Maximum participants?");
@@ -1143,8 +1226,9 @@ export function DirectionTwoShell() {
       const roomLimit = Number(answer);
 
       const nextDraft = { ...flowState.draft, roomLimit };
-      if (isMobileViewport && commitGuidedCreateSegment("limit", answer, nextDraft)) return;
-      if (!isMobileViewport) appendLines(line("input", answer), line("output", `member limit set: ${roomLimit}`));
+      const edited = isMobileViewport && commitGuidedCreateSegment("limit", answer, nextDraft);
+      appendLines(line("input", answer), line("output", `member limit set: ${roomLimit}`));
+      if (edited) return;
       sound.play("success");
       setFlow({ type: "create", step: "password-choice", draft: nextDraft });
       setKeyboardStatus("Add password? Answer y or n.");
@@ -1154,8 +1238,9 @@ export function DirectionTwoShell() {
     if (flowState.step === "password-choice") {
       if (isNo(answer)) {
         const nextDraft = { ...flowState.draft, password: "" };
-        if (isMobileViewport && commitGuidedCreateSegment("password-choice", answer, nextDraft)) return;
-        if (!isMobileViewport) appendLines(line("input", answer), line("output", "password: off"));
+        const edited = isMobileViewport && commitGuidedCreateSegment("password-choice", answer, nextDraft);
+        appendLines(line("input", answer), line("output", "password: off"));
+        if (edited) return;
         sound.play("success");
         if (isMobileViewport) {
           setFlow(null);
@@ -1168,8 +1253,9 @@ export function DirectionTwoShell() {
       }
 
       if (isYes(answer)) {
-        if (isMobileViewport && commitGuidedCreateSegment("password-choice", answer, flowState.draft)) return;
-        if (!isMobileViewport) appendLines(line("input", answer), line("output", "password: on"));
+        const edited = isMobileViewport && commitGuidedCreateSegment("password-choice", answer, flowState.draft);
+        appendLines(line("input", answer), line("output", "password: on"));
+        if (edited) return;
         sound.play("success");
         setFlow({ type: "create", step: "password", draft: flowState.draft });
         setKeyboardStatus("Write password.");
@@ -1180,8 +1266,9 @@ export function DirectionTwoShell() {
     if (flowState.step === "password") {
       revealPassword(answer, () => {
         const nextDraft = { ...flowState.draft, password: answer };
-        if (isMobileViewport && commitGuidedCreateSegment("password", answer, nextDraft)) return;
-        if (!isMobileViewport) appendLines(line("input", "********"), line("output", "password stored locally until room creation"));
+        const edited = isMobileViewport && commitGuidedCreateSegment("password", answer, nextDraft);
+        appendLines(line("input", "********"), line("output", "password stored locally until room creation"));
+        if (edited) return;
         sound.play("success");
         if (isMobileViewport) {
           setFlow(null);
@@ -1217,13 +1304,17 @@ export function DirectionTwoShell() {
     if (!flow) return;
 
     if (flow.type === "join") {
-      const id = cleanRoomId(rawAnswer);
-      if (!id) {
-        rejectInputInline(rawAnswer, "Enter a room ID to keep going.");
+      if (flow.step === "password") {
+        void submitJoinPassword(flow, rawAnswer);
         return;
       }
 
-      setFlow(null);
+      const id = parseRoomId(rawAnswer);
+      if (!id) {
+        rejectInputInline(rawAnswer, "Enter a room ID or a valid /room/ link to keep going.");
+        return;
+      }
+
       openRoom(id, id);
       return;
     }
@@ -1250,7 +1341,6 @@ export function DirectionTwoShell() {
       if (parsed.type !== "status") setPreviewMuted(nextMuted);
       const status = formatSystemSoundStatus(nextMuted);
       appendLines(line("input", transcriptCommand), line("output", status));
-      if (isMobileViewport) setMobileResultMessage(status);
       setKeyboardStatus(status);
       return;
     }
@@ -1258,7 +1348,6 @@ export function DirectionTwoShell() {
     if (parsed.type === "status") {
       const status = formatSystemSoundStatus(sound.muted);
       appendLines(line("input", transcriptCommand), line("output", status));
-      if (isMobileViewport) setMobileResultMessage(status);
       sound.play("notify");
       setKeyboardStatus(status);
       return;
@@ -1271,7 +1360,6 @@ export function DirectionTwoShell() {
     sound.setMuted(nextMuted);
     const status = formatSystemSoundStatus(nextMuted);
     appendLines(line("input", transcriptCommand), line("output", status));
-    if (isMobileViewport) setMobileResultMessage(status);
     setKeyboardStatus(status);
   };
 
@@ -1292,7 +1380,6 @@ export function DirectionTwoShell() {
 
     setInputValue("");
     setInputFeedbackMessage(null);
-    setMobileResultMessage(null);
 
     if (flow) {
       submitFlowAnswer(command);
@@ -1601,8 +1688,7 @@ export function DirectionTwoShell() {
 
     setInputValue(nextValue);
     setInputFeedbackMessage(null);
-    mobileResultRequestRef.current += 1;
-    setMobileResultMessage(null);
+    helpRequestIdRef.current += 1;
     setHistoryIndex(null);
   };
 
@@ -1625,7 +1711,8 @@ export function DirectionTwoShell() {
       : null;
   const ghostTapCompletion = resolveDirectionTwoGhostTapCompletion(inputValue, Boolean(flow));
   const inlineHint = inputFeedbackMessage ?? createFieldHint;
-  const isGuidedPasswordEntry = flow?.type === "create" && flow.step === "password";
+  const isGuidedPasswordEntry =
+    (flow?.type === "create" && flow.step === "password") || (flow?.type === "join" && flow.step === "password");
   const isGuidedCreateInput = isMobileViewport && flow?.type === "create" && Boolean(guidedCreateSegments);
   const passwordDisplayValue = passwordRevealIndex === null ? inputValue : passwordSubmissionRef.current;
   const visualInputText = isGuidedPasswordEntry
@@ -1658,8 +1745,7 @@ export function DirectionTwoShell() {
   };
 
   const handleSlashCommandSuggestionTap = (command: string) => {
-    mobileResultRequestRef.current += 1;
-    setMobileResultMessage(null);
+    helpRequestIdRef.current += 1;
     if (slashMenuImmediateCommands.has(command)) {
       executeCommand(command);
       focusInput();
@@ -1827,27 +1913,9 @@ export function DirectionTwoShell() {
         </header>
         ) : null}
 
-        {routeStatus && (
-          <div
-            aria-hidden={isLandingForegroundHidden || undefined}
-            className="pt-11 sm:hidden"
-            inert={isLandingForegroundHidden || undefined}
-            style={getLandingPartStyle("terminal")}
-          >
-            <p
-              aria-label={routeStatus.ariaLabel}
-              className="direction-two-route-status break-words text-[13px] leading-[20px]"
-              role="status"
-            >
-              <span aria-hidden="true">&gt; </span>
-              <span data-status-text={routeStatus.text}>{routeStatus.text}</span>
-            </p>
-          </div>
-        )}
-
         <div
           aria-hidden={isLandingForegroundHidden || undefined}
-          className={`direction-two-mobile-terminal hidden min-h-0 flex-1 flex-col pb-3 pt-11 transition-opacity duration-300 [transition-timing-function:var(--ease-out-strong)] sm:flex sm:pt-12 ${
+          className={`direction-two-mobile-terminal flex min-h-0 flex-1 flex-col pb-3 pt-11 transition-opacity duration-300 [transition-timing-function:var(--ease-out-strong)] sm:pt-12 ${
             isTerminalVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
           inert={isLandingForegroundHidden || undefined}
@@ -2245,7 +2313,7 @@ export function DirectionTwoShell() {
                     outline: "none",
                     WebkitTextFillColor: "transparent",
                   }}
-                  type={flow?.type === "create" && flow.step === "password" ? "password" : "text"}
+                  type={isGuidedPasswordEntry ? "password" : "text"}
                   value={inputValue}
                 />
               </div>
