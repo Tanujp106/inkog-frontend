@@ -466,10 +466,9 @@ export function DirectionTwoShell() {
   const [slashSelectionMode, setSlashSelectionMode] = useState<"pointer" | "keyboard">("pointer");
   const [creating, setCreating] = useState(false);
   const [routeActivity, setRouteActivity] = useState<RouteActivity | null>(null);
-  const [helping, setHelping] = useState(false);
   const [keyboardStatus, setKeyboardStatus] = useState("Private terminal ready.");
   const [inputFeedbackMessage, setInputFeedbackMessage] = useState<string | null>(null);
-  const helpRequestIdRef = useRef(0);
+  const helpRequestGenerationRef = useRef(0);
   const [passwordRevealIndex, setPasswordRevealIndex] = useState<number | null>(null);
   const [passwordFinalShimmer, setPasswordFinalShimmer] = useState(false);
   const [activeThemeId, setActiveThemeId] = useState<DirectionTwoTheme["id"]>("green");
@@ -607,7 +606,7 @@ export function DirectionTwoShell() {
 
   const cancelFlow = () => {
     sound.play("close");
-    helpRequestIdRef.current += 1;
+    helpRequestGenerationRef.current += 1;
     if (flow) appendLines(line("system", "prompt cleared"));
     setFlow(null);
     setGuidedCreateSegments(null);
@@ -622,7 +621,7 @@ export function DirectionTwoShell() {
 
   const clearTerminal = () => {
     sound.play("press");
-    helpRequestIdRef.current += 1;
+    helpRequestGenerationRef.current += 1;
     setFlow(null);
     setGuidedCreateSegments(null);
     setEditingCreateSegment(null);
@@ -795,26 +794,25 @@ export function DirectionTwoShell() {
       return;
     }
 
-    const requestId = ++helpRequestIdRef.current;
-    setHelping(true);
+    // Only clearing or cancelling the terminal invalidates pending help requests.
+    const requestGeneration = helpRequestGenerationRef.current;
     const askingLine = { ...line("output", "asking inkog..."), pending: true };
     appendLines(line("input", command), askingLine);
 
     try {
       const result = await askInkogHelp(API, question);
-      if (requestId !== helpRequestIdRef.current) return;
+      if (requestGeneration !== helpRequestGenerationRef.current) return;
       appendLines(line("output", result.answer));
       sound.play("notify");
       setKeyboardStatus("inkog answered.");
     } catch {
-      if (requestId !== helpRequestIdRef.current) return;
+      if (requestGeneration !== helpRequestGenerationRef.current) return;
       const message = "The inkog help brain is taking a breather. Try again in a moment.";
       appendLines(line("error", message));
       sound.play("error");
       setKeyboardStatus("The help request didn't go through.");
     } finally {
       setLines(current => current.map(entry => entry.id === askingLine.id ? { ...entry, pending: false } : entry));
-      setHelping(false);
     }
   };
 
@@ -1359,7 +1357,7 @@ export function DirectionTwoShell() {
     const command = rawCommand.trim();
     const normalized = command.toLowerCase().replace(/^\/+/, "");
 
-    if (creating || helping) return;
+    if (creating) return;
 
     if (!command) {
       if (flow?.type === "create" && flow.step === "confirm") {
@@ -1680,7 +1678,6 @@ export function DirectionTwoShell() {
 
     setInputValue(nextValue);
     setInputFeedbackMessage(null);
-    helpRequestIdRef.current += 1;
     setHistoryIndex(null);
   };
 
@@ -1737,7 +1734,6 @@ export function DirectionTwoShell() {
   };
 
   const handleSlashCommandSuggestionTap = (command: string) => {
-    helpRequestIdRef.current += 1;
     if (slashMenuImmediateCommands.has(command)) {
       executeCommand(command);
       focusInput();
