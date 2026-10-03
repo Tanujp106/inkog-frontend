@@ -47,6 +47,7 @@ import type { RoomCommand } from "@/lib/room-terminal-types";
 import { getInkogApiBaseUrl, getInkogSocketBaseUrl } from "@/lib/api-config.mjs";
 import { askInkogHelp } from "@/lib/inkog-help-api";
 import { copyTextToClipboard } from "@/lib/copy-to-clipboard.mjs";
+import { observeMobileViewport } from "@/lib/mobile-viewport.mjs";
 import { isExpiredRoomPreview } from "@/lib/room-preview.mjs";
 import {
   isValidRoomId,
@@ -228,15 +229,21 @@ const ROOM_HEADER_CSS = `
   .room-leave-actions { flex-direction: column; }
   .room-leave-actions button { width: 100%; }
 }
-@media (max-width: 640px) {
+@media (max-width: 640px), (max-width: 1024px) and (max-height: 500px) {
   html:has(.room-screen),
   body:has(.room-screen) {
     height: 100%;
     overflow: hidden;
   }
 
+  .room-floating-composer {
+    position: absolute !important;
+    bottom: max(12px, env(safe-area-inset-bottom)) !important;
+  }
+
   .room-screen {
     --room-composer-input-size: 16px;
+    --room-command-description-wrap: normal;
     --room-header-columns: minmax(0, 1fr) auto;
     position: fixed;
     top: var(--room-viewport-top, 0px);
@@ -607,6 +614,8 @@ export default function RoomPage() {
   const socketRef = useRef<Socket | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
   const roomShellRef = useRef<HTMLElement | null>(null);
+  const composerFormRef = useRef<HTMLFormElement | null>(null);
+  const slashMenuRef = useRef<HTMLDivElement | null>(null);
   const tabFocusPendingRef = useRef(false);
   const [isComposerTabFocused, setIsComposerTabFocused] = useState(false);
   const transcriptViewportRef = useRef<HTMLElement | null>(null);
@@ -626,7 +635,7 @@ export default function RoomPage() {
 
       tabFocusPendingRef.current = false;
       setIsComposerTabFocused(false);
-      input.focus();
+      input.focus({ preventScroll: true });
       input.setSelectionRange(input.value.length, input.value.length);
     });
   };
@@ -635,35 +644,42 @@ export default function RoomPage() {
     const shell = roomShellRef.current;
     if (!shell) return;
 
-    const mobileQuery = window.matchMedia("(max-width: 640px)");
-    const visualViewport = window.visualViewport;
-    const syncVisibleViewport = () => {
-      if (!mobileQuery.matches) {
-        shell.style.removeProperty("--room-viewport-height");
-        shell.style.removeProperty("--room-viewport-top");
-        return;
-      }
-
-      shell.style.setProperty("--room-viewport-height", `${visualViewport?.height ?? window.innerHeight}px`);
-      shell.style.setProperty("--room-viewport-top", `${visualViewport?.offsetTop ?? 0}px`);
-      if (shouldFollowTranscriptRef.current && transcriptViewportRef.current) {
-        transcriptViewportRef.current.scrollTop = transcriptViewportRef.current.scrollHeight;
-      }
-    };
-
-    syncVisibleViewport();
-    visualViewport?.addEventListener("resize", syncVisibleViewport);
-    visualViewport?.addEventListener("scroll", syncVisibleViewport);
-    window.addEventListener("resize", syncVisibleViewport);
-    mobileQuery.addEventListener("change", syncVisibleViewport);
-
-    return () => {
-      visualViewport?.removeEventListener("resize", syncVisibleViewport);
-      visualViewport?.removeEventListener("scroll", syncVisibleViewport);
-      window.removeEventListener("resize", syncVisibleViewport);
-      mobileQuery.removeEventListener("change", syncVisibleViewport);
-    };
+    return observeMobileViewport({
+      window,
+      mediaQuery: "(max-width: 640px), (max-width: 1024px) and (max-height: 500px)",
+      isFocused: () => document.activeElement === composerRef.current,
+      onChange: metrics => {
+        if (!metrics) {
+          shell.style.removeProperty("--room-viewport-height");
+          shell.style.removeProperty("--room-viewport-top");
+          return;
+        }
+        shell.style.setProperty("--room-viewport-height", `${metrics.height}px`);
+        shell.style.setProperty("--room-viewport-top", `${metrics.top}px`);
+        if (shouldFollowTranscriptRef.current && transcriptViewportRef.current) {
+          transcriptViewportRef.current.scrollTop = transcriptViewportRef.current.scrollHeight;
+        }
+      },
+    });
   }, []);
+
+  useEffect(() => {
+    const shell = roomShellRef.current;
+    const form = composerFormRef.current;
+    if (!shell || !form) return;
+    const reserveComposerSpace = () => {
+      const formBounds = form.getBoundingClientRect();
+      const bottomGap = Math.max(0, shell.getBoundingClientRect().bottom - formBounds.bottom);
+      shell.style.setProperty("--room-composer-reserve", `${Math.ceil(formBounds.height + bottomGap + 12)}px`);
+      const transcriptViewport = transcriptViewportRef.current;
+      if (transcriptViewport && shouldFollowTranscriptRef.current) transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
+    };
+    const observer = new ResizeObserver(reserveComposerSpace);
+    observer.observe(form);
+    observer.observe(shell);
+    reserveComposerSpace();
+    return () => observer.disconnect();
+  }, [stage, routeHandoffState.phase]);
 
   useEffect(() => {
     const trackTabNavigation = (event: KeyboardEvent) => {
@@ -692,7 +708,7 @@ export default function RoomPage() {
       event.preventDefault();
       setIsComposerTabFocused(false);
       setComposerValue(current => `${current}${event.key}`);
-      input.focus();
+      input.focus({ preventScroll: true });
       requestAnimationFrame(() => {
         const currentInput = composerRef.current;
         currentInput?.setSelectionRange(currentInput.value.length, currentInput.value.length);
@@ -797,7 +813,8 @@ export default function RoomPage() {
     const transcriptViewport = transcriptViewportRef.current;
     if (!transcriptViewport || !shouldFollowTranscriptRef.current) return;
 
-    transcriptViewport.scrollTo({ top: transcriptViewport.scrollHeight, behavior: "smooth" });
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    transcriptViewport.scrollTo({ top: transcriptViewport.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
   }, [transcript]);
 
   useEffect(() => {
@@ -1700,6 +1717,30 @@ export default function RoomPage() {
     });
   }, [showSlashSuggestions, slashSuggestions.length]);
 
+  useEffect(() => {
+    if (!showSlashSuggestions) return;
+    const menu = slashMenuRef.current;
+    if (!menu) return;
+    let frame = 0;
+    const keepSelectedVisible = () => {
+      frame = 0;
+      const selected = menu.querySelector<HTMLElement>(`#room-slash-option-${slashSuggestionIndex}`);
+      if (!selected) return;
+      const menuBounds = menu.getBoundingClientRect();
+      const selectedBounds = selected.getBoundingClientRect();
+      if (selectedBounds.top < menuBounds.top) menu.scrollTop += selectedBounds.top - menuBounds.top;
+      else if (selectedBounds.bottom > menuBounds.bottom) menu.scrollTop += selectedBounds.bottom - menuBounds.bottom;
+    };
+    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(keepSelectedVisible); };
+    const observer = new ResizeObserver(schedule);
+    observer.observe(menu);
+    schedule();
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [showSlashSuggestions, slashSuggestionIndex]);
+
   if (stage === "expired") {
     return (
       <TerminalState
@@ -1731,7 +1772,7 @@ export default function RoomPage() {
       style={styles.roomShell}
     >
       <style>{ROOM_HEADER_CSS}</style>
-      <header style={{ ...styles.roomHeader, ...getRoomPartStyle(roomId, "header") }}>
+      <header className="room-sticky-header" style={{ ...styles.roomHeader, ...getRoomPartStyle(roomId, "header") }}>
         <div style={styles.roomHeaderInner}>
           <div style={styles.headerIdentity}>
             <h1 style={styles.roomName} title={`inkog / ${topic}`}>
@@ -1839,6 +1880,8 @@ export default function RoomPage() {
       </section>
 
       <form
+        className="room-floating-composer"
+        ref={composerFormRef}
         onSubmit={event => {
           event.preventDefault();
           runComposer();
@@ -1852,7 +1895,7 @@ export default function RoomPage() {
             if (event.target instanceof Element && event.target.closest('input, [role="option"]')) return;
             tabFocusPendingRef.current = false;
             setIsComposerTabFocused(false);
-            composerRef.current?.focus();
+            composerRef.current?.focus({ preventScroll: true });
           }}
           style={{
             ...styles.composerFrame,
@@ -1862,10 +1905,11 @@ export default function RoomPage() {
             aria-hidden={!showSlashSuggestions}
             aria-label="Room command suggestions"
             id="room-slash-command-suggestions"
+            ref={slashMenuRef}
             role="listbox"
             style={{
               ...styles.slashCommandMenu,
-              maxHeight: showSlashSuggestions ? "220px" : "0px",
+              maxHeight: showSlashSuggestions ? "min(220px, max(44px, calc(var(--room-viewport-height, 100dvh) - 200px)))" : "0px",
               opacity: showSlashSuggestions ? 1 : 0,
               marginBottom: showSlashSuggestions ? "6px" : "0px",
               paddingBottom: showSlashSuggestions ? "8px" : "0px",
@@ -1957,6 +2001,7 @@ export default function RoomPage() {
               aria-describedby="room-composer-status"
               aria-expanded={isPasswordGate ? undefined : showSlashSuggestions}
               aria-controls={isPasswordGate ? undefined : "room-slash-command-suggestions"}
+              enterKeyHint={isPasswordGate ? "go" : "send"}
               id="room-terminal-input"
               onBlur={() => setIsComposerTabFocused(false)}
               onChange={event => {
@@ -2770,13 +2815,15 @@ const styles: Record<string, CSSProperties> = {
     fontFamily: ROOM_FONT_FAMILY,
     height: "var(--room-viewport-height, 100dvh)",
     isolation: "isolate",
+    overscrollBehavior: "none",
     overflow: "hidden",
   },
   roomHeader: {
     borderBottom: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
     flexShrink: 0,
     padding: "var(--room-header-padding, 12px clamp(32px, calc(3vw + 16px), 48px))",
-    position: "relative",
+    position: "sticky",
+    top: 0,
     zIndex: 10,
   },
   roomHeaderInner: {
@@ -2920,9 +2967,11 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     flex: 1,
+    minHeight: 0,
     gap: "6px",
+    overscrollBehaviorY: "contain",
     overflowY: "auto",
-    padding: "24px 0 12px",
+    padding: "24px 0 var(--room-composer-reserve, 96px)",
     position: "relative",
     zIndex: 1,
   },
@@ -3145,7 +3194,8 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: "2px",
-    overflow: "hidden",
+    overflowY: "auto",
+    overscrollBehaviorY: "contain",
     pointerEvents: "auto",
     paddingBottom: "8px",
     transition: "max-height 200ms ease-out, opacity 200ms ease-out",
@@ -3153,6 +3203,7 @@ const styles: Record<string, CSSProperties> = {
     willChange: "opacity",
   },
   slashCommandItem: {
+    flexShrink: 0,
     alignItems: "center",
     background: "transparent",
     border: 0,
@@ -3185,7 +3236,7 @@ const styles: Record<string, CSSProperties> = {
     overflow: "hidden",
     textAlign: "right",
     textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    whiteSpace: "var(--room-command-description-wrap, nowrap)",
   },
   composerRow: {
     alignItems: "center",

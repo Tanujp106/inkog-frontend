@@ -65,6 +65,7 @@ import { getInkogApiBaseUrl } from "@/lib/api-config.mjs";
 import { getRouteStatusPresentation } from "@/lib/route-handoff.mjs";
 import { useSystemSound } from "@/lib/system-sound-provider";
 import { parseRoomId } from "@/lib/room-lookup.mjs";
+import { observeMobileViewport } from "@/lib/mobile-viewport.mjs";
 
 const API = getInkogApiBaseUrl();
 const themeStorageKey = "inkog-theme";
@@ -161,13 +162,33 @@ function createWorstCaseHomeScenario() {
   };
 }
 const introHeadline = "Create a temporary room where friends can speak honestly, vote quickly, and disappear without leaving identity trails behind.";
-const mobileIntroHeadline = "Create a temporary room for honest chats, quick votes, and no identity trail.";
 const introScrambleDelayMs = 140;
 const introScrambleDurationMs = 1080;
 const terminalRevealDelayMs = 1640;
 const introCopyRevealDelayMs = 500;
 const introHighlightsRevealDelayMs = 600;
 const introHighlightsStaggerMs = 100;
+const LANDING_MOBILE_VIEWPORT_CSS = `
+@media (max-width: 639px), (max-width: 1024px) and (max-height: 500px) {
+  .direction-two-home {
+    min-height: var(--landing-layout-height, 100dvh);
+  }
+  .direction-two-home > section {
+    min-height: calc(var(--landing-layout-height, 100dvh) - 3rem);
+  }
+  .direction-two-home #terminal-command,
+  .direction-two-home .direction-two-input-mirror,
+  .direction-two-home .direction-two-input-mirror [aria-label="Autocomplete suggestion"],
+  .direction-two-home .direction-two-guided-command {
+    font-size: 16px;
+    line-height: 24px;
+  }
+  .direction-two-home .direction-two-mobile-slash-pill {
+    width: 156px;
+  }
+}
+`;
+
 const mobileViewportMediaQuery = "(max-width: 639px)";
 
 const introHighlights = [
@@ -182,7 +203,6 @@ const introHighlights = [
       "1111111",
     ],
     text: "private rooms for people who already know each other",
-    mobileText: "private rooms for known people",
   },
   {
     icon: [
@@ -195,7 +215,6 @@ const introHighlights = [
       "1111111",
     ],
     text: "temporary spaces that expire on their own",
-    mobileText: "temporary spaces that expire",
   },
   {
     icon: [
@@ -208,7 +227,6 @@ const introHighlights = [
       "1111110",
     ],
     text: "quick prompts for polls and lightweight decisions",
-    mobileText: "quick prompts for decisions",
   },
 ];
 
@@ -442,6 +460,7 @@ export function DirectionTwoShell() {
     getLandingPartStyle,
     state: routeHandoffState,
   } = useRouteHandoff();
+  const landingRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const inputMirrorRef = useRef<HTMLDivElement | null>(null);
   const terminalOutputRef = useRef<HTMLDivElement | null>(null);
@@ -535,13 +554,9 @@ export function DirectionTwoShell() {
   const headlineText = useDirectionTwoScrambleText(introHeadline, {
     durationMs: introScrambleDurationMs,
     startDelayMs: introScrambleDelayMs,
-    disabled: prefersReducedMotion || (hasViewportSync && isMobileViewport),
+    disabled: prefersReducedMotion,
   });
-  const mobileHeadlineText = useDirectionTwoScrambleText(mobileIntroHeadline, {
-    durationMs: introScrambleDurationMs,
-    startDelayMs: introScrambleDelayMs,
-    disabled: prefersReducedMotion || (hasViewportSync && !isMobileViewport),
-  });
+
 
   const appendLines = (...nextLines: TerminalLine[]) => {
     setLines(current => [...current, ...nextLines]);
@@ -552,7 +567,7 @@ export function DirectionTwoShell() {
       const input = inputRef.current;
       if (!input) return;
 
-      input.focus();
+      input.focus({ preventScroll: true });
       input.setSelectionRange(input.value.length, input.value.length);
     });
   };
@@ -714,33 +729,45 @@ export function DirectionTwoShell() {
   }, [prefersReducedMotion]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    let frame = 0;
-    let remainingPasses = 5;
-
-    const keepLatestLineAboveComposer = () => {
+    const frame = window.requestAnimationFrame(() => {
       const output = terminalOutputRef.current;
       const composer = composerRef.current;
-      const latestLine = output?.lastElementChild;
+      const latestLine = output?.lastElementChild ?? landingRef.current?.querySelector("header");
       if (!latestLine || !composer) return;
-
-      const requiredGap = 12;
-      const overlap = latestLine.getBoundingClientRect().bottom - composer.getBoundingClientRect().top + requiredGap;
-      if (overlap > 0) {
-        window.scrollBy({ top: overlap, behavior: "auto" });
-      }
-
-      remainingPasses -= 1;
-      if (remainingPasses > 0) {
-        frame = window.requestAnimationFrame(keepLatestLineAboveComposer);
-      }
-    };
-
-    frame = window.requestAnimationFrame(keepLatestLineAboveComposer);
-
+      const overlap = latestLine.getBoundingClientRect().bottom - composer.getBoundingClientRect().top + 12;
+      if (overlap > 0) window.scrollBy({ top: overlap, behavior: prefersReducedMotion ? "auto" : "smooth" });
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [composerReserveHeight, isMobileViewport, lines.length, prefersReducedMotion]);
+  }, [composerReserveHeight, isMobileViewport, lines, prefersReducedMotion]);
+
+  useEffect(() => {
+    const landing = landingRef.current;
+    if (!landing) return;
+    return observeMobileViewport({
+      window,
+      isFocused: () => document.activeElement === inputRef.current,
+      onChange: metrics => {
+        if (!metrics) {
+          landing.style.removeProperty("--landing-layout-height");
+          landing.style.removeProperty("--landing-composer-bottom");
+          delete landing.dataset.keyboardOpen;
+          return;
+        }
+        landing.style.setProperty("--landing-layout-height", `${metrics.layoutHeight}px`);
+        landing.style.setProperty("--landing-composer-bottom", `calc(${metrics.bottomInset}px + max(12px, env(safe-area-inset-bottom)))`);
+        landing.dataset.keyboardOpen = String(metrics.keyboardOpen);
+        if (!metrics.keyboardOpen && document.activeElement !== inputRef.current) return;
+        const composer = composerRef.current;
+        const latestContent = terminalOutputRef.current?.lastElementChild ?? landing.querySelector("header");
+        if (!composer || !latestContent) return;
+        const overlap = latestContent.getBoundingClientRect().bottom - composer.getBoundingClientRect().top + 12;
+        if (overlap > 0) {
+          const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          window.scrollBy({ top: overlap, behavior: reducedMotion ? "auto" : "smooth" });
+        }
+      },
+    });
+  }, []);
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1728,11 +1755,8 @@ export function DirectionTwoShell() {
   const slashCommandLabelHoverClass = slashSelectionMode === "pointer"
     ? "group-hover:text-[var(--color-signal)]/75"
     : "";
-  const handleGhostSuggestionTap = (event: PointerEvent<HTMLElement>) => {
+  const applyGhostSuggestion = () => {
     if (!ghostTapCompletion) return;
-
-    event.preventDefault();
-    event.stopPropagation();
     setInputValue(ghostTapCompletion);
     setInputFeedbackMessage(null);
     sound.play("press");
@@ -1743,19 +1767,16 @@ export function DirectionTwoShell() {
     );
     focusInput();
   };
+  const handleGhostSuggestionTap = (event: PointerEvent<HTMLElement>) => {
+    if (!ghostTapCompletion) return;
+    event.preventDefault();
+    event.stopPropagation();
+    applyGhostSuggestion();
+  };
 
   const handleSlashCommandSuggestionTap = (command: string) => {
     if (slashMenuImmediateCommands.has(command)) {
       executeCommand(command);
-      focusInput();
-      return;
-    }
-
-    if (command === "/create" && isMobileViewport) {
-      beginCreate(command);
-      setInputValue("");
-      setInputFeedbackMessage(null);
-      setHistoryIndex(null);
       focusInput();
       return;
     }
@@ -1806,10 +1827,12 @@ export function DirectionTwoShell() {
 
   return (
     <main
-      className="direction-two-pixel-cursor relative isolate min-h-[100dvh] overflow-visible bg-transparent px-6 py-6 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
+      className="direction-two-pixel-cursor direction-two-home relative isolate min-h-[100dvh] overflow-visible bg-transparent px-6 py-6 font-mono text-[var(--foreground)] sm:px-10 sm:py-10"
       data-route-handoff-phase={routeHandoffState.phase}
+      ref={landingRef}
       onClick={focusInput}
     >
+      <style>{LANDING_MOBILE_VIEWPORT_CSS}</style>
       <h1 className="sr-only">Private anonymous chat rooms for temporary conversations</h1>
       <p id="direction-two-keyboard-shortcuts" className="sr-only">
         Enter submits a command or answer. Arrow up and arrow down move through command history. Tab autocompletes commands. Escape cancels the current prompt.
@@ -1839,10 +1862,10 @@ export function DirectionTwoShell() {
           <div className="max-w-[360px] space-y-6 text-[12px] leading-[18px] text-[var(--muted-foreground)]">
             <div style={getLandingPartStyle("body")}>
               <p
-                className="direction-two-intro-copy pt-2 text-[12px] leading-[18px]"
+                className="direction-two-intro-copy pt-2 text-[14px] leading-[22px]"
                 style={{ animationDelay: `${prefersReducedMotion ? 0 : introCopyRevealDelayMs}ms` }}
               >
-                {mobileHeadlineText}
+                {headlineText}
               </p>
             </div>
             <div className="space-y-3 pt-2 text-[12px] leading-[18px] text-[var(--muted-foreground)]">
@@ -1854,12 +1877,12 @@ export function DirectionTwoShell() {
                   <DirectionTwoIntroRow
                     pattern={item.icon}
                     reducedMotion={prefersReducedMotion}
-                    rowClassName="flex items-center gap-5 text-[12px] leading-[18px]"
+                    rowClassName="flex items-start gap-5 text-[14px] leading-[22px]"
                     shimmerSettings={shimmerSettings}
                     shimmerStyle={shimmerStyle}
                     size="mobile"
                     startDelayMs={introHighlightsRevealDelayMs + index * introHighlightsStaggerMs}
-                    text={item.mobileText}
+                    text={item.text}
                   />
                 </div>
               ))}
@@ -1935,7 +1958,7 @@ export function DirectionTwoShell() {
               </p>
             )}
           </div>
-          <div aria-hidden="true" className="shrink-0" style={{ height: lines.length > 0 || routeStatus ? `${composerReserveHeight}px` : 0 }} />
+          <div aria-hidden="true" className="shrink-0" style={{ height: `${composerReserveHeight}px` }} />
 
           {flow?.type === "style" && (
             <div className="mt-4 flex flex-wrap items-center gap-3" role="group" aria-label="Theme choices">
@@ -1974,7 +1997,7 @@ export function DirectionTwoShell() {
         <div
           ref={composerRef}
           className="direction-two-floating-composer"
-          style={{ ...composerStyle, ...getLandingPartStyle("composer"), ...composerMotionStyle }}
+          style={{ ...composerStyle, bottom: "var(--landing-composer-bottom, 24px)", ...getLandingPartStyle("composer"), ...composerMotionStyle }}
         >
             <div
               className={composerMotionActive ? "direction-two-composer-entry" : undefined}
@@ -2044,7 +2067,7 @@ export function DirectionTwoShell() {
                       >
                         <span className="block text-[13px] leading-[18px]">{item.title}</span>
                         <span
-                          className={`block min-w-0 truncate text-[11px] leading-[15px] transition-colors duration-150 ${slashCommandLabelHoverClass} ${
+                          className={`block min-w-0 whitespace-normal text-[11px] leading-[15px] transition-colors duration-150 ${slashCommandLabelHoverClass} ${
                             selected ? "text-[var(--color-signal)]/75" : "text-[var(--color-dim)]"
                           }`}
                         >
@@ -2113,9 +2136,21 @@ export function DirectionTwoShell() {
                 role="status"
               >
                 <div className="direction-two-composer-message-inner">
-                  <p className="px-[4px] text-[13px] leading-[20px] text-[var(--color-dim)]">
-                    {mobileComposerMessage ?? lastMobileComposerMessage}
-                  </p>
+                  {ghostTapCompletion && !inputFeedbackMessage ? (
+                    <button
+                      aria-label="Continue command"
+                      className="w-full bg-transparent px-[4px] text-left font-mono text-[13px] leading-[20px] text-[var(--color-dim)]"
+                      onPointerDown={handleGhostSuggestionTap}
+                      onClick={event => { if (event.detail === 0) applyGhostSuggestion(); }}
+                      type="button"
+                    >
+                      {mobileComposerMessage ?? lastMobileComposerMessage}
+                    </button>
+                  ) : (
+                    <p className="px-[4px] text-[13px] leading-[20px] text-[var(--color-dim)]">
+                      {mobileComposerMessage ?? lastMobileComposerMessage}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="direction-two-terminal-input-row flex min-w-0 items-center gap-0 pl-[0px]">
@@ -2137,7 +2172,7 @@ export function DirectionTwoShell() {
                 )}
               </span>
               <div className={`relative min-w-0 flex-1 ${isGuidedCreateInput ? "ml-0 sm:ml-2" : "ml-2"}`}>
-                <div ref={inputMirrorRef} className="flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[14px] leading-[24px]">
+                <div ref={inputMirrorRef} className="direction-two-input-mirror flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[16px] sm:text-[14px] leading-[24px]">
                 {isGuidedCreateInput && (
                   <span className="sm:hidden">
                     <GuidedCreateInputPreview
@@ -2267,8 +2302,9 @@ export function DirectionTwoShell() {
                   autoCapitalize="off"
                   autoComplete="off"
                   autoCorrect="off"
-                  className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[0px] font-mono text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
+                  className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[0px] font-mono text-[16px] sm:text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
                   disabled={creating || routeActivity !== null || isLandingForegroundHidden}
+                  enterKeyHint={flow ? "next" : "go"}
                   id="terminal-command"
                   name="command"
                   onBeforeInput={event => {
@@ -2316,8 +2352,7 @@ export function DirectionTwoShell() {
                   value={inputValue}
                 />
               </div>
-              {flow && (
-                <button
+              <button
                   aria-label="Press Enter"
                   aria-keyshortcuts="Enter"
                   className="ml-2 inline-flex size-7 shrink-0 items-center justify-center rounded-[3px] border border-[color-mix(in_srgb,var(--color-signal)_35%,var(--background)_65%)] text-[var(--color-signal)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--color-signal)_10%,transparent)] disabled:pointer-events-none disabled:opacity-40 sm:hidden"
@@ -2332,7 +2367,6 @@ export function DirectionTwoShell() {
                     <path d="m2.25 7.35 11.5-4.7-3.1 10.1-3.05-4.05-5.35-1.35Z M7.6 8.7l4.15-4.15" stroke="currentColor" strokeLinecap="square" strokeLinejoin="miter" strokeWidth="1.25" />
                   </svg>
                 </button>
-              )}
               </div>
             </div>
             </div>
