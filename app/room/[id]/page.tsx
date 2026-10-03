@@ -3,6 +3,7 @@
 import type { CSSProperties, MouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 import { io, type Socket } from "socket.io-client";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
@@ -138,27 +139,94 @@ const ROOM_HEADER_CSS = `
   width: 14px;
 }
 .room-header-exit-menu {
-  background: var(--bg-2);
-  border: 1px solid var(--color-composer-border);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
-  min-width: 190px;
-  padding: 5px;
+  background: var(--bg);
+  border: 1px solid var(--text-dim);
+  border-radius: 4px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+  box-sizing: border-box;
+  color: var(--text);
+  min-width: 224px;
+  padding: 8px;
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
   z-index: 30;
 }
+.room-header-menu-heading {
+  border-bottom: 1px solid var(--color-composer-border);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 16px;
+  margin: 0 0 4px;
+  padding: 4px 8px 8px;
+}
 .room-header-end-action {
+  appearance: none;
   background: transparent;
   border: 0;
+  border-radius: 3px;
   color: var(--red);
   cursor: pointer;
+  display: flex;
+  flex-direction: column;
   font: inherit;
-  padding: 9px 10px;
+  gap: 3px;
+  padding: 9px 8px;
   text-align: left;
   width: 100%;
 }
-.room-header-end-action:hover { background: var(--bg-3); }
+.room-header-end-action:hover,
+.room-header-end-action:focus-visible {
+  background: color-mix(in srgb, var(--red) 10%, var(--bg));
+}
+.room-header-end-hint { color: var(--text-muted); font-size: 11px; }
+.room-leave-backdrop {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 100;
+}
+.room-leave-dialog {
+  background: var(--bg-2);
+  border: 1px solid var(--color-composer-border);
+  border-radius: 6px;
+  box-sizing: border-box;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  font-family: "Departure Mono", monospace;
+  max-width: 100%;
+  padding: 20px;
+  width: 360px;
+}
+.room-leave-eyebrow {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin: 0 0 12px;
+}
+.room-leave-dialog h2 { font-size: 16px; font-weight: 600; line-height: 24px; margin: 0 0 8px; }
+.room-leave-dialog p#room-leave-description { color: var(--text-muted); font-size: 12px; line-height: 20px; margin: 0; }
+.room-leave-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px; }
+.room-leave-actions button {
+  appearance: none;
+  border: 1px solid var(--color-composer-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+.room-leave-stay { background: transparent; color: var(--text); }
+.room-leave-confirm { background: color-mix(in srgb, var(--red) 16%, var(--bg-2)); color: var(--red); }
+.room-leave-actions button:hover { border-color: var(--text-muted); }
+@media (max-width: 380px) {
+  .room-leave-actions { flex-direction: column; }
+  .room-leave-actions button { width: 100%; }
+}
 @media (max-width: 640px) {
   .room-screen {
     --room-header-columns: minmax(0, 1fr) auto;
@@ -2159,12 +2227,13 @@ function TerminalMessage({
 
 const roomHeaderPixelPatterns = {
   people: [".#...#.", "###.###", ".#...#.", ".......", "###.###", "#.#.#.#", "#.#.#.#"],
-  invite: ["...##..", "..#..#.", ".#....#", ".#.##.#", "#....#.", ".#..#..", "..##..."],
-  leave: ["#####..", "#...#..", "#...###", "#.....#", "#...###", "#...#..", "#####.."],
+  invite: [".........", "..###....", ".#...#...", ".#..###..", "..###..#.", "...#...#.", "....###..", "........."],
+  leave: ["######...", "#....#...", "#....#.#.", "#......##", "#.......#", "#......##", "#....#.#.", "#....#...", "######..."],
   chevron: [".......", ".......", ".#...#.", "..#.#..", "...#...", ".......", "......."],
 } as const;
 
 function RoomHeaderPixelIcon({ kind }: { kind: keyof typeof roomHeaderPixelPatterns }) {
+  const pattern = roomHeaderPixelPatterns[kind];
   return (
     <svg
       aria-hidden="true"
@@ -2173,11 +2242,11 @@ function RoomHeaderPixelIcon({ kind }: { kind: keyof typeof roomHeaderPixelPatte
       focusable="false"
       height="17"
       shapeRendering="crispEdges"
-      viewBox="0 0 29 29"
+      viewBox={`0 0 ${pattern[0].length * 4 + 1} ${pattern.length * 4 + 1}`}
       width="17"
       xmlns="http://www.w3.org/2000/svg"
     >
-      {roomHeaderPixelPatterns[kind].flatMap((row, y) =>
+      {pattern.flatMap((row, y) =>
         [...row].map((pixel, x) => pixel === "#" ? (
           <rect className="room-header-pixel" height="3" key={`${x}-${y}`} width="3" x={1 + x * 4} y={1 + y * 4} />
         ) : null)
@@ -2194,11 +2263,11 @@ function RoomRosterCount({ roomUsers }: { roomUsers: string[] }) {
     const bounds = rosterRef.current?.getBoundingClientRect();
     if (!bounds) return;
 
-    const width = Math.min(360, Math.max(0, window.innerWidth - 32));
+    const width = Math.min(280, Math.max(0, window.innerWidth - 32));
     const maxLeft = Math.max(16, window.innerWidth - width - 16);
     setPopoverPosition({
-      left: Math.max(16, Math.min(bounds.right - width, maxLeft)),
-      top: bounds.bottom + 10,
+      left: Math.max(16, Math.min(bounds.left, maxLeft)),
+      top: bounds.bottom + 8,
     });
   }, []);
 
@@ -2270,8 +2339,17 @@ function RoomExitActions({
   onLeave: () => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isLeaveConfirmOpen, setIsLeaveConfirmOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const leaveRef = useRef<HTMLButtonElement | null>(null);
+  const stayRef = useRef<HTMLButtonElement | null>(null);
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+
+  const closeLeaveConfirm = () => {
+    setIsLeaveConfirmOpen(false);
+    requestAnimationFrame(() => leaveRef.current?.focus());
+  };
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -2291,45 +2369,115 @@ function RoomExitActions({
     };
   }, [isMenuOpen]);
 
+  useEffect(() => {
+    if (!isLeaveConfirmOpen) return;
+    stayRef.current?.focus();
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeLeaveConfirm();
+      } else if (event.key === "Tab") {
+        if (event.shiftKey && document.activeElement === stayRef.current) {
+          event.preventDefault();
+          confirmRef.current?.focus();
+        } else if (!event.shiftKey && document.activeElement === confirmRef.current) {
+          event.preventDefault();
+          stayRef.current?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", handleDialogKeyDown);
+    return () => document.removeEventListener("keydown", handleDialogKeyDown);
+  }, [isLeaveConfirmOpen]);
+
   return (
-    <div className="room-header-exit" ref={menuRef}>
-      <button aria-label="Leave room" className="room-header-exit-primary" onClick={onLeave} onMouseEnter={onHover} type="button">
-        <RoomHeaderPixelIcon kind="leave" />
-        <span>Leave</span>
-      </button>
-      {isCreator ? (
-        <>
-          <button
-            aria-controls="room-exit-menu"
-            aria-expanded={isMenuOpen}
-            aria-haspopup="menu"
-            aria-label="Room options"
-            className="room-header-exit-menu-trigger"
-            onClick={() => setIsMenuOpen(open => !open)}
-            onMouseEnter={onHover}
-            ref={triggerRef}
-            type="button"
+    <>
+      <div className="room-header-exit" ref={menuRef}>
+        <button
+          aria-label="Leave room"
+          className="room-header-exit-primary"
+          onClick={() => {
+            setIsMenuOpen(false);
+            setIsLeaveConfirmOpen(true);
+          }}
+          onMouseEnter={onHover}
+          ref={leaveRef}
+          type="button"
+        >
+          <RoomHeaderPixelIcon kind="leave" />
+          <span>Leave</span>
+        </button>
+        {isCreator ? (
+          <>
+            <button
+              aria-controls="room-exit-menu"
+              aria-expanded={isMenuOpen}
+              aria-haspopup="menu"
+              aria-label="Room options"
+              className="room-header-exit-menu-trigger"
+              onClick={() => setIsMenuOpen(open => !open)}
+              onMouseEnter={onHover}
+              ref={triggerRef}
+              type="button"
+            >
+              <RoomHeaderPixelIcon kind="chevron" />
+            </button>
+            {isMenuOpen ? (
+              <div aria-label="Room options" className="room-header-exit-menu" id="room-exit-menu" role="menu">
+                <p className="room-header-menu-heading" role="presentation">Room options</p>
+                <button
+                  className="room-header-end-action"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    onEndRoom();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span>End room</span>
+                  <span className="room-header-end-hint">Closes it for everyone</span>
+                </button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+      {isLeaveConfirmOpen ? createPortal(
+        <div
+          className="room-leave-backdrop"
+          onPointerDown={event => {
+            if (event.target === event.currentTarget) closeLeaveConfirm();
+          }}
+        >
+          <div
+            aria-describedby="room-leave-description"
+            aria-labelledby="room-leave-title"
+            aria-modal="true"
+            className="room-leave-dialog"
+            role="dialog"
           >
-            <RoomHeaderPixelIcon kind="chevron" />
-          </button>
-          {isMenuOpen ? (
-            <div className="room-header-exit-menu" id="room-exit-menu" role="menu">
+            <p className="room-leave-eyebrow">Room action</p>
+            <h2 id="room-leave-title">Leave this room?</h2>
+            <p id="room-leave-description">You’ll return to the home screen. This room will stay open.</p>
+            <div className="room-leave-actions">
+              <button className="room-leave-stay" onClick={closeLeaveConfirm} ref={stayRef} type="button">Stay here</button>
               <button
-                className="room-header-end-action"
+                className="room-leave-confirm"
                 onClick={() => {
-                  setIsMenuOpen(false);
-                  onEndRoom();
+                  setIsLeaveConfirmOpen(false);
+                  onLeave();
                 }}
-                role="menuitem"
+                ref={confirmRef}
                 type="button"
               >
-                End room for everyone
+                Leave room
               </button>
             </div>
-          ) : null}
-        </>
+          </div>
+        </div>,
+        document.body,
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -2718,7 +2866,7 @@ const styles: Record<string, CSSProperties> = {
     overflowWrap: "anywhere",
     padding: "12px 14px",
     position: "fixed",
-    width: "min(360px, calc(100vw - 32px))",
+    width: "min(280px, calc(100vw - 32px))",
     zIndex: 20,
   },
   transcript: {
