@@ -516,7 +516,6 @@ export default function RoomPage() {
   const [terminalEvents, setTerminalEvents] = useState<TerminalEvent[]>([]);
   const [isWorstCaseScenario, setIsWorstCaseScenario] = useState(false);
   const [composerValue, setComposerValue] = useState("");
-  const [socketError, setSocketError] = useState("");
   const [isRealtimeReady, setIsRealtimeReady] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
   const [composerStatus, setComposerStatus] = useState<ComposerStatus | null>(null);
@@ -536,6 +535,7 @@ export default function RoomPage() {
   const shareCopiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousSecondsLeftRef = useRef<number | null>(null);
   const pendingPollRequestRef = useRef<ReturnType<typeof createPendingRoomPollRequest> | null>(null);
+  const reconnectErrorReportedRef = useRef(false);
   const ttlTotalSecondsRef = useRef(0);
 
   const focusComposer = () => {
@@ -631,10 +631,16 @@ export default function RoomPage() {
   };
 
   const setComposerStatusMessage = (message: string, tone: ComposerStatus["tone"] = "muted") => {
-    setComposerStatus({ message, tone });
     if (composerStatusTimeoutRef.current) {
       clearTimeout(composerStatusTimeoutRef.current);
+      composerStatusTimeoutRef.current = null;
     }
+    if (tone === "error") {
+      setComposerStatus(null);
+      appendEvent("error", message);
+      return;
+    }
+    setComposerStatus({ message, tone });
     composerStatusTimeoutRef.current = setTimeout(() => {
       setComposerStatus(current => (current?.message === message ? null : current));
     }, 3200);
@@ -717,6 +723,7 @@ export default function RoomPage() {
 
   const connectSocket = (token: string, myAlias: string, onReady: () => void) => {
     setIsRealtimeReady(false);
+    reconnectErrorReportedRef.current = false;
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
@@ -730,12 +737,14 @@ export default function RoomPage() {
     });
 
     socket.on("connect_error", () => {
+      if (reconnectErrorReportedRef.current) return;
+      reconnectErrorReportedRef.current = true;
       soundRef.current.play("error");
-      setSocketError("Chat is reconnecting. Your messages will catch up in a moment.");
-      setTimeout(() => setSocketError(""), 3600);
+      appendEvent("error", "Chat is reconnecting. Your messages will catch up in a moment.");
     });
 
     socket.on("join_room_success", ({ onlineCount, roomUsers }: { onlineCount: number; roomUsers: string[] }) => {
+      reconnectErrorReportedRef.current = false;
       setOnlineCount(onlineCount);
       setRoomUsers(roomUsers ?? []);
       soundRef.current.play("success");
@@ -810,23 +819,19 @@ export default function RoomPage() {
     });
 
     socket.on("error", ({ message }: { message: string }) => {
-      if (pendingPollRequestRef.current) {
-        pendingPollRequestRef.current = null;
-        setComposerStatusMessage(`That poll didn't go through: ${message}`, "error");
-      }
-
       if (message === "This room is already open in another tab. Pick up where you left off there.") {
         socket.disconnect();
         socketRef.current = null;
-        setStage("error");
-        setErrorMsg("This room is already open in another tab. Pick up where you left off there.");
-        return;
+        setIsRealtimeReady(false);
       }
 
-      appendEvent("error", message);
+      if (pendingPollRequestRef.current) {
+        pendingPollRequestRef.current = null;
+        appendEvent("error", `That poll didn't go through: ${message}`);
+      } else {
+        appendEvent("error", message);
+      }
       soundRef.current.play("error");
-      setSocketError(message);
-      setTimeout(() => setSocketError(""), 3000);
     });
 
     return socket;
@@ -1646,8 +1651,6 @@ export default function RoomPage() {
           </div>
         </div>
       </header>
-
-      {socketError && <div role="alert" style={{ ...styles.errorToast, ...getRoomPartStyle(roomId, "transcript") }}>heads-up: {socketError}</div>}
 
       <section
         aria-label="Room terminal transcript"
@@ -2717,15 +2720,6 @@ const styles: Record<string, CSSProperties> = {
     position: "fixed",
     width: "min(360px, calc(100vw - 32px))",
     zIndex: 20,
-  },
-  errorToast: {
-    background: "rgba(255, 87, 87, 0.12)",
-    color: "var(--red)",
-    flexShrink: 0,
-    fontSize: "12px",
-    padding: "8px clamp(16px, 3vw, 32px)",
-    position: "relative",
-    zIndex: 1,
   },
   transcript: {
     display: "flex",
