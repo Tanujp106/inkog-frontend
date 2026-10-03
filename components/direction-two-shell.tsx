@@ -76,6 +76,7 @@ type TerminalLine = {
   id: string;
   kind: "input" | "output" | "error" | "system";
   text: string;
+  pending?: boolean;
 };
 
 type CreateDraft = {
@@ -796,7 +797,8 @@ export function DirectionTwoShell() {
 
     const requestId = ++helpRequestIdRef.current;
     setHelping(true);
-    appendLines(line("input", command), line("output", "asking inkog..."));
+    const askingLine = { ...line("output", "asking inkog..."), pending: true };
+    appendLines(line("input", command), askingLine);
 
     try {
       const result = await askInkogHelp(API, question);
@@ -811,6 +813,7 @@ export function DirectionTwoShell() {
       sound.play("error");
       setKeyboardStatus("The help request didn't go through.");
     } finally {
+      setLines(current => current.map(entry => entry.id === askingLine.id ? { ...entry, pending: false } : entry));
       setHelping(false);
     }
   };
@@ -2927,7 +2930,7 @@ function GuidedCreateInputPreview({
   );
 }
 
-function TerminalLine({ kind, text }: TerminalLine) {
+function TerminalLine({ kind, text, pending }: TerminalLine) {
   const prefix = kind === "input" ? "$" : kind === "error" ? "heads-up:" : kind === "system" ? "system:" : ">";
   const tone =
     kind === "error"
@@ -2939,9 +2942,9 @@ function TerminalLine({ kind, text }: TerminalLine) {
           : "text-[var(--muted-foreground)]";
 
   return (
-    <p className={`break-words text-[14px] leading-[24px] ${tone}`}>
+    <p className={`break-words text-[14px] leading-[24px] ${tone} ${pending ? "direction-two-help-status" : ""}`}>
       <span aria-hidden="true">{prefix} </span>
-      {text}
+      {pending ? <span data-status-text={text}>{text}</span> : text}
     </p>
   );
 }
