@@ -607,6 +607,7 @@ export function DirectionTwoShell() {
   const cancelFlow = () => {
     sound.play("close");
     helpRequestGenerationRef.current += 1;
+    setLines(current => current.filter(entry => !entry.pending));
     if (flow) appendLines(line("system", "prompt cleared"));
     setFlow(null);
     setGuidedCreateSegments(null);
@@ -802,17 +803,17 @@ export function DirectionTwoShell() {
     try {
       const result = await askInkogHelp(API, question);
       if (requestGeneration !== helpRequestGenerationRef.current) return;
-      appendLines(line("output", result.answer));
+      const answerLine = line("output", result.answer);
+      setLines(current => current.map(entry => entry.id === askingLine.id ? answerLine : entry));
       sound.play("notify");
       setKeyboardStatus("inkog answered.");
     } catch {
       if (requestGeneration !== helpRequestGenerationRef.current) return;
       const message = "The inkog help brain is taking a breather. Try again in a moment.";
-      appendLines(line("error", message));
+      const errorLine = line("error", message);
+      setLines(current => current.map(entry => entry.id === askingLine.id ? errorLine : entry));
       sound.play("error");
       setKeyboardStatus("The help request didn't go through.");
-    } finally {
-      setLines(current => current.map(entry => entry.id === askingLine.id ? { ...entry, pending: false } : entry));
     }
   };
 
@@ -1017,7 +1018,7 @@ export function DirectionTwoShell() {
       }
 
       setStoredToken(joinFlow.roomId, joinData.anonToken);
-      appendLines(line("output", "password accepted; opening the room"));
+      appendLines(line("output", "password accepted"));
       sound.play("success");
       beginRoomHandoff(joinFlow.roomId);
       router.push(`/room/${joinFlow.roomId}`);
@@ -1092,10 +1093,7 @@ export function DirectionTwoShell() {
 
       setStoredToken(data.id, data.creatorToken);
       setStoredRoomPassword(data.id, draft.password);
-      appendLines(
-        line("output", `room created: ${data.id}`),
-        line("output", `opening /room/${data.id}`),
-      );
+      appendLines(line("output", `room created: ${data.id}`));
       sound.play("success");
       beginRoomHandoff(data.id);
       router.push(`/room/${data.id}`);
@@ -1163,7 +1161,6 @@ export function DirectionTwoShell() {
       setInputValue("");
       appendLines(
         line("input", command),
-        line("output", `creating "${parsed.draft.topic}" for ${parsed.draft.expiry}m, ${parsed.draft.roomLimit} members`),
         line("output", parsed.draft.password ? "password: on" : "password: off"),
       );
       sound.play("press");
