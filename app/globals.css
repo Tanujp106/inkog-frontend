@@ -536,14 +536,12 @@ body::before {
   width: fit-content;
   color: var(--muted-foreground);
 }
-.direction-two-route-status > span:last-child,
-.direction-two-help-status > span:last-child {
+.direction-two-route-status > span:last-child {
   color: color-mix(in srgb, var(--color-signal) 68%, var(--muted-foreground));
   display: inline-block;
   position: relative;
 }
-.direction-two-route-status > span:last-child::after,
-.direction-two-help-status > span:last-child::after {
+.direction-two-route-status > span:last-child::after {
   animation: direction-two-route-status-shimmer 1120ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
   color: var(--foreground);
   content: attr(data-status-text);

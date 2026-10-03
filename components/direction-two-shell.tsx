@@ -2935,7 +2935,7 @@ function TerminalLine({ kind, text, pending }: TerminalLine) {
           : "text-[var(--muted-foreground)]";
 
   return (
-    <p className={`break-words text-[14px] leading-[24px] ${tone} ${pending ? "direction-two-help-status" : ""}`}>
+    <p className={`break-words text-[14px] leading-[24px] ${tone} ${pending ? "direction-two-route-status" : ""}`}>
       <span aria-hidden="true">{prefix} </span>
       {pending ? <span data-status-text={text}>{text}</span> : text}
     </p>
