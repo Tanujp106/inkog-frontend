@@ -64,6 +64,7 @@ const SOCKET_URL = getInkogSocketBaseUrl();
 const ROOM_FONT_FAMILY = '"Departure Mono", monospace';
 
 const ROOM_HEADER_CSS = `
+.room-screen { position: relative; }
 .room-header-pixel-icon {
   display: block;
   flex: none;
@@ -228,8 +229,19 @@ const ROOM_HEADER_CSS = `
   .room-leave-actions button { width: 100%; }
 }
 @media (max-width: 640px) {
+  html:has(.room-screen),
+  body:has(.room-screen) {
+    height: 100%;
+    overflow: hidden;
+  }
+
   .room-screen {
+    --room-composer-input-size: 16px;
     --room-header-columns: minmax(0, 1fr) auto;
+    position: fixed;
+    top: var(--room-viewport-top, 0px);
+    left: 0;
+    width: 100%;
     --room-header-divider-display: none;
     --room-header-actions-column: 1 / -1;
     --room-header-action-gap: 8px;
@@ -594,6 +606,7 @@ export default function RoomPage() {
 
   const socketRef = useRef<Socket | null>(null);
   const composerRef = useRef<HTMLInputElement | null>(null);
+  const roomShellRef = useRef<HTMLElement | null>(null);
   const tabFocusPendingRef = useRef(false);
   const [isComposerTabFocused, setIsComposerTabFocused] = useState(false);
   const transcriptViewportRef = useRef<HTMLElement | null>(null);
@@ -617,6 +630,40 @@ export default function RoomPage() {
       input.setSelectionRange(input.value.length, input.value.length);
     });
   };
+
+  useEffect(() => {
+    const shell = roomShellRef.current;
+    if (!shell) return;
+
+    const mobileQuery = window.matchMedia("(max-width: 640px)");
+    const visualViewport = window.visualViewport;
+    const syncVisibleViewport = () => {
+      if (!mobileQuery.matches) {
+        shell.style.removeProperty("--room-viewport-height");
+        shell.style.removeProperty("--room-viewport-top");
+        return;
+      }
+
+      shell.style.setProperty("--room-viewport-height", `${visualViewport?.height ?? window.innerHeight}px`);
+      shell.style.setProperty("--room-viewport-top", `${visualViewport?.offsetTop ?? 0}px`);
+      if (shouldFollowTranscriptRef.current && transcriptViewportRef.current) {
+        transcriptViewportRef.current.scrollTop = transcriptViewportRef.current.scrollHeight;
+      }
+    };
+
+    syncVisibleViewport();
+    visualViewport?.addEventListener("resize", syncVisibleViewport);
+    visualViewport?.addEventListener("scroll", syncVisibleViewport);
+    window.addEventListener("resize", syncVisibleViewport);
+    mobileQuery.addEventListener("change", syncVisibleViewport);
+
+    return () => {
+      visualViewport?.removeEventListener("resize", syncVisibleViewport);
+      visualViewport?.removeEventListener("scroll", syncVisibleViewport);
+      window.removeEventListener("resize", syncVisibleViewport);
+      mobileQuery.removeEventListener("change", syncVisibleViewport);
+    };
+  }, []);
 
   useEffect(() => {
     const trackTabNavigation = (event: KeyboardEvent) => {
@@ -1680,6 +1727,7 @@ export default function RoomPage() {
     <main
       className="room-screen"
       data-route-handoff-phase={routeHandoffState.phase}
+      ref={roomShellRef}
       style={styles.roomShell}
     >
       <style>{ROOM_HEADER_CSS}</style>
@@ -2720,10 +2768,9 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     fontFamily: ROOM_FONT_FAMILY,
-    height: "100dvh",
+    height: "var(--room-viewport-height, 100dvh)",
     isolation: "isolate",
     overflow: "hidden",
-    position: "relative",
   },
   roomHeader: {
     borderBottom: "1px solid color-mix(in srgb, var(--text-dim) 28%, transparent)",
@@ -3197,7 +3244,7 @@ const styles: Record<string, CSSProperties> = {
     color: "var(--text)",
     flex: 1,
     fontFamily: ROOM_FONT_FAMILY,
-    fontSize: "14px",
+    fontSize: "var(--room-composer-input-size, 14px)",
     lineHeight: "24px",
     minWidth: 0,
     padding: "0 0 0 4px",
