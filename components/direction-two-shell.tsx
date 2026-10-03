@@ -1674,8 +1674,22 @@ export function DirectionTwoShell() {
     }
 
     setInputValue(nextValue);
-    setInputFeedbackMessage(null);
     setHistoryIndex(null);
+
+    const roomLimitAnswer = flow?.type === "create" && flow.step === "limit"
+      ? nextValue
+      : !flow && getDirectionTwoCreateEditingStep(nextValue) === "limit"
+        ? nextValue.split("/").at(-1) ?? ""
+        : "";
+    const roomLimitError = roomLimitAnswer.trim()
+      ? getDirectionTwoCreateAnswerError("limit", roomLimitAnswer)
+      : null;
+
+    if (roomLimitError) {
+      nudgeInput(roomLimitError);
+    } else {
+      setInputFeedbackMessage(null);
+    }
   };
 
   const activePrompt = promptFor(flow);
