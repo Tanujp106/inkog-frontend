@@ -20,6 +20,7 @@ import {
   getDirectionTwoInlineGhostText,
   getDirectionTwoGuidedBackspaceAction,
   getDirectionTwoMobileComposerMessage,
+  getDirectionTwoComposerPlaceholder,
   getDirectionTwoPasswordMask,
   getDirectionTwoSlashCommandSuggestions,
   getDirectionTwoCreateTimeArrowValue,
@@ -180,8 +181,8 @@ const LANDING_MOBILE_VIEWPORT_CSS = `
   .direction-two-home .direction-two-input-mirror,
   .direction-two-home .direction-two-input-mirror [aria-label="Autocomplete suggestion"],
   .direction-two-home .direction-two-guided-command {
-    font-size: 16px;
-    line-height: 24px;
+    font-size: 13px;
+    line-height: 20px;
   }
   .direction-two-home .direction-two-mobile-slash-pill {
     width: 156px;
@@ -203,6 +204,7 @@ const introHighlights = [
       "1111111",
     ],
     text: "private rooms for people who already know each other",
+    mobileText: "private rooms for people you know",
   },
   {
     icon: [
@@ -215,6 +217,7 @@ const introHighlights = [
       "1111111",
     ],
     text: "temporary spaces that expire on their own",
+    mobileText: "temporary spaces that expire",
   },
   {
     icon: [
@@ -227,6 +230,7 @@ const introHighlights = [
       "1111110",
     ],
     text: "quick prompts for polls and lightweight decisions",
+    mobileText: "quick prompts for polls",
   },
 ];
 
@@ -391,24 +395,7 @@ function promptFor(flow: SessionFlow | null) {
 }
 
 function placeholderFor(flow: SessionFlow | null) {
-  if (!flow) return "write '/' to start";
-  if (flow.type === "join") return flow.step === "password" ? "write password" : "abc123 or room link";
-  if (flow.type === "style") return "1, 2, 3, 4, or 5";
-
-  switch (flow.step) {
-    case "topic":
-      return "what should we call the room?";
-    case "expiry":
-      return "how many minutes should the room stay open?";
-    case "limit":
-      return "maximum participants?";
-    case "password-choice":
-      return "add password?(y/n)";
-    case "password":
-      return "write password";
-    case "confirm":
-      return "tap enter to create";
-  }
+  return getDirectionTwoComposerPlaceholder(flow);
 }
 
 function createPromptPresentationForFlow(flow: SessionFlow | null) {
@@ -1742,9 +1729,11 @@ export function DirectionTwoShell() {
     (flow?.type === "create" && flow.step === "password") || (flow?.type === "join" && flow.step === "password");
   const isGuidedCreateInput = isMobileViewport && flow?.type === "create" && Boolean(guidedCreateSegments);
   const passwordDisplayValue = passwordRevealIndex === null ? inputValue : passwordSubmissionRef.current;
+  const hideMobileInputQuestion = Boolean(isMobileViewport && mobileComposerMessage);
+  const hideMobilePromptLabel = isGuidedCreateInput || (hideMobileInputQuestion && activePrompt !== "$");
   const visualInputText = isGuidedPasswordEntry
     ? getDirectionTwoPasswordMask(passwordDisplayValue, passwordRevealIndex ?? passwordDisplayValue.length - 1)
-    : inputValue || placeholderFor(flow);
+    : inputValue || (hideMobileInputQuestion ? "" : placeholderFor(flow));
   const visualCreateSegments = !isGuidedPasswordEntry && inputValue
     ? getDirectionTwoCreateVisualSegments(inputValue, passwordRevealIndex ?? undefined)
     : null;
@@ -1862,7 +1851,7 @@ export function DirectionTwoShell() {
           <div className="max-w-[360px] space-y-6 text-[12px] leading-[18px] text-[var(--muted-foreground)]">
             <div style={getLandingPartStyle("body")}>
               <p
-                className="direction-two-intro-copy pt-2 text-[14px] leading-[22px]"
+                className="direction-two-intro-copy pt-2 text-[13px] leading-[20px]"
                 style={{ animationDelay: `${prefersReducedMotion ? 0 : introCopyRevealDelayMs}ms` }}
               >
                 {headlineText}
@@ -1877,12 +1866,12 @@ export function DirectionTwoShell() {
                   <DirectionTwoIntroRow
                     pattern={item.icon}
                     reducedMotion={prefersReducedMotion}
-                    rowClassName="flex items-start gap-5 text-[14px] leading-[22px]"
+                    rowClassName="flex items-center gap-5 text-[13px] leading-[20px]"
                     shimmerSettings={shimmerSettings}
                     shimmerStyle={shimmerStyle}
                     size="mobile"
                     startDelayMs={introHighlightsRevealDelayMs + index * introHighlightsStaggerMs}
-                    text={item.text}
+                    text={item.mobileText}
                   />
                 </div>
               ))}
@@ -1943,6 +1932,12 @@ export function DirectionTwoShell() {
           inert={isLandingForegroundHidden || undefined}
           style={getLandingPartStyle("terminal")}
         >
+          {(lines.length > 0 || routeStatus) && (
+            <div
+              aria-hidden="true"
+              className="mb-4 h-px w-12 shrink-0 bg-[var(--foreground)] opacity-[0.12]"
+            />
+          )}
           <div ref={terminalOutputRef} className="flex min-h-0 flex-1 flex-col gap-2" aria-label="Terminal output">
             {lines.map(entry => (
               <TerminalLine key={entry.id} {...entry} />
@@ -2136,21 +2131,9 @@ export function DirectionTwoShell() {
                 role="status"
               >
                 <div className="direction-two-composer-message-inner">
-                  {ghostTapCompletion && !inputFeedbackMessage ? (
-                    <button
-                      aria-label="Continue command"
-                      className="w-full bg-transparent px-[4px] text-left font-mono text-[13px] leading-[20px] text-[var(--color-dim)]"
-                      onPointerDown={handleGhostSuggestionTap}
-                      onClick={event => { if (event.detail === 0) applyGhostSuggestion(); }}
-                      type="button"
-                    >
-                      {mobileComposerMessage ?? lastMobileComposerMessage}
-                    </button>
-                  ) : (
-                    <p className="px-[4px] text-[13px] leading-[20px] text-[var(--color-dim)]">
-                      {mobileComposerMessage ?? lastMobileComposerMessage}
-                    </p>
-                  )}
+                  <p className="px-[4px] text-[13px] leading-[20px] text-[var(--color-dim)]">
+                    {mobileComposerMessage ?? lastMobileComposerMessage}
+                  </p>
                 </div>
               </div>
               <div className="direction-two-terminal-input-row flex min-w-0 items-center gap-0 pl-[0px]">
@@ -2158,7 +2141,7 @@ export function DirectionTwoShell() {
               <span
                 className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-base ${
                   activePromptPresentation?.tone === "accent" ? "text-[var(--color-signal)]" : "text-[var(--foreground)]"
-                } ${isGuidedCreateInput ? "hidden sm:flex" : "flex"}`}
+                } ${hideMobilePromptLabel ? "hidden sm:flex" : "flex"}`}
                 aria-hidden="true"
               >
                 {activePrompt === "$" ? (
@@ -2172,7 +2155,7 @@ export function DirectionTwoShell() {
                 )}
               </span>
               <div className={`relative min-w-0 flex-1 ${isGuidedCreateInput ? "ml-0 sm:ml-2" : "ml-2"}`}>
-                <div ref={inputMirrorRef} className="direction-two-input-mirror flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[16px] sm:text-[14px] leading-[24px]">
+                <div ref={inputMirrorRef} className="direction-two-input-mirror flex min-h-[24px] min-w-0 items-center overflow-hidden pl-[4px] text-[13px] leading-[20px] sm:text-[14px] sm:leading-[24px]">
                 {isGuidedCreateInput && (
                   <span className="sm:hidden">
                     <GuidedCreateInputPreview
@@ -2254,7 +2237,7 @@ export function DirectionTwoShell() {
                     {inputFeedbackMessage}
                   </span>
                 )}
-                {visibleCreateFieldSuggestion && (
+                {visibleCreateFieldSuggestion && !hideMobileInputQuestion && (
                   <button
                     aria-label="Autocomplete suggestion"
                     className={`relative z-10 ml-2 inline-flex shrink-0 items-center gap-2 whitespace-pre bg-transparent p-0 font-mono text-[14px] leading-[24px] pointer-events-auto sm:pointer-events-none ${
@@ -2302,7 +2285,7 @@ export function DirectionTwoShell() {
                   autoCapitalize="off"
                   autoComplete="off"
                   autoCorrect="off"
-                  className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[0px] font-mono text-[16px] sm:text-[14px] leading-[24px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60"
+                  className="absolute inset-0 h-[24px] w-full appearance-none pt-[0px] pr-[0px] pb-[0px] pl-[0px] font-mono text-[13px] leading-[20px] text-transparent caret-transparent placeholder:text-transparent disabled:cursor-wait disabled:opacity-60 sm:text-[14px] sm:leading-[24px]"
                   disabled={creating || routeActivity !== null || isLandingForegroundHidden}
                   enterKeyHint={flow ? "next" : "go"}
                   id="terminal-command"
@@ -2363,8 +2346,8 @@ export function DirectionTwoShell() {
                   }}
                   type="button"
                 >
-                  <svg aria-hidden="true" className="size-4" fill="none" viewBox="0 0 16 16">
-                    <path d="m2.25 7.35 11.5-4.7-3.1 10.1-3.05-4.05-5.35-1.35Z M7.6 8.7l4.15-4.15" stroke="currentColor" strokeLinecap="square" strokeLinejoin="miter" strokeWidth="1.25" />
+                  <svg aria-hidden="true" className="size-4 text-[var(--color-signal)]" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M2.25 7.35 13.75 2.65 10.65 12.75 7.6 8.7Z" />
                   </svg>
                 </button>
               </div>
@@ -2928,7 +2911,7 @@ function GuidedCreateInputPreview({
   return (
     <span
       aria-label={serializeDirectionTwoGuidedCommandSegments(segments)}
-      className="direction-two-guided-command inline-flex min-w-max items-center text-[14px] leading-[24px] text-[var(--muted-foreground)]"
+      className="direction-two-guided-command inline-flex min-w-max items-center text-[13px] leading-[20px] text-[var(--muted-foreground)]"
     >
       {segments.map((segment, index) => {
         const editableSegmentId = segment.id === "command" ? null : segment.id;

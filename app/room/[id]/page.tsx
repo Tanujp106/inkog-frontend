@@ -1,7 +1,7 @@
 "use client";
 
-import type { CSSProperties, MouseEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { io, type Socket } from "socket.io-client";
@@ -45,7 +45,6 @@ import {
 import { parseRoomCommand } from "@/lib/room-terminal.mjs";
 import type { RoomCommand } from "@/lib/room-terminal-types";
 import { getInkogApiBaseUrl, getInkogSocketBaseUrl } from "@/lib/api-config.mjs";
-import { askInkogHelp } from "@/lib/inkog-help-api";
 import { copyTextToClipboard } from "@/lib/copy-to-clipboard.mjs";
 import { observeMobileViewport } from "@/lib/mobile-viewport.mjs";
 import { isExpiredRoomPreview } from "@/lib/room-preview.mjs";
@@ -66,6 +65,7 @@ const ROOM_FONT_FAMILY = '"Departure Mono", monospace';
 
 const ROOM_HEADER_CSS = `
 .room-screen { position: relative; }
+.room-composer-entry-track::-webkit-scrollbar { display: none; }
 .room-header-pixel-icon {
   display: block;
   flex: none;
@@ -73,22 +73,85 @@ const ROOM_HEADER_CSS = `
   height: 17px;
   width: 17px;
 }
-.room-header-roster {
-  align-items: center;
+.room-topic-trigger {
   appearance: none;
   background: transparent;
   border: 0;
   color: var(--text-muted);
-  cursor: pointer;
+  cursor: default;
+  display: block;
+  flex: 0 1 auto;
+  font: inherit;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  text-align: left;
+  white-space: nowrap;
+}
+.room-topic-trigger[data-overflowing="true"] { cursor: pointer; }
+.room-topic-trigger:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.room-topic-static {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-topic-moving {
+  display: block;
+  left: 0;
+  position: absolute;
+  top: 0;
+  visibility: hidden;
+  white-space: nowrap;
+  width: max-content;
+}
+.room-topic-trigger[data-active="true"] .room-topic-static { visibility: hidden; }
+.room-topic-trigger[data-active="true"] .room-topic-moving {
+  animation: room-topic-marquee var(--room-topic-duration) linear infinite;
+  visibility: visible;
+}
+@keyframes room-topic-marquee {
+  0%, 10% { transform: translateX(0); }
+  45%, 55% { transform: translateX(var(--room-topic-travel)); }
+  90%, 100% { transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .room-topic-trigger[data-active="true"] {
+    overflow-x: auto;
+    touch-action: pan-x;
+  }
+  .room-topic-trigger[data-active="true"] .room-topic-static {
+    overflow: visible;
+    text-overflow: clip;
+    visibility: visible;
+    width: max-content;
+  }
+  .room-topic-trigger[data-active="true"] .room-topic-moving {
+    animation: none;
+    visibility: hidden;
+  }
+}
+.room-header-roster {
+  align-items: center;
+  color: var(--text-muted);
   display: inline-flex;
   font: inherit;
   font-size: var(--room-meta-size, 13px);
   gap: 7px;
   min-height: 34px;
-  padding: 0;
   white-space: nowrap;
 }
-.room-header-roster:hover { color: var(--text); }
+.room-header-roster .room-header-pixel-icon {
+  height: 18px;
+  width: 16px;
+}
+.room-header-exit-menu-trigger .room-header-exit-icon-kebab .room-header-pixel-icon {
+  color: var(--text);
+  height: 14px;
+  width: 12px;
+}
 .room-header-pill,
 .room-header-exit {
   align-items: center;
@@ -111,6 +174,10 @@ const ROOM_HEADER_CSS = `
 .room-header-pill--invite {
   background: color-mix(in srgb, var(--accent) 19%, var(--bg-2));
   color: var(--text);
+}
+.room-header-exit-icon-kebab,
+.room-composer-send {
+  display: none;
 }
 .room-header-pill:hover,
 .room-header-exit:hover {
@@ -136,52 +203,53 @@ const ROOM_HEADER_CSS = `
   justify-content: center;
   padding: 0 6px;
 }
+.room-header-exit-menu-trigger.room-header-exit-menu-trigger--guest {
+  display: none;
+}
 .room-header-exit-menu-trigger .room-header-pixel-icon {
   height: 14px;
   width: 14px;
 }
 .room-header-exit-menu {
-  background: var(--bg);
-  border: 1px solid var(--text-dim);
-  border-radius: 4px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
   box-sizing: border-box;
   color: var(--text);
-  min-width: 224px;
-  padding: 8px;
+  min-width: 152px;
+  padding: 4px;
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
   z-index: 30;
 }
-.room-header-menu-heading {
-  border-bottom: 1px solid var(--color-composer-border);
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 16px;
-  margin: 0 0 4px;
-  padding: 4px 8px 8px;
-}
 .room-header-end-action {
   appearance: none;
   background: transparent;
   border: 0;
-  border-radius: 3px;
-  color: var(--red);
+  border-radius: 2px;
+  color: var(--text);
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
+  display: block;
   font: inherit;
-  gap: 3px;
-  padding: 9px 8px;
+  line-height: 20px;
+  padding: 8px 10px;
   text-align: left;
   width: 100%;
 }
 .room-header-end-action:hover,
 .room-header-end-action:focus-visible {
-  background: color-mix(in srgb, var(--red) 10%, var(--bg));
+  background: color-mix(in srgb, var(--text) 8%, var(--bg-3));
 }
-.room-header-end-hint { color: var(--text-muted); font-size: 11px; }
+.room-header-menu-end:hover,
+.room-header-menu-end:focus-visible {
+  color: var(--red);
+}
+.room-header-end-action.room-header-menu-leave,
+.room-header-end-action.room-header-menu-invite {
+  display: none;
+}
+.room-leave-sheet-handle { display: none; }
 .room-leave-backdrop {
   align-items: center;
   background: rgba(0, 0, 0, 0.72);
@@ -237,6 +305,7 @@ const ROOM_HEADER_CSS = `
   }
 
   .room-floating-composer {
+    --route-composer-inline-gutter: 32px;
     position: absolute !important;
     bottom: max(12px, env(safe-area-inset-bottom)) !important;
   }
@@ -244,15 +313,119 @@ const ROOM_HEADER_CSS = `
   .room-screen {
     --room-composer-input-size: 16px;
     --room-command-description-wrap: normal;
-    --room-header-columns: minmax(0, 1fr) auto;
+    --room-header-columns: minmax(0, 1fr) auto auto;
     position: fixed;
     top: var(--room-viewport-top, 0px);
     left: 0;
     width: 100%;
     --room-header-divider-display: none;
-    --room-header-actions-column: 1 / -1;
+    --room-header-actions-column: auto;
     --room-header-action-gap: 8px;
-    --room-header-status-gap: 6px;
+    --room-header-status-gap: 2px;
+    --room-header-separator-size: 13px;
+    --room-ttl-min-width: 0px;
+    --room-brand-size: 16px;
+    --room-title-size: 16px;
+  }
+
+  .room-composer-send {
+    align-items: center;
+    appearance: none;
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--bg) 65%);
+    border-radius: 3px;
+    color: var(--accent);
+    cursor: pointer;
+    display: inline-flex;
+    flex: none;
+    height: 28px;
+    justify-content: center;
+    margin-left: 8px;
+    padding: 0;
+    width: 28px;
+  }
+
+  .room-composer-send svg {
+    display: block;
+    fill: currentColor;
+    height: 16px;
+    width: 16px;
+  }
+
+  .room-composer-send:disabled {
+    cursor: default;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  .room-header-pill--invite {
+    display: none;
+  }
+
+  .room-header-exit,
+  .room-header-exit:hover {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    justify-content: center;
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .room-header-exit-primary {
+    display: none;
+  }
+
+  .room-header-exit-menu-trigger,
+  .room-header-exit-menu-trigger.room-header-exit-menu-trigger--guest {
+    border-left: 0;
+    display: inline-flex;
+    min-height: 0;
+    min-width: 0;
+    padding: 4px;
+  }
+
+  .room-leave-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .room-leave-dialog {
+    border-bottom: 0;
+    border-radius: 16px 16px 0 0;
+    max-width: none;
+    padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+    width: 100%;
+  }
+
+  .room-leave-sheet-handle {
+    background: var(--text-dim);
+    border-radius: 999px;
+    display: block;
+    height: 4px;
+    margin: 0 auto 16px;
+    width: 36px;
+  }
+
+  .room-leave-actions {
+    flex-direction: column;
+  }
+
+  .room-leave-actions button {
+    width: 100%;
+  }
+
+  .room-header-exit-icon-chevron {
+    display: none;
+  }
+
+  .room-header-exit-icon-kebab {
+    display: block;
+  }
+
+  .room-header-end-action.room-header-menu-leave,
+  .room-header-end-action.room-header-menu-invite {
+    display: flex;
   }
 }
 `;
@@ -612,7 +785,8 @@ export default function RoomPage() {
   const [shareCopied, setShareCopied] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
-  const composerRef = useRef<HTMLInputElement | null>(null);
+  const composerRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const composerTrackRef = useRef<HTMLDivElement | null>(null);
   const roomShellRef = useRef<HTMLElement | null>(null);
   const composerFormRef = useRef<HTMLFormElement | null>(null);
   const slashMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1296,41 +1470,13 @@ export default function RoomPage() {
     }
   };
 
-  const printHelp = (commandType = "help") => {
-    const base = "commands: /help /commands /style /sound /poll /share /leave /exit";
+  const printHelp = (commandType = "commands") => {
+    const base = "commands: /commands /style /sound /poll /share /leave /exit";
     const creator = isCreator ? " /password /close" : "";
     setComposerStatusMessage(
       commandType === "commands" ? `${base}${creator}` : `try ${base}${creator}`,
       "muted",
     );
-  };
-
-  const askProjectHelp = async (question: string) => {
-    if (isWorstCaseScenario) {
-      setComposerStatusMessage("Help replies are disabled in this local UI scenario.", "muted");
-      return;
-    }
-
-    setComposerStatusMessage("asking inkog...", "muted");
-
-    try {
-      const result = await askInkogHelp(API, question);
-      sound.play("notify");
-      setComposerStatus(null);
-      setMessages(current => [
-        ...current,
-        {
-          id: makeId(),
-          alias: "inkog",
-          content: result.answer,
-          createdAt: new Date().toISOString(),
-          isSystem: true,
-        },
-      ]);
-    } catch {
-      sound.play("error");
-      setComposerStatusMessage("The inkog help brain is taking a breather. Try again in a moment.", "error");
-    }
   };
 
   const handleSoundCommand = (rawCommand: string) => {
@@ -1452,14 +1598,6 @@ export default function RoomPage() {
     });
   };
 
-  const startHelpPrompt = () => {
-    setPendingCommand(null);
-    setComposerValue("/help ");
-    setComposerStatusMessage("ask anything about inkog", "muted");
-    sound.play("press");
-    focusComposer();
-  };
-
   const runSlashSuggestion = (command: string) => {
     setSlashSuggestionIndex(0);
     setComposerValue("");
@@ -1488,11 +1626,6 @@ export default function RoomPage() {
 
     if (command === "/password") {
       handlePasswordCommand();
-      return;
-    }
-
-    if (command === "/help") {
-      startHelpPrompt();
       return;
     }
 
@@ -1647,12 +1780,6 @@ export default function RoomPage() {
         }
         closeRoomWithConfirm();
         return;
-      case "help":
-        startHelpPrompt();
-        return;
-      case "help-question":
-        void askProjectHelp(command.question);
-        return;
       case "unknown":
         sound.play("error");
         setComposerStatusMessage(`That command's new to me: ${command.command}.`, "error");
@@ -1684,9 +1811,14 @@ export default function RoomPage() {
   const isRoomBooting = stage === "loading";
   const isPasswordGate = stage === "password";
   const pollInlinePrompt = !isRoomBooting && !isPasswordGate && pendingCommand?.type === "poll" ? getRoomPollInlinePrompt(pendingCommand) : null;
+  const isCommandEntry = Boolean(pendingCommand) || composerValue.trimStart().startsWith("/");
   const showIdleCursor = composerValue.length === 0 && !pollInlinePrompt;
+  const soundCommandHint = /^\/sound(?:\s|$)/i.test(composerValue)
+    ? { message: "sound: on / off / status", tone: "muted" as const }
+    : null;
+  const visibleComposerStatus = soundCommandHint ?? composerStatus;
   const composerChrome = getRoomComposerChrome({
-    composerStatus: isRoomBooting || isPasswordGate ? null : composerStatus,
+    composerStatus: isRoomBooting || isPasswordGate ? null : visibleComposerStatus,
     pendingCommand: isRoomBooting || isPasswordGate ? null : pendingCommand,
   });
   const slashSuggestions = isRoomBooting || isPasswordGate ? [] : getRoomSlashCommandSuggestions({
@@ -1705,11 +1837,153 @@ export default function RoomPage() {
         : [];
   const ttlMeter = getRoomTtlMeter({ secondsLeft, totalSeconds: ttlTotalSecondsRef.current });
   const composerStatusColor =
-    composerStatus?.tone === "error"
+    visibleComposerStatus?.tone === "error"
       ? "var(--red)"
-      : composerStatus?.tone === "accent"
+      : visibleComposerStatus?.tone === "accent"
         ? "var(--room-accent-text)"
         : "var(--text-muted)";
+  useLayoutEffect(() => {
+    const field = composerRef.current;
+    if (!(field instanceof HTMLTextAreaElement)) return;
+    field.style.height = "24px";
+    field.style.overflowY = "hidden";
+    if (isCommandEntry) return;
+
+    const maxHeight = 168;
+    field.style.height = `${Math.min(field.scrollHeight, maxHeight)}px`;
+    field.style.overflowY = field.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [composerValue, isCommandEntry, stage]);
+
+  useLayoutEffect(() => {
+    if (!pollInlinePrompt) return;
+    const track = composerTrackRef.current;
+    if (track) track.scrollLeft = track.scrollWidth - track.clientWidth;
+  }, [pollInlinePrompt?.prefix, composerValue]);
+
+  const handleComposerKeyDown = (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (event.key === "Escape" && passwordReveal) {
+      event.preventDefault();
+      sound.play("close");
+      setPasswordReveal(null);
+      setSlashSuggestionIndex(0);
+      return;
+    }
+
+    if (
+      passwordReveal
+      && event.key.toLowerCase() === "c"
+      && !event.altKey
+      && !event.ctrlKey
+      && !event.metaKey
+    ) {
+      event.preventDefault();
+      void copyRevealedPassword();
+      return;
+    }
+
+    const slashCommandDeletionDirection = event.key === "Backspace"
+      ? "backward"
+      : event.key === "Delete"
+        ? "forward"
+        : null;
+
+    const cancelActiveCommand = !isPasswordGate && !passwordReveal && (
+      (event.key === "Escape" && Boolean(pendingCommand || composerValue))
+      || (Boolean(pendingCommand) && !composerValue && Boolean(slashCommandDeletionDirection))
+    );
+    if (cancelActiveCommand) {
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingCommand(null);
+      setComposerValue("");
+      clearComposerStatus();
+      setSlashSuggestionIndex(0);
+      sound.play("close");
+      return;
+    }
+
+    if (
+      !isPasswordGate &&
+      !pendingCommand &&
+      !passwordReveal &&
+      slashCommandDeletionDirection &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      const input = event.currentTarget;
+      const deletionRange = getSlashCommandTokenDeletionRange(
+        input.value,
+        input.selectionStart,
+        input.selectionEnd,
+        slashCommandDeletionDirection,
+      );
+
+      if (deletionRange) {
+        event.preventDefault();
+        setComposerValue(input.value.slice(0, deletionRange.start) + input.value.slice(deletionRange.end));
+        requestAnimationFrame(() => composerRef.current?.setSelectionRange(deletionRange.start, deletionRange.start));
+        setSlashSuggestionIndex(0);
+        return;
+      }
+    }
+
+    if (showSlashSuggestions) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSlashSuggestionIndex(index => (index + 1) % slashSuggestions.length);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSlashSuggestionIndex(index => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        runSlashSuggestion(slashSuggestions[slashSuggestionIndex]?.command ?? slashSuggestions[0].command);
+        return;
+      }
+    }
+
+    if (event.currentTarget instanceof HTMLTextAreaElement && event.key === "Enter" && !event.nativeEvent.isComposing) {
+      if (isCommandEntry || !event.shiftKey) {
+        event.preventDefault();
+        if (!event.shiftKey) runComposer();
+      }
+    }
+  };
+
+  const composerFieldProps = {
+    autoCapitalize: "off",
+    autoComplete: "off",
+    autoCorrect: "off",
+    "aria-activedescendant": showSlashSuggestions ? `room-slash-option-${slashSuggestionIndex}` : undefined,
+    "aria-autocomplete": isPasswordGate ? undefined : "list",
+    "aria-describedby": "room-composer-status",
+    "aria-expanded": isPasswordGate ? undefined : showSlashSuggestions,
+    "aria-controls": isPasswordGate ? undefined : "room-slash-command-suggestions",
+    enterKeyHint: isPasswordGate ? "go" : "send",
+    id: "room-terminal-input",
+    onBlur: () => setIsComposerTabFocused(false),
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setComposerValue(event.target.value);
+      setSlashSuggestionIndex(0);
+    },
+    onFocus: () => {
+      setIsComposerTabFocused(tabFocusPendingRef.current);
+      tabFocusPendingRef.current = false;
+    },
+    onKeyDown: handleComposerKeyDown,
+    spellCheck: false,
+    disabled: stage !== "joined" && stage !== "password",
+    placeholder: isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder,
+    role: isPasswordGate ? undefined : "combobox",
+    value: composerValue,
+  } as const;
+
   useEffect(() => {
     setSlashSuggestionIndex(index => {
       if (!showSlashSuggestions) return 0;
@@ -1778,7 +2052,7 @@ export default function RoomPage() {
             <h1 style={styles.roomName} title={`inkog / ${topic}`}>
               <span style={styles.roomBrand}>inkog</span>
               <span style={styles.roomNameDivider}>/</span>
-              <span style={styles.roomTopic}>{topic}</span>
+              <RoomTopicTitle topic={topic} />
             </h1>
           </div>
           <div style={styles.headerStatus}>
@@ -1801,8 +2075,9 @@ export default function RoomPage() {
             {shareCopied ? <span aria-live="polite" role="status" style={styles.srOnly}>Room link copied.</span> : null}
             <RoomExitActions
               isCreator={isCreator}
-              onEndRoom={closeRoomWithConfirm}
+              onEndRoom={closeRoom}
               onHover={() => sound.play("hover")}
+              onInvite={() => void copyShareLinkFromButton()}
               onLeave={handleLeave}
             />
           </div>
@@ -1892,7 +2167,7 @@ export default function RoomPage() {
           data-route-composer="room"
           data-tab-focused={isComposerTabFocused ? "true" : undefined}
           onClick={event => {
-            if (event.target instanceof Element && event.target.closest('input, [role="option"]')) return;
+            if (event.target instanceof Element && event.target.closest('input, textarea, [role="option"]')) return;
             tabFocusPendingRef.current = false;
             setIsComposerTabFocused(false);
             composerRef.current?.focus({ preventScroll: true });
@@ -1954,7 +2229,7 @@ export default function RoomPage() {
             }}
           >
             <p id="room-composer-status" role="status" aria-live="polite" style={{ ...styles.composerStatus, color: composerStatusColor }}>
-              {composerChrome.statusMode === "inline" ? (composerStatus?.message ?? "") : ""}
+              {composerChrome.statusMode === "inline" ? (visibleComposerStatus?.message ?? "") : ""}
             </p>
           </div>
           {passwordReveal ? (
@@ -1968,142 +2243,69 @@ export default function RoomPage() {
               {isPasswordGate ? "Room password" : "Chat message or room command"}
             </label>
             <span aria-hidden="true" style={styles.composerPrompt}>$</span>
-            {pollInlinePrompt ? (
-              <span aria-hidden="true" style={styles.composerPollPrefix}>
-                {pollInlinePrompt.prefix}
-              </span>
-            ) : null}
-            {showIdleCursor || showComposerHint ? (
-              <span aria-hidden="true" style={styles.composerIdleText}>
-                {showIdleCursor ? (
-                  <span
-                    style={{
-                      ...styles.composerCursor,
-                      opacity: cursorVisible ? 1 : 0.18,
-                    }}
-                  >
-                    |
-                  </span>
-                ) : null}
-                {showComposerHint ? (
-                  <span style={styles.composerHint}>
-                    {isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or / for commands"}
-                  </span>
-                ) : null}
-              </span>
-            ) : null}
-            <input
-              autoCapitalize="off"
-              autoComplete="off"
-              autoCorrect="off"
-              aria-activedescendant={showSlashSuggestions ? `room-slash-option-${slashSuggestionIndex}` : undefined}
-              aria-autocomplete={isPasswordGate ? undefined : "list"}
-              aria-describedby="room-composer-status"
-              aria-expanded={isPasswordGate ? undefined : showSlashSuggestions}
-              aria-controls={isPasswordGate ? undefined : "room-slash-command-suggestions"}
-              enterKeyHint={isPasswordGate ? "go" : "send"}
-              id="room-terminal-input"
-              onBlur={() => setIsComposerTabFocused(false)}
-              onChange={event => {
-                setComposerValue(event.target.value);
-                setSlashSuggestionIndex(0);
-              }}
-              onFocus={() => {
-                setIsComposerTabFocused(tabFocusPendingRef.current);
-                tabFocusPendingRef.current = false;
-              }}
-              onKeyDown={event => {
-                if (event.key === "Escape" && passwordReveal) {
-                  event.preventDefault();
-                  sound.play("close");
-                  setPasswordReveal(null);
-                  setSlashSuggestionIndex(0);
-                  return;
-                }
-
-                if (
-                  passwordReveal
-                  && event.key.toLowerCase() === "c"
-                  && !event.altKey
-                  && !event.ctrlKey
-                  && !event.metaKey
-                ) {
-                  event.preventDefault();
-                  void copyRevealedPassword();
-                  return;
-                }
-
-                const slashCommandDeletionDirection = event.key === "Backspace"
-                  ? "backward"
-                  : event.key === "Delete"
-                    ? "forward"
-                    : null;
-
-                if (
-                  !isPasswordGate &&
-                  !pendingCommand &&
-                  !passwordReveal &&
-                  slashCommandDeletionDirection &&
-                  !event.altKey &&
-                  !event.ctrlKey &&
-                  !event.metaKey
-                ) {
-                  const input = event.currentTarget;
-                  const deletionRange = getSlashCommandTokenDeletionRange(
-                    input.value,
-                    input.selectionStart,
-                    input.selectionEnd,
-                    slashCommandDeletionDirection,
-                  );
-
-                  if (deletionRange) {
-                    event.preventDefault();
-                    setComposerValue(input.value.slice(0, deletionRange.start) + input.value.slice(deletionRange.end));
-                    requestAnimationFrame(() => composerRef.current?.setSelectionRange(deletionRange.start, deletionRange.start));
-                    setSlashSuggestionIndex(0);
-                    return;
-                  }
-                }
-
-                if (!showSlashSuggestions) return;
-
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setSlashSuggestionIndex(index => (index + 1) % slashSuggestions.length);
-                  return;
-                }
-
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setSlashSuggestionIndex(index => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
-                  return;
-                }
-
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setComposerValue("");
-                  setSlashSuggestionIndex(0);
-                  return;
-                }
-
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  runSlashSuggestion(slashSuggestions[slashSuggestionIndex]?.command ?? slashSuggestions[0].command);
-                }
-              }}
-              ref={composerRef}
-              spellCheck={false}
+            <div className="room-composer-entry-track" ref={composerTrackRef} style={styles.composerEntryTrack}>
+              {pollInlinePrompt ? (
+                <span aria-hidden="true" style={styles.composerPollPrefix}>
+                  {pollInlinePrompt.prefix}
+                </span>
+              ) : null}
+              {showIdleCursor || showComposerHint ? (
+                <span aria-hidden="true" style={styles.composerIdleText}>
+                  {showIdleCursor ? (
+                    <span
+                      style={{
+                        ...styles.composerCursor,
+                        opacity: cursorVisible ? 1 : 0.18,
+                      }}
+                    >
+                      |
+                    </span>
+                  ) : null}
+                  {showComposerHint ? (
+                    <span style={styles.composerHint}>
+                      {isRoomBooting ? "opening chat" : isPasswordGate ? "write password to enter chat" : "type to chat, or / for commands"}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+              {isPasswordGate ? (
+                <input
+                  {...composerFieldProps}
+                  ref={node => { composerRef.current = node; }}
+                  style={{
+                    ...styles.composerInput,
+                    caretColor: showIdleCursor ? "transparent" : "var(--text)",
+                    color: "var(--room-message-text)",
+                  }}
+                  type="password"
+                />
+              ) : (
+                <textarea
+                  {...composerFieldProps}
+                  ref={node => { composerRef.current = node; }}
+                  rows={1}
+                  style={{
+                    ...styles.composerInput,
+                    ...styles.composerTextArea,
+                    caretColor: showIdleCursor ? "transparent" : "var(--text)",
+                    color: "var(--room-message-text)",
+                    minWidth: pollInlinePrompt ? "min(160px, 70%)" : 0,
+                  }}
+                  wrap={isCommandEntry ? "off" : "soft"}
+                />
+              )}
+            </div>
+            <button
+              aria-label="Send"
+              className="room-composer-send"
               disabled={stage !== "joined" && stage !== "password"}
-              placeholder={isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder}
-              style={{
-                ...styles.composerInput,
-                caretColor: showIdleCursor ? "transparent" : "var(--text)",
-                color: "var(--room-message-text)",
-              }}
-              role={isPasswordGate ? undefined : "combobox"}
-              type={isPasswordGate ? "password" : "text"}
-              value={composerValue}
-            />
+              onMouseEnter={() => sound.play("hover")}
+              type="submit"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16">
+                <path d="M2.25 7.35 13.75 2.65 10.65 12.75 7.6 8.7Z" />
+              </svg>
+            </button>
           </div>
         </div>
       </form>
@@ -2319,10 +2521,11 @@ function TerminalMessage({
 }
 
 const roomHeaderPixelPatterns = {
-  people: [".#...#.", "###.###", ".#...#.", ".......", "###.###", "#.#.#.#", "#.#.#.#"],
+  people: ["..###..", ".#...#.", ".#.#.#.", ".#...#.", "..###..", ".#...#.", "#.....#", "#.....#"],
   invite: [".........", "..###....", ".#...#...", ".#..###..", "..###..#.", "...#...#.", "....###..", "........."],
   leave: ["######...", "#....#...", "#....#.#.", "#......##", "#.......#", "#......##", "#....#.#.", "#....#...", "######..."],
   chevron: [".......", ".......", ".#...#.", "..#.#..", "...#...", ".......", "......."],
+  kebab: ["..##...", "..##...", ".......", "..##...", "..##...", ".......", "..##...", "..##..."],
 } as const;
 
 function RoomHeaderPixelIcon({ kind }: { kind: keyof typeof roomHeaderPixelPatterns }) {
@@ -2348,75 +2551,72 @@ function RoomHeaderPixelIcon({ kind }: { kind: keyof typeof roomHeaderPixelPatte
   );
 }
 
-function RoomRosterCount({ roomUsers }: { roomUsers: string[] }) {
-  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null);
-  const rosterRef = useRef<HTMLDivElement | null>(null);
-  const positionPopover = useCallback(() => {
-    const bounds = rosterRef.current?.getBoundingClientRect();
-    if (!bounds) return;
-
-    const width = Math.min(280, Math.max(0, window.innerWidth - 32));
-    const maxLeft = Math.max(16, window.innerWidth - width - 16);
-    setPopoverPosition({
-      left: Math.max(16, Math.min(bounds.left, maxLeft)),
-      top: bounds.bottom + 8,
-    });
-  }, []);
+function RoomTopicTitle({ topic }: { topic: string }) {
+  const viewportRef = useRef<HTMLButtonElement | null>(null);
+  const fullTextRef = useRef<HTMLSpanElement | null>(null);
+  const [overflow, setOverflow] = useState(0);
+  const [isActive, setIsActive] = useState(false);
 
   useEffect(() => {
-    if (!isPopoverOpen) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!rosterRef.current?.contains(event.target as Node)) setIsPopoverOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsPopoverOpen(false);
-    };
+    const viewport = viewportRef.current;
+    const fullText = fullTextRef.current;
+    if (!viewport || !fullText) return;
 
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    document.addEventListener("keydown", closeOnEscape);
-    window.addEventListener("resize", positionPopover);
+    let mounted = true;
+    const measure = () => {
+      if (!mounted) return;
+      const nextOverflow = Math.max(0, Math.ceil(fullText.scrollWidth - viewport.clientWidth));
+      setOverflow(nextOverflow);
+      if (nextOverflow === 0) setIsActive(false);
+    };
+    setIsActive(false);
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(fullText);
+    measure();
+    void document.fonts?.ready.then(measure);
     return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      document.removeEventListener("keydown", closeOnEscape);
-      window.removeEventListener("resize", positionPopover);
+      mounted = false;
+      observer.disconnect();
     };
-  }, [isPopoverOpen, positionPopover]);
+  }, [topic]);
 
+  const isOverflowing = overflow > 1;
+  const duration = Math.max(7, overflow / 25 + 4);
+  return (
+    <button
+      aria-label={isOverflowing ? `Room name: ${topic}. ${isActive ? "Stop scrolling" : "Scroll to read full name"}.` : `Room name: ${topic}`}
+      aria-pressed={isActive}
+      className="room-topic-trigger"
+      data-active={isActive && isOverflowing}
+      data-overflowing={isOverflowing}
+      onClick={() => {
+        if (!isOverflowing) return;
+        if (isActive) viewportRef.current?.scrollTo({ left: 0 });
+        setIsActive(active => !active);
+      }}
+      ref={viewportRef}
+      style={{
+        "--room-topic-duration": `${duration}s`,
+        "--room-topic-travel": `-${overflow}px`,
+      } as CSSProperties}
+      tabIndex={isOverflowing ? 0 : -1}
+      title={topic}
+      type="button"
+    >
+      <span className="room-topic-static">{topic}</span>
+      <span aria-hidden="true" className="room-topic-moving" ref={fullTextRef}>{topic}</span>
+    </button>
+  );
+}
+
+function RoomRosterCount({ roomUsers }: { roomUsers: string[] }) {
   const countLabel = `${roomUsers.length} ${roomUsers.length === 1 ? "person" : "people"}`;
   return (
-    <div ref={rosterRef}>
-      <button
-        aria-controls="room-people-popover"
-        aria-expanded={isPopoverOpen}
-        aria-label={`Show people in room: ${countLabel}`}
-        className="room-header-roster"
-        onClick={event => {
-          event.stopPropagation();
-          positionPopover();
-          setIsPopoverOpen(open => !open);
-        }}
-        type="button"
-      >
-        <RoomHeaderPixelIcon kind="people" />
-        <span>{countLabel}</span>
-      </button>
-      {isPopoverOpen ? (
-        <div
-          aria-label="People in room"
-          aria-live="polite"
-          id="room-people-popover"
-          role="region"
-          style={{
-            ...styles.rosterPopover,
-            left: popoverPosition?.left ?? 16,
-            top: popoverPosition?.top ?? 0,
-          }}
-        >
-          {roomUsers.length ? roomUsers.join(", ") : "No one here yet"}
-        </div>
-      ) : null}
-    </div>
+    <span className="room-header-roster">
+      <RoomHeaderPixelIcon kind="people" />
+      <span>{countLabel}</span>
+    </span>
   );
 }
 
@@ -2424,15 +2624,17 @@ function RoomExitActions({
   isCreator,
   onEndRoom,
   onHover,
+  onInvite,
   onLeave,
 }: {
   isCreator: boolean;
   onEndRoom: () => void;
   onHover: () => void;
+  onInvite: () => void;
   onLeave: () => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isLeaveConfirmOpen, setIsLeaveConfirmOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<null | "leave" | "end">(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const leaveRef = useRef<HTMLButtonElement | null>(null);
@@ -2440,8 +2642,22 @@ function RoomExitActions({
   const confirmRef = useRef<HTMLButtonElement | null>(null);
 
   const closeLeaveConfirm = () => {
-    setIsLeaveConfirmOpen(false);
-    requestAnimationFrame(() => leaveRef.current?.focus());
+    setConfirmAction(null);
+    requestAnimationFrame(() => {
+      const leaveButton = leaveRef.current;
+      const leaveIsVisible = Boolean(leaveButton && getComputedStyle(leaveButton).display !== "none");
+      (leaveIsVisible ? leaveButton : triggerRef.current)?.focus();
+    });
+  };
+
+  const openLeaveConfirm = () => {
+    setIsMenuOpen(false);
+    setConfirmAction("leave");
+  };
+
+  const openEndConfirm = () => {
+    setIsMenuOpen(false);
+    setConfirmAction("end");
   };
 
   useEffect(() => {
@@ -2463,7 +2679,7 @@ function RoomExitActions({
   }, [isMenuOpen]);
 
   useEffect(() => {
-    if (!isLeaveConfirmOpen) return;
+    if (!confirmAction) return;
     stayRef.current?.focus();
     const handleDialogKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -2481,7 +2697,7 @@ function RoomExitActions({
     };
     document.addEventListener("keydown", handleDialogKeyDown);
     return () => document.removeEventListener("keydown", handleDialogKeyDown);
-  }, [isLeaveConfirmOpen]);
+  }, [confirmAction]);
 
   return (
     <>
@@ -2489,10 +2705,7 @@ function RoomExitActions({
         <button
           aria-label="Leave room"
           className="room-header-exit-primary"
-          onClick={() => {
-            setIsMenuOpen(false);
-            setIsLeaveConfirmOpen(true);
-          }}
+          onClick={openLeaveConfirm}
           onMouseEnter={onHover}
           ref={leaveRef}
           type="button"
@@ -2500,42 +2713,59 @@ function RoomExitActions({
           <RoomHeaderPixelIcon kind="leave" />
           <span>Leave</span>
         </button>
-        {isCreator ? (
-          <>
+        <button
+          aria-controls="room-exit-menu"
+          aria-expanded={isMenuOpen}
+          aria-haspopup="menu"
+          aria-label="Room options"
+          className={`room-header-exit-menu-trigger${isCreator ? "" : " room-header-exit-menu-trigger--guest"}`}
+          onClick={() => setIsMenuOpen(open => !open)}
+          onMouseEnter={onHover}
+          ref={triggerRef}
+          type="button"
+        >
+          <span className="room-header-exit-icon-chevron">
+            <RoomHeaderPixelIcon kind="chevron" />
+          </span>
+          <span className="room-header-exit-icon-kebab">
+            <RoomHeaderPixelIcon kind="kebab" />
+          </span>
+        </button>
+        {isMenuOpen ? (
+          <div aria-label="Room options" className="room-header-exit-menu" id="room-exit-menu" role="menu">
             <button
-              aria-controls="room-exit-menu"
-              aria-expanded={isMenuOpen}
-              aria-haspopup="menu"
-              aria-label="Room options"
-              className="room-header-exit-menu-trigger"
-              onClick={() => setIsMenuOpen(open => !open)}
-              onMouseEnter={onHover}
-              ref={triggerRef}
+              className="room-header-end-action room-header-menu-invite"
+              onClick={() => {
+                setIsMenuOpen(false);
+                onInvite();
+              }}
+              role="menuitem"
               type="button"
             >
-              <RoomHeaderPixelIcon kind="chevron" />
+              <span>Invite</span>
             </button>
-            {isMenuOpen ? (
-              <div aria-label="Room options" className="room-header-exit-menu" id="room-exit-menu" role="menu">
-                <p className="room-header-menu-heading" role="presentation">Room options</p>
-                <button
-                  className="room-header-end-action"
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    onEndRoom();
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <span>End room</span>
-                  <span className="room-header-end-hint">Closes it for everyone</span>
-                </button>
-              </div>
+            <button
+              className="room-header-end-action room-header-menu-leave"
+              onClick={openLeaveConfirm}
+              role="menuitem"
+              type="button"
+            >
+              <span>Leave</span>
+            </button>
+            {isCreator ? (
+              <button
+                className="room-header-end-action room-header-menu-end"
+                onClick={openEndConfirm}
+                role="menuitem"
+                type="button"
+              >
+                <span>End room</span>
+              </button>
             ) : null}
-          </>
+          </div>
         ) : null}
       </div>
-      {isLeaveConfirmOpen ? createPortal(
+      {confirmAction ? createPortal(
         <div
           className="room-leave-backdrop"
           onPointerDown={event => {
@@ -2549,21 +2779,28 @@ function RoomExitActions({
             className="room-leave-dialog"
             role="dialog"
           >
+            <span aria-hidden="true" className="room-leave-sheet-handle" />
             <p className="room-leave-eyebrow">Room action</p>
-            <h2 id="room-leave-title">Leave this room?</h2>
-            <p id="room-leave-description">You’ll return to the home screen. This room will stay open.</p>
+            <h2 id="room-leave-title">{confirmAction === "end" ? "Close this room?" : "Leave this room?"}</h2>
+            <p id="room-leave-description">
+              {confirmAction === "end"
+                ? "This closes the room for everyone and cannot be undone."
+                : "You’ll return to the home screen. This room will stay open."}
+            </p>
             <div className="room-leave-actions">
               <button className="room-leave-stay" onClick={closeLeaveConfirm} ref={stayRef} type="button">Stay here</button>
               <button
                 className="room-leave-confirm"
                 onClick={() => {
-                  setIsLeaveConfirmOpen(false);
-                  onLeave();
+                  const action = confirmAction;
+                  setConfirmAction(null);
+                  if (action === "end") onEndRoom();
+                  else onLeave();
                 }}
                 ref={confirmRef}
                 type="button"
               >
-                Leave room
+                {confirmAction === "end" ? "Close room" : "Leave room"}
               </button>
             </div>
           </div>
@@ -2844,7 +3081,7 @@ const styles: Record<string, CSSProperties> = {
     minWidth: 0,
   },
   roomName: {
-    fontSize: "var(--room-meta-size, 13px)",
+    fontSize: "var(--room-title-size, var(--room-meta-size, 13px))",
     fontFamily: ROOM_FONT_FAMILY,
     fontWeight: 400,
     alignItems: "center",
@@ -2865,13 +3102,6 @@ const styles: Record<string, CSSProperties> = {
     color: "var(--text-dim)",
     flexShrink: 0,
   },
-  roomTopic: {
-    color: "var(--text-muted)",
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
   headerStatus: {
     alignItems: "center",
     display: "inline-flex",
@@ -2880,7 +3110,7 @@ const styles: Record<string, CSSProperties> = {
   },
   headerSeparator: {
     color: "var(--text-dim)",
-    fontSize: "20px",
+    fontSize: "var(--room-header-separator-size, 20px)",
     lineHeight: 1,
   },
   headerDivider: {
@@ -2918,14 +3148,14 @@ const styles: Record<string, CSSProperties> = {
     gap: "3px",
     height: "32px",
     justifyContent: "center",
-    minWidth: "56px",
+    minWidth: "var(--room-ttl-min-width, 56px)",
     padding: 0,
     position: "relative",
     whiteSpace: "nowrap",
   },
   ttlTime: {
     fontSize: "var(--room-meta-size, 13px)",
-    minWidth: "56px",
+    minWidth: "var(--room-ttl-min-width, 56px)",
     textAlign: "left",
   },
   ttlBarTrack: {
@@ -2971,7 +3201,7 @@ const styles: Record<string, CSSProperties> = {
     gap: "6px",
     overscrollBehaviorY: "contain",
     overflowY: "auto",
-    padding: "24px 0 var(--room-composer-reserve, 96px)",
+    padding: "var(--room-transcript-top-padding, 24px) 0 var(--room-composer-reserve, 96px)",
     position: "relative",
     zIndex: 1,
   },
@@ -3094,16 +3324,19 @@ const styles: Record<string, CSSProperties> = {
     overflowWrap: "anywhere",
   },
   pollQuestion: {
-    color: "var(--text)",
-    fontSize: "var(--room-body-size, 14px)",
-    lineHeight: "var(--room-body-line-height, 24px)",
+    color: "var(--accent)",
+    fontSize: "var(--room-poll-question-size, 18px)",
+    fontWeight: 600,
+    lineHeight: "26px",
     margin: "0 0 var(--room-poll-question-gap, 18px)",
     overflowWrap: "anywhere",
+    paddingTop: "var(--room-poll-question-padding-top, 0px)",
   },
   pollOptions: {
     display: "flex",
     flexDirection: "column",
     gap: "4px",
+    marginLeft: "var(--room-poll-options-margin-left, 0px)",
   },
   pollOption: {
     alignItems: "center",
@@ -3113,13 +3346,13 @@ const styles: Record<string, CSSProperties> = {
     boxSizing: "border-box",
     cursor: "pointer",
     display: "grid",
-    gridTemplateColumns: "18px 38px minmax(0, 1fr) clamp(88px, 18vw, 132px) 30px",
+    gridTemplateColumns: "var(--room-poll-option-columns, 18px 26px minmax(0, 1fr) clamp(88px, 18vw, 132px) 30px)",
     fontFamily: ROOM_FONT_FAMILY,
     fontSize: "var(--room-body-size, 14px)",
     gap: "8px",
     lineHeight: "var(--room-body-line-height, 24px)",
     minHeight: "34px",
-    padding: "0 12px",
+    padding: "var(--room-poll-option-padding, 0 12px)",
     textAlign: "left",
     transition: "color 0.15s ease, opacity 0.15s ease, background-color 0.15s ease",
     width: "100%",
@@ -3128,11 +3361,12 @@ const styles: Record<string, CSSProperties> = {
     boxSizing: "border-box",
     minWidth: 0,
     overflowWrap: "anywhere",
-    paddingLeft: "8px",
+    paddingLeft: "4px",
     whiteSpace: "normal",
   },
   pollOptionMarker: {
     color: "var(--accent)",
+    display: "var(--room-poll-option-marker-display, inline)",
     flexShrink: 0,
     textAlign: "center",
     width: "18px",
@@ -3140,7 +3374,7 @@ const styles: Record<string, CSSProperties> = {
   pollOptionIndex: {
     color: "var(--text-dim)",
     flexShrink: 0,
-    textAlign: "right",
+    textAlign: "var(--room-poll-option-index-align, right)",
   },
   pollOptionMeter: {
     fontSize: "12px",
@@ -3245,6 +3479,16 @@ const styles: Record<string, CSSProperties> = {
     minHeight: "24px",
     width: "100%",
   },
+  composerEntryTrack: {
+    alignItems: "center",
+    display: "flex",
+    flex: 1,
+    gap: "8px",
+    minWidth: 0,
+    overflowX: "auto",
+    overflowY: "hidden",
+    scrollbarWidth: "none",
+  },
   composerStatus: {
     fontSize: "12px",
     lineHeight: "18px",
@@ -3299,6 +3543,12 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: "24px",
     minWidth: 0,
     padding: "0 0 0 4px",
+  },
+  composerTextArea: {
+    boxSizing: "border-box",
+    height: "24px",
+    maxHeight: "168px",
+    resize: "none",
   },
   stateShell: {
     alignItems: "center",

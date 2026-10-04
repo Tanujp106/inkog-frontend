@@ -15,7 +15,7 @@ export declare function getRoomComposerChrome(input: {
 };
 
 export type RoomSlashCommandSuggestion = {
-  id: "password" | "poll" | "style" | "sound" | "share" | "help" | "leave" | "close";
+  id: "password" | "poll" | "style" | "sound" | "share" | "leave" | "close";
   command: string;
   label: string;
 };

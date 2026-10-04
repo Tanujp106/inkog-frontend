@@ -58,6 +58,12 @@ export declare function getDirectionTwoCreateAnswerError(
   rawAnswer: string,
 ): string | null;
 export declare function getDirectionTwoCreateGhostText(value: string): string | null;
+export declare function getDirectionTwoComposerPlaceholder(flow:
+  | { type: "create"; step: DirectionTwoCreateStep | "confirm" }
+  | { type: "join"; step: "room" | "password" }
+  | { type: "style" }
+  | null
+): string;
 export declare function getDirectionTwoMobileComposerQuestion(input: {
   flow: { type: "create"; step: DirectionTwoCreateStep | "confirm" } | { type: "join" | "style" } | null;
   inputValue: string;

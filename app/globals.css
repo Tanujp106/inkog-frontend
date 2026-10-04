@@ -1133,8 +1133,15 @@ input::placeholder, textarea::placeholder {
     --room-header-padding: 10px 16px;
     --room-header-gap: 10px;
     --room-poll-margin: 24px 0 20px;
-    --room-poll-padding: 10px 14px 14px;
+    --room-poll-padding: 18px 22px 22px;
     --room-poll-question-gap: 14px;
+    --room-poll-question-size: 16px;
+    --room-poll-question-padding-top: 2px;
+    --room-poll-option-columns: 26px minmax(0, 1fr) clamp(88px, 18vw, 132px) 30px;
+    --room-poll-option-padding: 0 16px;
+    --room-poll-options-margin-left: -8px;
+    --room-poll-option-marker-display: none;
+    --room-poll-option-index-align: left;
   }
 
   .room-state-screen {
@@ -1184,6 +1191,7 @@ input::placeholder, textarea::placeholder {
   }
 
   .room-chat-transcript {
+    --room-transcript-top-padding: 4px;
     --room-chat-gutters: 2rem;
     --room-chat-font-size: 14px;
     --room-chat-line-height: 22px;
