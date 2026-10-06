@@ -211,8 +211,10 @@ const ROOM_HEADER_CSS = `
   width: 14px;
 }
 .room-header-exit-menu {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  background: color-mix(in srgb, color-mix(in srgb, var(--accent) 14%, var(--bg-2)) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
   border-radius: 3px;
   box-sizing: border-box;
   color: var(--text);
@@ -387,32 +389,60 @@ const ROOM_HEADER_CSS = `
 
   .room-leave-backdrop {
     align-items: flex-end;
+    background: rgba(0, 0, 0, 0.58);
     padding: 0;
   }
 
   .room-leave-dialog {
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    background: color-mix(in srgb, color-mix(in srgb, var(--accent) 14%, var(--bg-2)) 90%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
     border-bottom: 0;
-    border-radius: 16px 16px 0 0;
+    border-radius: 4px 4px 0 0;
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.24);
     max-width: none;
-    padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+    padding: 20px 20px calc(20px + env(safe-area-inset-bottom));
     width: 100%;
   }
 
   .room-leave-sheet-handle {
-    background: var(--text-dim);
-    border-radius: 999px;
-    display: block;
-    height: 4px;
-    margin: 0 auto 16px;
-    width: 36px;
+    display: none;
+  }
+
+  .room-leave-eyebrow {
+    color: var(--accent);
+    letter-spacing: 0.06em;
+    margin-bottom: 8px;
+  }
+
+  .room-leave-dialog h2 {
+    font-family: inherit;
+    font-size: 18px;
+    line-height: 26px;
+    margin-bottom: 10px;
+  }
+
+  .room-leave-dialog p#room-leave-description {
+    font-size: 13px;
+    line-height: 21px;
   }
 
   .room-leave-actions {
     flex-direction: column;
+    margin-top: 24px;
   }
 
   .room-leave-actions button {
+    border-radius: 3px;
+    font-size: 13px;
+    min-height: 42px;
+    padding: 9px 12px;
     width: 100%;
+  }
+
+  .room-leave-confirm {
+    border-color: color-mix(in srgb, var(--red) 45%, var(--bg-2));
   }
 
   .room-header-exit-icon-chevron {
@@ -426,6 +456,13 @@ const ROOM_HEADER_CSS = `
   .room-header-end-action.room-header-menu-leave,
   .room-header-end-action.room-header-menu-invite {
     display: flex;
+  }
+}
+@media (max-width: 640px) {
+  .room-header-exit { position: static; }
+  .room-header-exit-menu {
+    right: 16px;
+    top: 100%;
   }
 }
 `;
