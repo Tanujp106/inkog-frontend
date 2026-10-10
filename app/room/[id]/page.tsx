@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import { io, type Socket } from "socket.io-client";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
+import { useMeasuredExpansion } from "@/components/use-measured-expansion";
 import { ExpiredRoomPixelBubble } from "@/components/expired-room-pixel-bubble";
 import { getSlashCommandTokenDeletionRange } from "@/lib/slash-command-token.mjs";
 import {
@@ -827,6 +828,9 @@ export default function RoomPage() {
   const roomShellRef = useRef<HTMLElement | null>(null);
   const composerFormRef = useRef<HTMLFormElement | null>(null);
   const slashMenuRef = useRef<HTMLDivElement | null>(null);
+  const slashExpansionRef = useRef<HTMLDivElement | null>(null);
+  const slashExpansionContentRef = useRef<HTMLDivElement | null>(null);
+  const lastSlashSuggestionsRef = useRef<ReturnType<typeof getRoomSlashCommandSuggestions>>([]);
   const tabFocusPendingRef = useRef(false);
   const [isComposerTabFocused, setIsComposerTabFocused] = useState(false);
   const transcriptViewportRef = useRef<HTMLElement | null>(null);
@@ -1864,6 +1868,9 @@ export default function RoomPage() {
     query: composerValue,
   });
   const showSlashSuggestions = slashSuggestions.length > 0 && !pendingCommand;
+  if (showSlashSuggestions) lastSlashSuggestionsRef.current = slashSuggestions;
+  const renderedSlashSuggestions = showSlashSuggestions ? slashSuggestions : lastSlashSuggestionsRef.current;
+  useMeasuredExpansion(showSlashSuggestions, slashExpansionRef, slashExpansionContentRef);
   const showComposerHint = showIdleCursor && !showSlashSuggestions && composerChrome.statusMode === "hidden";
   const gateTranscriptLines = isRoomBooting
     ? []
@@ -2215,46 +2222,54 @@ export default function RoomPage() {
         >
           <div
             aria-hidden={!showSlashSuggestions}
-            aria-label="Room command suggestions"
-            id="room-slash-command-suggestions"
-            ref={slashMenuRef}
-            role="listbox"
+            className="inkog-expandable-menu"
+            inert={!showSlashSuggestions}
+            ref={slashExpansionRef}
             style={{
-              ...styles.slashCommandMenu,
-              maxHeight: showSlashSuggestions ? "min(220px, max(44px, calc(var(--room-viewport-height, 100dvh) - 200px)))" : "0px",
               opacity: showSlashSuggestions ? 1 : 0,
-              marginBottom: showSlashSuggestions ? "6px" : "0px",
-              paddingBottom: showSlashSuggestions ? "8px" : "0px",
               pointerEvents: showSlashSuggestions ? "auto" : "none",
             }}
           >
-            {showSlashSuggestions ? slashSuggestions.map((item, index) => {
-              const selected = slashSuggestionIndex === index;
+            <div ref={slashExpansionContentRef} style={{ paddingBottom: "6px" }}>
+              <div
+                aria-label="Room command suggestions"
+                id="room-slash-command-suggestions"
+                ref={slashMenuRef}
+                role="listbox"
+                style={{
+                  ...styles.slashCommandMenu,
+                  maxHeight: "min(220px, max(44px, calc(var(--room-viewport-height, 100dvh) - 200px)))",
+                }}
+              >
+                {renderedSlashSuggestions.map((item, index) => {
+                  const selected = slashSuggestionIndex === index;
 
-              return (
-                <div
-                  aria-selected={selected}
-                  key={item.command}
-                  id={`room-slash-option-${index}`}
-                  onMouseDown={event => event.preventDefault()}
-                  onClick={() => runSlashSuggestion(item.command)}
-                  onMouseEnter={() => {
-                    setSlashSuggestionIndex(index);
-                    sound.play("hover");
-                  }}
-                  style={{
-                    ...styles.slashCommandItem,
-                    background: selected ? "color-mix(in srgb, var(--accent) 7%, transparent)" : "transparent",
-                    color: selected ? "var(--room-accent-text)" : "var(--text)",
-                  }}
-                  role="option"
-                >
-                  <span aria-hidden="true" style={styles.slashCommandMarker}>{selected ? ">" : ""}</span>
-                  <span style={styles.slashCommandName}>{item.command}</span>
-                  <span style={styles.slashCommandDescription}>{item.label}</span>
-                </div>
-              );
-            }) : null}
+                  return (
+                    <div
+                      aria-selected={selected}
+                      key={item.command}
+                      id={`room-slash-option-${index}`}
+                      onMouseDown={event => event.preventDefault()}
+                      onClick={() => runSlashSuggestion(item.command)}
+                      onMouseEnter={() => {
+                        setSlashSuggestionIndex(index);
+                        sound.play("hover");
+                      }}
+                      style={{
+                        ...styles.slashCommandItem,
+                        background: selected ? "color-mix(in srgb, var(--accent) 7%, transparent)" : "transparent",
+                        color: selected ? "var(--room-accent-text)" : "var(--text)",
+                      }}
+                      role="option"
+                    >
+                      <span aria-hidden="true" style={styles.slashCommandMarker}>{selected ? ">" : ""}</span>
+                      <span style={styles.slashCommandName}>{item.command}</span>
+                      <span style={styles.slashCommandDescription}>{item.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
           <div
             aria-hidden={composerChrome.statusMode !== "inline"}
@@ -3469,9 +3484,7 @@ const styles: Record<string, CSSProperties> = {
     overscrollBehaviorY: "contain",
     pointerEvents: "auto",
     paddingBottom: "8px",
-    transition: "max-height 200ms ease-out, opacity 200ms ease-out",
     width: "100%",
-    willChange: "opacity",
   },
   slashCommandItem: {
     flexShrink: 0,

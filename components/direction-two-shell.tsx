@@ -4,6 +4,7 @@ import { CSSProperties, KeyboardEvent, PointerEvent, useEffect, useRef, useState
 import { useRouter } from "next/navigation";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
+import { useMeasuredExpansion } from "@/components/use-measured-expansion";
 import { getSlashCommandTokenDeletionRange } from "@/lib/slash-command-token.mjs";
 import {
   completeDirectionTwoCommand,
@@ -453,6 +454,9 @@ export function DirectionTwoShell() {
   const terminalOutputRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const slashMenuRef = useRef<HTMLDivElement | null>(null);
+  const slashExpansionRef = useRef<HTMLDivElement | null>(null);
+  const slashExpansionContentRef = useRef<HTMLDivElement | null>(null);
+  const lastSlashSuggestionsRef = useRef<ReturnType<typeof getDirectionTwoSlashCommandSuggestions>>([]);
   const joinLinkHandledRef = useRef(false);
   const inputNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const passwordRevealTimerRef = useRef<number | null>(null);
@@ -536,6 +540,9 @@ export function DirectionTwoShell() {
     if (mobileComposerMessage) setLastMobileComposerMessage(mobileComposerMessage);
   }, [mobileComposerMessage]);
   const hasPromptMenu = isSlashMenuOpen;
+  if (hasPromptMenu) lastSlashSuggestionsRef.current = slashCommandSuggestions;
+  const renderedSlashSuggestions = hasPromptMenu ? slashCommandSuggestions : lastSlashSuggestionsRef.current;
+  useMeasuredExpansion(hasPromptMenu, slashExpansionRef, slashExpansionContentRef);
   const isLandingForegroundHidden = routeHandoffState.phase === "transitioning";
   const routeStatus = routeActivity ? getRouteStatusPresentation(routeActivity) : null;
   const headlineText = useDirectionTwoScrambleText(introHeadline, {
@@ -2020,19 +2027,21 @@ export function DirectionTwoShell() {
               />
             <div
                 aria-hidden={!hasPromptMenu}
-                className="overflow-hidden transition-[max-height,opacity] duration-200 ease-out motion-reduce:transition-none"
+                className="inkog-expandable-menu"
+                inert={!hasPromptMenu}
+                ref={slashExpansionRef}
                 style={{
-                  maxHeight: hasPromptMenu ? "240px" : "0px",
                   opacity: hasPromptMenu ? 1 : 0,
                   pointerEvents: hasPromptMenu ? "auto" : "none",
                 }}
               >
+              <div className="flow-root" ref={slashExpansionContentRef}>
                 <div
                   aria-label="Slash command suggestions"
                   className="direction-two-mobile-slash-menu mb-2 flex w-full min-w-0 gap-2 overflow-x-auto pb-2 text-[13px] leading-[18px] sm:hidden"
                   role="listbox"
                 >
-                  {slashCommandSuggestions.map((item, index) => {
+                  {renderedSlashSuggestions.map((item, index) => {
                     const selected = slashSuggestionIndex === index;
 
                     return (
@@ -2074,11 +2083,11 @@ export function DirectionTwoShell() {
                 </div>
                 <div
                   aria-label="Slash command suggestions"
-                  className="direction-two-slash-menu mb-2 flex w-full flex-col gap-1 pb-2 text-[14px] leading-[24px] direction-two-desktop-slash-menu hidden sm:flex"
+                  className="direction-two-slash-menu mb-2 flex max-h-[240px] w-full flex-col gap-1 overflow-y-auto pb-2 text-[14px] leading-[24px] direction-two-desktop-slash-menu hidden sm:flex"
                   ref={slashMenuRef}
                   role="listbox"
                 >
-                  {slashCommandSuggestions.map((item, index) => {
+                  {renderedSlashSuggestions.map((item, index) => {
                     const selected = slashSuggestionIndex === index;
 
                     return (
@@ -2122,6 +2131,7 @@ export function DirectionTwoShell() {
                   })}
                 </div>
               </div>
+            </div>
               <div
                 aria-hidden={!mobileComposerMessage}
                 aria-live="polite"

@@ -10,6 +10,11 @@
 }
 
 :root {
+  --motion-feedback-duration: 120ms;
+  --motion-expand-duration: 220ms;
+  --motion-collapse-duration: 170ms;
+  --motion-handoff-duration: 210ms;
+  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --color-black: #050505;
   --color-shell: #0b0b0c;
   --color-panel: #111113;
@@ -71,6 +76,23 @@
   --radius-shell: 12px;
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+.inkog-expandable-menu {
+  height: 0;
+  overflow: hidden;
+  transition: height var(--motion-expand-duration) var(--motion-ease-out), opacity var(--motion-feedback-duration) ease-out;
+}
+
+.inkog-expandable-menu[aria-hidden="true"] {
+  transition-duration: var(--motion-collapse-duration), var(--motion-feedback-duration);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inkog-expandable-menu,
+  .inkog-expandable-menu[aria-hidden="true"] {
+    transition-property: opacity;
+  }
 }
 
 :root[data-inkog-theme="orange"] {
