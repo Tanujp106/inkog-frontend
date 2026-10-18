@@ -10,6 +10,11 @@
 }
 
 :root {
+  --motion-feedback-duration: 120ms;
+  --motion-expand-duration: 220ms;
+  --motion-collapse-duration: 170ms;
+  --motion-handoff-duration: 210ms;
+  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --color-black: #050505;
   --color-shell: #0b0b0c;
   --color-panel: #111113;
@@ -71,6 +76,24 @@
   --radius-shell: 12px;
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+.inkog-expandable-menu {
+  height: 0;
+  overflow: hidden;
+  transition: height var(--motion-expand-duration) var(--motion-ease-out), opacity var(--motion-feedback-duration) ease-out;
+}
+
+.inkog-expandable-menu[aria-hidden="true"] {
+  transition-duration: var(--motion-collapse-duration), var(--motion-feedback-duration);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inkog-expandable-menu,
+  .inkog-expandable-menu[aria-hidden="true"] {
+    transition-property: opacity;
+    transition-duration: 90ms !important;
+  }
 }
 
 :root[data-inkog-theme="orange"] {
@@ -318,22 +341,6 @@ body::before {
     opacity: 0.4;
   }
 }
-@keyframes room-route-terminal-decode {
-  0% {
-    clip-path: inset(0 100% 0 0);
-    filter: brightness(0.72);
-    text-shadow: 0 0 0 transparent;
-  }
-  58% {
-    filter: brightness(1.28);
-    text-shadow: 0 0 9px color-mix(in srgb, var(--color-signal) 36%, transparent);
-  }
-  100% {
-    clip-path: inset(0 0 0 0);
-    filter: brightness(1);
-    text-shadow: 0 0 0 transparent;
-  }
-}
 @keyframes direction-two-ambient-pixel-drift {
   0%,
   100% {
@@ -532,6 +539,13 @@ body::before {
   opacity: 0;
   animation: direction-two-copy-reveal 260ms var(--ease-out-strong) both;
 }
+@keyframes direction-two-terminal-line-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.direction-two-terminal-line {
+  animation: direction-two-terminal-line-enter var(--motion-collapse-duration) var(--motion-ease-out) both;
+}
 .direction-two-route-status {
   width: fit-content;
   color: var(--muted-foreground);
@@ -550,9 +564,6 @@ body::before {
   text-shadow: 0 0 8px color-mix(in srgb, var(--color-signal) 42%, transparent);
   white-space: nowrap;
   will-change: clip-path, opacity;
-}
-.room-route-transcript-enter > div {
-  animation: room-route-terminal-decode 320ms steps(7, end) 360ms both;
 }
 .room-chat-transcript .room-chat-message-content {
   color: var(--room-message-text);

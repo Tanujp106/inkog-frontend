@@ -54,18 +54,34 @@ export function RouteHandoffProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reduceRouteHandoff, undefined, createRouteHandoffState);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [routeLayers, setRouteLayers] = useState<RouteLayer[]>(() => [{ children, pathname, routerContext }]);
+  const [returnPhase, setReturnPhase] = useState<"idle" | "preparing" | "entering">("idle");
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const returnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const returnFrameRef = useRef<number | null>(null);
+  const previousPathnameRef = useRef(pathname);
   const latestChildrenRef = useRef(children);
   const latestRouterContextRef = useRef(routerContext);
   latestChildrenRef.current = children;
   latestRouterContextRef.current = routerContext;
+
+  const clearReturnTimers = useCallback(() => {
+    if (returnTimerRef.current) {
+      clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = null;
+    }
+    if (returnFrameRef.current !== null) {
+      cancelAnimationFrame(returnFrameRef.current);
+      returnFrameRef.current = null;
+    }
+  }, []);
 
   const clearTimers = useCallback(() => {
     if (transitionTimerRef.current) {
       clearTimeout(transitionTimerRef.current);
       transitionTimerRef.current = null;
     }
-  }, []);
+    clearReturnTimers();
+  }, [clearReturnTimers]);
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -78,19 +94,38 @@ export function RouteHandoffProvider({ children }: { children: ReactNode }) {
   useEffect(() => clearTimers, [clearTimers]);
 
   useEffect(() => {
+    const previousPathname = previousPathnameRef.current;
+    if (previousPathname === pathname) return;
+    previousPathnameRef.current = pathname;
+    clearReturnTimers();
+    const returningToLanding = !reducedMotion && state.phase === "idle" &&
+      previousPathname.startsWith("/room/") && pathname === "/";
     setRouteLayers(current => {
       const destination = current[current.length - 1];
-      if (destination?.pathname === pathname) return current;
-
       const nextLayer = {
         children: latestChildrenRef.current,
         pathname,
         routerContext: latestRouterContextRef.current,
       };
       if (state.phase === "pending" && destination) return [destination, nextLayer];
+      if (returningToLanding && destination) return [destination, nextLayer];
       return [nextLayer];
     });
-  }, [pathname, state.phase]);
+    if (!returningToLanding) {
+      setReturnPhase("idle");
+      return;
+    }
+    setReturnPhase("preparing");
+    returnFrameRef.current = requestAnimationFrame(() => {
+      returnFrameRef.current = null;
+      setReturnPhase("entering");
+      returnTimerRef.current = setTimeout(() => {
+        returnTimerRef.current = null;
+        setRouteLayers(current => current.length > 1 ? [current[current.length - 1]] : current);
+        setReturnPhase("idle");
+      }, 240);
+    });
+  }, [clearReturnTimers, pathname, reducedMotion, state.phase]);
 
   useEffect(() => {
     if (state.phase !== "settled") return;
@@ -161,9 +196,10 @@ export function RouteHandoffProvider({ children }: { children: ReactNode }) {
           const hasRetainedRoute = routeLayers.length > 1;
           const isDestination = index === routeLayers.length - 1;
           const isRetained = hasRetainedRoute && !isDestination;
-          const isPendingDestination = isDestination && state.phase === "pending";
+          const isReturning = hasRetainedRoute && returnPhase !== "idle";
+          const isPendingDestination = isDestination && (state.phase === "pending" || returnPhase === "preparing");
           const isHiddenRetained =
-            isRetained && (state.phase === "transitioning" || state.phase === "settled");
+            isRetained && (isReturning || state.phase === "transitioning" || state.phase === "settled");
 
           return (
             <div
@@ -175,6 +211,13 @@ export function RouteHandoffProvider({ children }: { children: ReactNode }) {
                 pointerEvents: isPendingDestination || isHiddenRetained ? "none" : undefined,
                 position: hasRetainedRoute ? "fixed" : "relative",
                 zIndex: isRetained ? 2 : 1,
+                ...(isReturning ? {
+                  opacity: returnPhase === "entering" ? (isRetained ? 0 : 1) : (isRetained ? 1 : 0),
+                  transform: returnPhase === "entering"
+                    ? (isRetained ? "translateY(-6px)" : "translateY(0)")
+                    : (isRetained ? "translateY(0)" : "translateY(6px)"),
+                  transition: "opacity 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1)",
+                } : {}),
               }}
             >
               <LayoutRouterContext.Provider value={layer.routerContext}>
