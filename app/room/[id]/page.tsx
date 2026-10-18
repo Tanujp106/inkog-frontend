@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChangeEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from "react";
+import type { ChangeEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
@@ -8,13 +8,14 @@ import { io, type Socket } from "socket.io-client";
 
 import { useRouteHandoff } from "@/components/route-handoff-provider";
 import { useMeasuredExpansion } from "@/components/use-measured-expansion";
+import { useMotionPresence } from "@/components/use-motion-presence";
+import { useRoomSendHandoff } from "@/components/use-room-send-handoff";
 import { ExpiredRoomPixelBubble } from "@/components/expired-room-pixel-bubble";
 import { getSlashCommandTokenDeletionRange } from "@/lib/slash-command-token.mjs";
 import {
   buildRoomGateTranscriptLines,
   buildRoomPeerColorMap,
   classifyRoomMessage,
-  isRoomComposerInteractive,
   resolveRoomStageAfterAuthenticatedJoin,
 } from "@/lib/room-chat-ui.mjs";
 import { getRoomComposerChrome, getRoomSlashCommandSuggestions } from "@/lib/room-composer-ui.mjs";
@@ -31,10 +32,7 @@ import {
   getRoomPollPrompt,
   submitRoomPollDraftAnswer,
 } from "@/lib/room-poll-command.mjs";
-import {
-  createPendingRoomPollRequest,
-  matchesPendingRoomPollRequest,
-} from "@/lib/room-poll-request.mjs";
+import { mergeRoomHistory, mergeRoomRecord, validateRoomPoll } from "@/lib/room-optimistic.mjs";
 import {
   getRoomStylePrompt,
   resolveRoomStyleSelection,
@@ -67,6 +65,21 @@ const ROOM_FONT_FAMILY = '"Departure Mono", monospace';
 const ROOM_HEADER_CSS = `
 .room-screen { position: relative; }
 .room-composer-entry-track::-webkit-scrollbar { display: none; }
+.room-recovery-strip {
+  align-items: center; background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 4px; box-sizing: border-box; color: var(--text); display: flex; flex-wrap: wrap;
+  font: 12px/18px "Departure Mono", monospace; gap: 6px; margin-bottom: 6px;
+  padding: 8px 10px; width: 100%;
+  animation: room-surface-enter var(--motion-expand-duration) var(--motion-ease-out) both;
+}
+.room-recovery-strip button { background: transparent; border: 0; color: var(--accent); cursor: pointer; font: inherit; padding: 2px 4px; }
+.room-recovery-strip button:focus-visible { outline: 1px solid var(--accent); }
+.room-recovery-editor { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+.room-recovery-editor { animation: room-surface-enter var(--motion-feedback-duration) var(--motion-ease-out) both; }
+.room-recovery-editor textarea { background: var(--bg); border: 1px solid var(--border); color: var(--text); flex: 1; font: inherit; min-height: 48px; min-width: 0; padding: 6px; resize: vertical; }
+.room-recovery-reason { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(360px, 100%); }
+.room-recovery-edit-error { color: var(--red); margin: 0; width: 100%; }
+@media (max-width: 640px) { .room-recovery-strip { font-size: 11px; } }
 .room-header-pixel-icon {
   display: block;
   flex: none;
@@ -225,7 +238,12 @@ const ROOM_HEADER_CSS = `
   right: 0;
   top: calc(100% + 8px);
   z-index: 30;
+  opacity: 0;
+  transform: translateY(-6px);
+  transform-origin: top right;
+  transition: opacity var(--motion-feedback-duration) ease-out, transform var(--motion-collapse-duration) var(--motion-ease-out);
 }
+.room-header-exit-menu[data-visible="true"] { opacity: 1; transform: translateY(0); }
 .room-header-end-action {
   appearance: none;
   background: transparent;
@@ -262,7 +280,10 @@ const ROOM_HEADER_CSS = `
   padding: 16px;
   position: fixed;
   z-index: 100;
+  opacity: 0;
+  transition: opacity var(--motion-collapse-duration) ease-out;
 }
+.room-leave-backdrop[data-visible="true"] { opacity: 1; }
 .room-leave-dialog {
   background: var(--bg-2);
   border: 1px solid var(--color-composer-border);
@@ -274,6 +295,20 @@ const ROOM_HEADER_CSS = `
   max-width: 100%;
   padding: 20px;
   width: 360px;
+  transform: translateY(8px);
+  transition: transform var(--motion-collapse-duration) var(--motion-ease-out);
+}
+.room-leave-backdrop[data-visible="true"] .room-leave-dialog { transform: translateY(0); }
+@keyframes room-surface-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.room-poll-created { animation: room-surface-enter var(--motion-handoff-duration) var(--motion-ease-out) both; }
+.room-poll-option > span { transition: color var(--motion-feedback-duration) ease-out, opacity var(--motion-feedback-duration) ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .room-recovery-strip, .room-recovery-editor, .room-poll-created { animation: none; }
+  .room-header-exit-menu, .room-leave-dialog { transform: none; }
+  .room-header-exit-menu, .room-leave-backdrop {
+    transition-property: opacity !important;
+    transition-duration: 90ms !important;
+  }
 }
 .room-leave-eyebrow {
   color: var(--text-muted);
@@ -470,6 +505,7 @@ const ROOM_HEADER_CSS = `
 
 interface Message {
   id: string;
+  clientActionId?: string;
   alias: string;
   content: string;
   createdAt: string;
@@ -483,6 +519,8 @@ interface PollVote {
 
 interface Poll {
   pollId: string;
+  clientActionId?: string;
+  voteRevision?: number;
   question: string;
   options: string[];
   votesByMember: PollVote[];
@@ -498,12 +536,33 @@ interface TerminalEvent {
 }
 
 interface JoinRoomData {
+  memberId: string;
   anonToken: string;
   alias: string;
   isCreator: boolean;
 }
 
 type Stage = "loading" | "password" | "joined" | "expired" | "error";
+type RoomActionKind = "message" | "poll" | "vote" | "close";
+interface RoomAction {
+  clientActionId: string;
+  kind: RoomActionKind;
+  createdAt: string;
+  payload: { message?: string; question?: string; options?: string[]; pollId?: string; optionIndex?: number };
+  state: "unresolved" | "failed";
+  reason?: string;
+  retryable?: boolean;
+}
+interface ActionResult {
+  kind: RoomActionKind;
+  clientActionId: string;
+  ok: boolean;
+  code?: string;
+  message?: string;
+  retryable?: boolean;
+  definitive?: boolean;
+  record?: Message | Poll | { pollId: string; votesByMember: PollVote[] };
+}
 type ComposerStatus = { tone: "muted" | "accent" | "error"; message: string };
 type PasswordReveal = { password: string; hint: string };
 type PendingComposerCommand =
@@ -749,6 +808,67 @@ function createWorstCaseRoomScenario() {
   };
 }
 
+function createMusicTasteRoomScenario() {
+  const now = Date.now();
+  const createdAt = (secondsAgo: number) => new Date(now - secondsAgo * 1_000).toISOString();
+  const aliases = { initiator: "Nia", voter: "Owen", pollCreator: "Milo" };
+  const makeMessage = (id: string, alias: string, content: string, secondsAgo: number): Message => ({
+    id,
+    alias,
+    content,
+    createdAt: createdAt(secondsAgo),
+  });
+  const openingMessages: Array<[string, string]> = [
+    [aliases.initiator, "serious question"],
+    [aliases.voter, "go on"],
+    [aliases.pollCreator, "who has the worst music taste in this group"],
+    [aliases.initiator, "we all know the answer"],
+    [aliases.voter, "say it then"],
+    [aliases.pollCreator, "nah let's make a poll"],
+    [aliases.initiator, "fair enough"],
+  ];
+  const closingMessages: Array<[string, string]> = [
+    [aliases.voter, "there's literally 3 of us"],
+    [aliases.pollCreator, "unanimous decision"],
+    [aliases.voter, "wait"],
+    [aliases.voter, "I VOTED FOR MYSELF TOO"],
+    [aliases.initiator, "bro wanted to be included"],
+    [aliases.pollCreator, "at least you have self awareness"],
+    [aliases.voter, "i thought i could change my vote"],
+    [aliases.initiator, "democracy bro"],
+    [aliases.voter, "fine, i'll make a playlist to change your minds"],
+    [aliases.pollCreator, "that sounds like evidence"],
+    [aliases.voter, "first track is queued"],
+    [aliases.initiator, "we voted before it played"],
+    [aliases.pollCreator, "unanimous skip"],
+    [aliases.voter, "democracy is flawed"],
+    [aliases.initiator, "only when it hears your playlist"],
+  ];
+
+  return {
+    topic: "Music taste poll",
+    alias: aliases.voter,
+    roomUsers: [aliases.initiator, aliases.voter, aliases.pollCreator],
+    secondsLeft: 3_599,
+    totalSeconds: 3_600,
+    messages: [
+      ...openingMessages.map(([alias, content], index) =>
+        makeMessage(`music-message-${String(index + 1).padStart(2, "0")}`, alias, content, 270 - index * 10)),
+      ...closingMessages.map(([alias, content], index) =>
+        makeMessage(`music-message-${String(index + openingMessages.length + 1).padStart(2, "0")}`, alias, content, 190 - index * 10)),
+    ],
+    polls: [{
+      pollId: "music-taste-poll",
+      question: "Who has the worst music taste?",
+      options: [aliases.initiator, aliases.voter, aliases.pollCreator],
+      votesByMember: [aliases.initiator, aliases.voter, aliases.pollCreator].map(alias => ({ alias, optionIndex: 1 })),
+      createdAt: createdAt(200),
+      createdByAlias: aliases.pollCreator,
+    }],
+    events: [] satisfies TerminalEvent[],
+  };
+}
+
 function getStoredToken(roomId: string) {
   if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") return undefined;
   return window.localStorage.getItem(`token_${roomId}`) || undefined;
@@ -766,7 +886,7 @@ function clearStoredToken(roomId: string) {
 
 function makeId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random()}`;
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2).padEnd(12, "0")}`;
 }
 
 function timestampFrom(value: string) {
@@ -805,16 +925,33 @@ export default function RoomPage() {
   const [activeThemeId, setActiveThemeId] = useState("green");
   const [isCreator, setIsCreator] = useState(false);
   const [hasPassword, setHasPassword] = useState(false);
+  const [hasEnteredRoom, setHasEnteredRoom] = useState(false);
   const anonTokenRef = useRef<string>("");
+  const memberAliasRef = useRef("");
+  const memberIdRef = useRef("");
+  const joinedSocketRef = useRef(false);
+  const actionsRef = useRef<RoomAction[]>([]);
+  const uncertainChecksRef = useRef(new Map<string, number>());
+  const voteRevisionRef = useRef(new Map<string, number>());
+  const voteRef = useRef(new Map<string, {
+    active: { clientActionId: string; optionIndex: number };
+    queued?: { clientActionId: string; optionIndex: number };
+    confirmed: PollVote[];
+  }>());
 
   const [passwordError, setPasswordError] = useState("");
   const [passwordGateUnlocked, setPasswordGateUnlocked] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
+  const [actions, setActions] = useState<RoomAction[]>([]);
+  const [editingActionId, setEditingActionId] = useState<string | null>(null);
+  const [copyRecoveryError, setCopyRecoveryError] = useState("");
+  const [recoveryEditValue, setRecoveryEditValue] = useState("");
+  const [recoveryEditError, setRecoveryEditError] = useState("");
+  const [duplicateTabBlocked, setDuplicateTabBlocked] = useState(false);
   const [terminalEvents, setTerminalEvents] = useState<TerminalEvent[]>([]);
-  const [isWorstCaseScenario, setIsWorstCaseScenario] = useState(false);
+  const [isScenarioPreview, setIsScenarioPreview] = useState(false);
   const [composerValue, setComposerValue] = useState("");
-  const [isRealtimeReady, setIsRealtimeReady] = useState(false);
   const [cursorVisible, setCursorVisible] = useState(true);
   const [composerStatus, setComposerStatus] = useState<ComposerStatus | null>(null);
   const [pendingCommand, setPendingCommand] = useState<PendingComposerCommand>(null);
@@ -839,9 +976,224 @@ export default function RoomPage() {
   const composerStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shareCopiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousSecondsLeftRef = useRef<number | null>(null);
-  const pendingPollRequestRef = useRef<ReturnType<typeof createPendingRoomPollRequest> | null>(null);
   const reconnectErrorReportedRef = useRef(false);
   const ttlTotalSecondsRef = useRef(0);
+
+  const outboxKey = (memberId: string) => `inkog:outbox:${roomId}:${memberId}`;
+  const updateActions = (next: RoomAction[] | ((current: RoomAction[]) => RoomAction[])) => {
+    const resolved = typeof next === "function" ? next(actionsRef.current) : next;
+    actionsRef.current = resolved;
+    setActions(resolved);
+    const memberId = memberIdRef.current;
+    if (!memberId) return;
+    try {
+      if (resolved.length) sessionStorage.setItem(outboxKey(memberId), JSON.stringify(resolved));
+      else sessionStorage.removeItem(outboxKey(memberId));
+    } catch { /* The active tab still retains its in-memory outbox. */ }
+  };
+
+  const renderLocalAction = (action: RoomAction) => {
+    if (action.kind === "message") {
+      setMessages(current => mergeRoomRecord(current, {
+        id: action.clientActionId, clientActionId: action.clientActionId,
+        alias: memberAliasRef.current, content: action.payload.message ?? "",
+        createdAt: action.createdAt,
+      }, "id"));
+    } else if (action.kind === "poll") {
+      setPolls(current => mergeRoomRecord(current, {
+        pollId: action.clientActionId, clientActionId: action.clientActionId,
+        question: action.payload.question ?? "", options: action.payload.options ?? [],
+        votesByMember: [], createdAt: action.createdAt, createdByAlias: memberAliasRef.current,
+      }, "pollId"));
+    }
+  };
+
+  const sendAction = (action: RoomAction) => {
+    const socket = socketRef.current;
+    if (!socket || !joinedSocketRef.current) return;
+    if (action.kind === "message") {
+      socket.emit("send_message", { message: action.payload.message, clientActionId: action.clientActionId });
+    } else if (action.kind === "poll") {
+      socket.emit("create_poll", { question: action.payload.question, options: action.payload.options, clientActionId: action.clientActionId });
+    } else if (action.kind === "close") {
+      socket.emit("close_room", { clientActionId: action.clientActionId });
+    }
+  };
+
+  const confirmMessage = (record: Message) => {
+    setMessages(current => mergeRoomRecord(current, record, "id"));
+    if (record.clientActionId) updateActions(current => current.filter(action => action.clientActionId !== record.clientActionId));
+  };
+  const confirmPoll = (record: Poll) => {
+    const waitingVote = record.clientActionId ? voteRef.current.get(record.clientActionId) : undefined;
+    if (waitingVote && record.clientActionId) {
+      voteRef.current.delete(record.clientActionId);
+      voteRef.current.set(record.pollId, { ...waitingVote, confirmed: record.votesByMember });
+      updateActions(current => current.map(action =>
+        action.kind === "vote" && action.payload.pollId === record.clientActionId
+          ? { ...action, payload: { ...action.payload, pollId: record.pollId } }
+          : action));
+      if (joinedSocketRef.current) {
+        socketRef.current?.emit("vote_poll", {
+          pollId: record.pollId, optionIndex: waitingVote.active.optionIndex,
+          clientActionId: waitingVote.active.clientActionId,
+        });
+      }
+    }
+    voteRevisionRef.current.set(record.pollId, Math.max(voteRevisionRef.current.get(record.pollId) ?? 0, record.voteRevision ?? 0));
+    setPolls(current => {
+      const merged: Poll[] = mergeRoomRecord(current, record, "pollId");
+      const pending = voteRef.current.get(record.pollId);
+      if (!pending) return merged;
+      const desired = pending.queued ?? pending.active;
+      return merged.map(poll => poll.pollId === record.pollId ? {
+        ...poll, votesByMember: [
+          ...poll.votesByMember.filter(vote => vote.alias !== memberAliasRef.current),
+          { alias: memberAliasRef.current, optionIndex: desired.optionIndex },
+        ],
+      } : poll);
+    });
+    if (record.clientActionId) updateActions(current => current.filter(action => action.clientActionId !== record.clientActionId));
+  };
+
+  const restoreActions = (memberId: string) => {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(outboxKey(memberId)) || "[]") as RoomAction[];
+      const recent = Array.isArray(stored) ? stored.filter(action =>
+        action && typeof action.clientActionId === "string" &&
+        typeof action.createdAt === "string" && Date.now() - Date.parse(action.createdAt) < 24 * 60 * 60 * 1000
+      ) : [];
+      updateActions(recent);
+      recent.filter(action => action.state === "unresolved").forEach(renderLocalAction);
+    } catch { updateActions([]); }
+  };
+
+  const failAction = (result: ActionResult) => {
+    const action = actionsRef.current.find(item => item.clientActionId === result.clientActionId);
+    if (!action) return;
+    const supersededVote = action.kind === "vote" && Boolean(voteRef.current.get(action.payload.pollId ?? "")?.queued);
+    updateActions(current => supersededVote
+      ? current.filter(item => item.clientActionId !== result.clientActionId)
+      : current.map(item => item.clientActionId === result.clientActionId
+        ? { ...item, state: "failed", reason: result.message, retryable: result.retryable }
+        : item));
+    if (action.kind === "message") setMessages(current => current.filter(item => item.clientActionId !== action.clientActionId));
+    if (action.kind === "poll") setPolls(current => current.filter(item => item.clientActionId !== action.clientActionId));
+    if (action.kind === "vote") {
+      const vote = voteRef.current.get(action.payload.pollId ?? "");
+      if (vote?.active.clientActionId === action.clientActionId) {
+        const queued = vote.queued;
+        if (queued) {
+          voteRef.current.set(action.payload.pollId ?? "", { active: queued, confirmed: vote.confirmed });
+          socketRef.current?.emit("vote_poll", { pollId: action.payload.pollId, optionIndex: queued.optionIndex, clientActionId: queued.clientActionId });
+        } else {
+          voteRef.current.delete(action.payload.pollId ?? "");
+          setPolls(current => current.map(poll => poll.pollId === action.payload.pollId ? { ...poll, votesByMember: vote.confirmed } : poll));
+        }
+      }
+    }
+    if (action.kind === "close") setStage("joined");
+    soundRef.current.play("error");
+  };
+
+  const reconcileUncertain = (result: ActionResult) => {
+    const checks = (uncertainChecksRef.current.get(result.clientActionId) ?? 0) + 1;
+    uncertainChecksRef.current.set(result.clientActionId, checks);
+    window.setTimeout(async () => {
+      const action = actionsRef.current.find(item => item.clientActionId === result.clientActionId && item.state === "unresolved");
+      if (!action || !anonTokenRef.current) return;
+      try {
+        if (action.kind === "message" || action.kind === "poll") {
+          const ready = await fetchHistory(anonTokenRef.current);
+          const missing = actionsRef.current.some(item => item.clientActionId === action.clientActionId);
+          if (!ready || !missing) return;
+          if (checks < 2) sendAction(action);
+          else failAction({ ...result, definitive: true, retryable: true, message: `${action.kind === "message" ? "Message" : "Poll"} didn't reach the room. Retry it.` });
+          return;
+        }
+        if (action.kind === "close") {
+          const response = await fetch(`${API}/rooms/${roomId}`);
+          if (response.status === 404 || response.status === 410) {
+            updateActions(current => current.filter(item => item.clientActionId !== action.clientActionId));
+          } else if (response.ok) {
+            if (checks < 2) sendAction(action);
+            else failAction({ ...result, definitive: true, retryable: true, message: "Room is still open. Retry closing it." });
+          }
+          return;
+        }
+        const response = await fetch(`${API}/rooms/${roomId}/polls?anonToken=${encodeURIComponent(anonTokenRef.current)}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const poll = (data.polls as Poll[]).find(item => item.pollId === action.payload.pollId);
+        const canonicalVote = poll?.votesByMember.find(vote => vote.alias === memberAliasRef.current)?.optionIndex;
+        if (canonicalVote === action.payload.optionIndex) {
+          if (poll) {
+            voteRef.current.delete(poll.pollId);
+            setPolls(current => mergeRoomRecord(current, poll, "pollId"));
+          }
+          updateActions(current => current.filter(item => item.clientActionId !== action.clientActionId));
+        } else if (checks < 2 && joinedSocketRef.current) {
+          socketRef.current?.emit("vote_poll", { ...action.payload, clientActionId: action.clientActionId });
+        } else if (checks >= 2) {
+          failAction({ ...result, definitive: true, retryable: true, message: "Vote didn't reach the room. Retry it." });
+        }
+      } catch { /* Keep the ordinary optimistic item until history can be read. */ }
+    }, 500);
+  };
+
+  const retryAction = (action: RoomAction) => {
+    uncertainChecksRef.current.delete(action.clientActionId);
+    updateActions(current => current.map(item => item.clientActionId === action.clientActionId
+      ? { ...item, state: "unresolved", reason: undefined } : item));
+    setEditingActionId(null);
+    setRecoveryEditError("");
+    if (action.kind === "close") setStage("expired");
+    if (action.kind === "vote") {
+      const pollId = action.payload.pollId ?? "";
+      const optionIndex = action.payload.optionIndex ?? -1;
+      const poll = polls.find(item => item.pollId === pollId);
+      if (poll && optionIndex >= 0) {
+        voteRef.current.set(pollId, { active: { clientActionId: action.clientActionId, optionIndex }, confirmed: poll.votesByMember });
+        setPolls(current => current.map(item => item.pollId === pollId ? {
+          ...item, votesByMember: [...item.votesByMember.filter(vote => vote.alias !== memberAliasRef.current), { alias: memberAliasRef.current, optionIndex }],
+        } : item));
+        if (joinedSocketRef.current && poll.pollId !== poll.clientActionId) {
+        socketRef.current?.emit("vote_poll", { pollId, optionIndex, clientActionId: action.clientActionId });
+      }
+      }
+      return;
+    }
+    if (action.kind === "message") queueHandoff(action.clientActionId, null);
+    renderLocalAction(action);
+    sendAction(action);
+  };
+
+  const saveRecoveryEdit = (action: RoomAction) => {
+    if (duplicateTabBlocked) {
+      setRecoveryEditError("This room is open in another tab. Copy the text or return there.");
+      return;
+    }
+    let payload: RoomAction["payload"];
+    if (action.kind === "message") {
+      if (!recoveryEditValue.trim()) { setRecoveryEditError("Add a message before sending."); return; }
+      payload = { message: recoveryEditValue.trim() };
+    } else if (action.kind === "poll") {
+      const parsed = parseRoomCommand(`/poll ${recoveryEditValue}`) as RoomCommand;
+      if (parsed.type !== "poll-inline") {
+        setRecoveryEditError(parsed.type === "invalid" ? parsed.message : "Use question | option | option to edit this poll.");
+        return;
+      }
+      payload = { question: parsed.question, options: parsed.options };
+    } else return;
+    updateActions(current => current.filter(item => item.clientActionId !== action.clientActionId));
+    const next: RoomAction = { clientActionId: makeId(), kind: action.kind, payload, createdAt: new Date().toISOString(), state: "unresolved" };
+    updateActions(current => [...current, next]);
+    setEditingActionId(null);
+    setRecoveryEditError("");
+    if (next.kind === "message") queueHandoff(next.clientActionId, null);
+    renderLocalAction(next);
+    sendAction(next);
+  };
 
   const focusComposer = () => {
     requestAnimationFrame(() => {
@@ -1004,6 +1356,11 @@ export default function RoomPage() {
     () => transcriptFrom(messages, polls, terminalEvents),
     [messages, polls, terminalEvents],
   );
+  const { queueHandoff, suppressSmoothScrollRef } = useRoomSendHandoff(
+    transcript,
+    transcriptViewportRef,
+    shouldFollowTranscriptRef,
+  );
   const peerColorMap = useMemo(
     () => buildRoomPeerColorMap([...roomUsers, ...messages.map(message => message.alias)], alias, activeThemeId),
     [activeThemeId, alias, messages, roomUsers],
@@ -1026,8 +1383,14 @@ export default function RoomPage() {
 
   useEffect(() => {
     const transcriptViewport = transcriptViewportRef.current;
+    const suppressSmoothScroll = suppressSmoothScrollRef.current;
+    suppressSmoothScrollRef.current = false;
     if (!transcriptViewport || !shouldFollowTranscriptRef.current) return;
 
+    if (suppressSmoothScroll) {
+      transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
+      return;
+    }
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     transcriptViewport.scrollTo({ top: transcriptViewport.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
   }, [transcript]);
@@ -1068,8 +1431,7 @@ export default function RoomPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const connectSocket = (token: string, myAlias: string, onReady: () => void) => {
-    setIsRealtimeReady(false);
+  const connectSocket = (token: string, myAlias: string) => {
     reconnectErrorReportedRef.current = false;
     if (socketRef.current) {
       socketRef.current.disconnect();
@@ -1080,8 +1442,12 @@ export default function RoomPage() {
     socketRef.current = socket;
 
     socket.on("connect", () => {
+      joinedSocketRef.current = false;
       socket.emit("join_room", { roomId, anonToken: token });
     });
+    socket.on("disconnect", () => {
+      joinedSocketRef.current = false;
+      });
 
     socket.on("connect_error", () => {
       if (reconnectErrorReportedRef.current) return;
@@ -1092,6 +1458,8 @@ export default function RoomPage() {
 
     socket.on("join_room_success", ({ onlineCount, roomUsers }: { onlineCount: number; roomUsers: string[] }) => {
       reconnectErrorReportedRef.current = false;
+      joinedSocketRef.current = true;
+      setDuplicateTabBlocked(false);
       setOnlineCount(onlineCount);
       setRoomUsers(roomUsers ?? []);
       soundRef.current.play("success");
@@ -1102,7 +1470,16 @@ export default function RoomPage() {
         createdAt: new Date().toISOString(),
         isSystem: true,
       }]);
-      onReady();
+      void fetchHistory(token).then(historyReady => {
+        if (!historyReady) return;
+        actionsRef.current.filter(action => action.state === "unresolved" && action.kind !== "vote").forEach(sendAction);
+        for (const [pollId, pending] of voteRef.current) {
+          socket.emit("vote_poll", {
+            pollId, optionIndex: pending.active.optionIndex,
+            clientActionId: pending.active.clientActionId,
+          });
+        }
+      }).catch(() => { /* Preserve uncertain actions until history can be read. */ });
     });
 
     socket.on("user_joined", ({ alias, onlineCount, roomUsers }: { alias: string; onlineCount: number; roomUsers: string[] }) => {
@@ -1135,7 +1512,7 @@ export default function RoomPage() {
       if (msg.alias !== myAlias) {
         soundRef.current.play("messageReceived");
       }
-      setMessages(prev => [...prev, msg]);
+      confirmMessage(msg);
     });
 
     socket.on("message_deleted", ({ messageId }: { messageId: string }) => {
@@ -1143,17 +1520,23 @@ export default function RoomPage() {
     });
 
     socket.on("poll_created", (poll: Poll) => {
-      if (matchesPendingRoomPollRequest(pendingPollRequestRef.current, poll)) {
-        pendingPollRequestRef.current = null;
-        setComposerStatusMessage(`poll created: ${poll.question}`, "accent");
-      } else {
+      if (poll.createdByAlias !== myAlias && !actionsRef.current.some(action => action.clientActionId === poll.clientActionId)) {
         soundRef.current.play("pollCreated");
       }
-      setPolls(prev => [...prev, poll]);
+      confirmPoll(poll);
     });
 
-    socket.on("poll_updated", ({ pollId, votesByMember }: { pollId: string; votesByMember: PollVote[] }) => {
-      setPolls(prev => prev.map(p => p.pollId === pollId ? { ...p, votesByMember } : p));
+    socket.on("poll_updated", ({ pollId, votesByMember, voteRevision }: { pollId: string; votesByMember: PollVote[]; voteRevision?: number }) => {
+      const revision = Number(voteRevision ?? 0);
+      if (revision < (voteRevisionRef.current.get(pollId) ?? 0)) return;
+      voteRevisionRef.current.set(pollId, revision);
+      const pending = voteRef.current.get(pollId);
+      if (pending) pending.confirmed = votesByMember;
+      const desired = pending?.queued ?? pending?.active;
+      const visible = desired
+        ? [...votesByMember.filter(vote => vote.alias !== myAlias), { alias: myAlias, optionIndex: desired.optionIndex }]
+        : votesByMember;
+      setPolls(prev => prev.map(p => p.pollId === pollId ? { ...p, votesByMember: visible, voteRevision: revision } : p));
     });
 
     socket.on("poll_closed", ({ pollId, votesByMember }: { pollId: string; votesByMember: PollVote[] }) => {
@@ -1163,21 +1546,57 @@ export default function RoomPage() {
     socket.on("room_closed", () => {
       soundRef.current.play("close");
       setStage("expired");
+      joinedSocketRef.current = false;
+    });
+
+    socket.on("action_result", (result: ActionResult) => {
+      if (!result?.clientActionId) return;
+      if (!result.ok) {
+        if (result.definitive === false) reconcileUncertain(result);
+        else failAction(result);
+        return;
+      }
+      uncertainChecksRef.current.delete(result.clientActionId);
+      if (result.kind === "message" && result.record) confirmMessage(result.record as Message);
+      if (result.kind === "poll" && result.record) confirmPoll(result.record as Poll);
+      if (result.kind === "vote") {
+        const record = result.record as { pollId: string; votesByMember: PollVote[]; voteRevision?: number } | undefined;
+        const pollId = record?.pollId;
+        const pending = pollId ? voteRef.current.get(pollId) : undefined;
+        if (pending?.active.clientActionId === result.clientActionId) {
+          const revision = Number(record?.voteRevision ?? 0);
+          if (revision >= (voteRevisionRef.current.get(pollId!) ?? 0)) {
+            voteRevisionRef.current.set(pollId!, revision);
+            pending.confirmed = record?.votesByMember ?? pending.confirmed;
+          }
+          if (pending.queued) {
+            const next = pending.queued;
+            pending.active = next;
+            pending.queued = undefined;
+            socket.emit("vote_poll", { pollId, optionIndex: next.optionIndex, clientActionId: next.clientActionId });
+          } else {
+            voteRef.current.delete(pollId!);
+            setPolls(current => current.map(poll => poll.pollId === pollId ? {
+              ...poll, votesByMember: pending.confirmed,
+              voteRevision: voteRevisionRef.current.get(pollId!) ?? poll.voteRevision,
+            } : poll));
+          }
+        }
+      }
+      updateActions(current => current.filter(action => action.clientActionId !== result.clientActionId));
     });
 
     socket.on("error", ({ message }: { message: string }) => {
       if (message === "This room is already open in another tab. Pick up where you left off there.") {
         socket.disconnect();
         socketRef.current = null;
-        setIsRealtimeReady(false);
+            joinedSocketRef.current = false;
+        setDuplicateTabBlocked(true);
+        actionsRef.current.filter(action => action.state === "unresolved").forEach(action => {
+          failAction({ kind: action.kind, clientActionId: action.clientActionId, ok: false, message, retryable: false });
+        });
       }
-
-      if (pendingPollRequestRef.current) {
-        pendingPollRequestRef.current = null;
-        appendEvent("error", `That poll didn't go through: ${message}`);
-      } else {
-        appendEvent("error", message);
-      }
+      appendEvent("error", message);
       soundRef.current.play("error");
     });
 
@@ -1208,24 +1627,80 @@ export default function RoomPage() {
 
     if (msgRes.ok) {
       const data = await msgRes.json();
-      setMessages(data.messages || []);
+      const records = (data.messages || []) as Message[];
+      setMessages(current => mergeRoomHistory(current, records, "id"));
+      const confirmed = new Set(records.map(record => record.clientActionId).filter(Boolean));
+      updateActions(current => current.filter(action => !confirmed.has(action.clientActionId)));
     }
 
     if (pollRes.ok) {
       const data = await pollRes.json();
-      setPolls(data.polls || []);
+      const records = (data.polls || []) as Poll[];
+      for (const record of records) {
+        const previousRevision = voteRevisionRef.current.get(record.pollId) ?? 0;
+        if ((record.voteRevision ?? 0) >= previousRevision) {
+          const pending = voteRef.current.get(record.pollId);
+          if (pending) pending.confirmed = record.votesByMember;
+        }
+        voteRevisionRef.current.set(record.pollId, Math.max(previousRevision, record.voteRevision ?? 0));
+        if (record.clientActionId) {
+          updateActions(current => current.map(action =>
+            action.kind === "vote" && action.payload.pollId === record.clientActionId
+              ? { ...action, payload: { ...action.payload, pollId: record.pollId } }
+              : action));
+        }
+        if (record.clientActionId && voteRef.current.has(record.clientActionId)) {
+          const pending = voteRef.current.get(record.clientActionId)!;
+          voteRef.current.delete(record.clientActionId);
+          voteRef.current.set(record.pollId, { ...pending, confirmed: record.votesByMember });
+          updateActions(current => current.map(action =>
+            action.kind === "vote" && action.payload.pollId === record.clientActionId
+              ? { ...action, payload: { ...action.payload, pollId: record.pollId } }
+              : action));
+        }
+        const unresolved = actionsRef.current.filter(action =>
+          action.kind === "vote" && action.state === "unresolved" && action.payload.pollId === record.pollId);
+        if (unresolved.length && !voteRef.current.has(record.pollId)) {
+          const latest = unresolved[unresolved.length - 1];
+          voteRef.current.set(record.pollId, {
+            active: { clientActionId: latest.clientActionId, optionIndex: latest.payload.optionIndex ?? 0 },
+            confirmed: record.votesByMember,
+          });
+          updateActions(current => current.filter(action =>
+            action.kind !== "vote" || action.payload.pollId !== record.pollId || action.clientActionId === latest.clientActionId));
+        }
+      }
+      setPolls(current => {
+        const merged: Poll[] = mergeRoomHistory(current, records, "pollId");
+        return merged.map(poll => {
+          const pending = voteRef.current.get(poll.pollId);
+          if (!pending) return poll;
+          const desired = pending.queued ?? pending.active;
+          return { ...poll, votesByMember: [
+            ...poll.votesByMember.filter(vote => vote.alias !== memberAliasRef.current),
+            { alias: memberAliasRef.current, optionIndex: desired.optionIndex },
+          ] };
+        });
+      });
+      const confirmed = new Set(records.map(record => record.clientActionId).filter(Boolean));
+      updateActions(current => current.filter(action => !confirmed.has(action.clientActionId)));
     }
+    return msgRes.ok && pollRes.ok;
   };
 
   const enterJoinedRoom = async (joinData: JoinRoomData, options: { fromPasswordGate?: boolean } = {}) => {
     anonTokenRef.current = joinData.anonToken;
+    memberAliasRef.current = joinData.alias;
+    memberIdRef.current = joinData.memberId;
+    restoreActions(joinData.memberId);
     setStoredToken(roomId, joinData.anonToken);
     setAlias(joinData.alias);
     setIsCreator(joinData.isCreator);
     if (options.fromPasswordGate) setPasswordGateUnlocked(true);
     await fetchHistory(joinData.anonToken);
+    setHasEnteredRoom(true);
     setStage(resolveRoomStageAfterAuthenticatedJoin());
-    connectSocket(joinData.anonToken, joinData.alias, () => setIsRealtimeReady(true));
+    connectSocket(joinData.anonToken, joinData.alias);
   };
 
   useEffect(() => {
@@ -1249,14 +1724,16 @@ export default function RoomPage() {
 
     const run = async () => {
       const requestedScenario = new URLSearchParams(window.location.search).get("uiScenario");
-      if (requestedScenario === "worst-case") {
+      if (requestedScenario === "worst-case" || requestedScenario === "music-poll") {
         if (process.env.NODE_ENV === "production") {
           setStage("expired");
           return;
         }
 
-        const scenario = createWorstCaseRoomScenario();
-        setIsWorstCaseScenario(true);
+        const scenario = requestedScenario === "music-poll"
+          ? createMusicTasteRoomScenario()
+          : createWorstCaseRoomScenario();
+        setIsScenarioPreview(true);
         setTopic(scenario.topic);
         setAlias(scenario.alias);
         setRoomUsers(scenario.roomUsers);
@@ -1268,7 +1745,6 @@ export default function RoomPage() {
         setTerminalEvents(scenario.events);
         setIsCreator(true);
         setHasPassword(false);
-        setIsRealtimeReady(true);
         setStage("joined");
         return;
       }
@@ -1309,6 +1785,9 @@ export default function RoomPage() {
         });
 
         if (lookup.stage === "expired") {
+          setErrorMsg(roomRes.status === 404
+            ? "We couldn't find that room. Check the link and try again."
+            : "This room has wrapped up. Start a fresh one to keep chatting.");
           setStage("expired");
           return;
         }
@@ -1332,8 +1811,7 @@ export default function RoomPage() {
 
         const storedToken = getStoredToken(roomId);
         if (roomData.hasPassword && !storedToken) {
-          cancelRoomHandoff();
-          router.replace(`/?join=${encodeURIComponent(roomId)}`);
+          setStage("password");
           return;
         }
 
@@ -1344,8 +1822,7 @@ export default function RoomPage() {
           const e = err as { status?: number; message?: string };
           if (roomData.hasPassword && e.status === 403) {
             clearStoredToken(roomId);
-            cancelRoomHandoff();
-            router.replace(`/?join=${encodeURIComponent(roomId)}`);
+            setStage("password");
             return;
           }
           throw err;
@@ -1358,6 +1835,7 @@ export default function RoomPage() {
         const e = err as { status?: number; message?: string };
         const failureStage = resolveRoomAccessFailureStage(e.status);
         if (failureStage === "expired") {
+          setErrorMsg(e.message || "This room has wrapped up. Start a fresh one to keep chatting.");
           setStage("expired");
           return;
         }
@@ -1401,60 +1879,71 @@ export default function RoomPage() {
   };
 
   const emitPoll = (question: string, options: string[]) => {
-    if (isWorstCaseScenario) {
+    const validation = validateRoomPoll(question, options);
+    if (validation) { setComposerStatusMessage(validation, "error"); return false; }
+    if (polls.length >= 5) {
+      setComposerStatusMessage("That's five polls for this room. Start a new room to make another.", "error");
+      return false;
+    }
+    if (duplicateTabBlocked || stage !== "joined") {
+      setComposerStatusMessage("Rejoin this room before creating a poll.", "error");
+      return false;
+    }
+    if (isScenarioPreview) {
       setPolls(current => [...current, {
-        pollId: makeId(),
-        question,
-        options,
-        votesByMember: [],
-        createdAt: new Date().toISOString(),
-        createdByAlias: alias,
+        pollId: makeId(), question, options, votesByMember: [],
+        createdAt: new Date().toISOString(), createdByAlias: alias,
       }]);
       sound.play("pollCreated");
       return true;
     }
-
-    if (!socketRef.current) {
-      appendEvent("error", "You're not connected to the room yet. Try again in a moment.");
-      sound.play("error");
-      return false;
-    }
-
-    pendingPollRequestRef.current = createPendingRoomPollRequest(question, options);
-    socketRef.current.emit("create_poll", { question, options });
+    const action: RoomAction = {
+      clientActionId: makeId(), kind: "poll", createdAt: new Date().toISOString(),
+      payload: { question: question.trim(), options: options.map(option => option.trim()) }, state: "unresolved",
+    };
+    updateActions(current => [...current, action]);
+    renderLocalAction(action);
+    sendAction(action);
     sound.play("pollCreated");
     return true;
   };
 
   const sendChatMessage = (message: string) => {
-    if (isWorstCaseScenario) {
+    if (!message.trim() || duplicateTabBlocked || stage !== "joined") return false;
+    if (isScenarioPreview) {
       setMessages(current => [...current, {
-        id: makeId(),
-        alias,
-        content: message,
-        createdAt: new Date().toISOString(),
+        id: makeId(), alias, content: message, createdAt: new Date().toISOString(),
       }]);
       sound.play("messageSent");
-      return;
+      return true;
     }
-
-    if (!socketRef.current) {
-      appendEvent("error", "You're not connected to the room yet. Try again in a moment.");
-      sound.play("error");
-      return;
-    }
-
-    socketRef.current.emit("send_message", { message });
+    const action: RoomAction = {
+      clientActionId: makeId(), kind: "message", createdAt: new Date().toISOString(),
+      payload: { message: message.trim() }, state: "unresolved",
+    };
+    queueHandoff(action.clientActionId, composerRef.current);
+    updateActions(current => [...current, action]);
+    renderLocalAction(action);
+    sendAction(action);
     sound.play("messageSent");
+    return true;
   };
 
   const closeRoom = () => {
+    if (!isCreator || duplicateTabBlocked || stage !== "joined") return;
     sound.play("close");
-    socketRef.current?.emit("close_room", {});
+    if (!isScenarioPreview) {
+      const action: RoomAction = { clientActionId: makeId(), kind: "close", createdAt: new Date().toISOString(), payload: {}, state: "unresolved" };
+      updateActions(current => [...current, action]);
+      sendAction(action);
+    }
+    setStage("expired");
   };
 
   const handleLeave = () => {
     sound.play("close");
+    updateActions([]);
+    joinedSocketRef.current = false;
     socketRef.current?.disconnect();
     socketRef.current = null;
     router.push("/");
@@ -1691,7 +2180,7 @@ export default function RoomPage() {
   };
 
   const runComposer = () => {
-    if (!isRoomComposerInteractive(stage, isRealtimeReady)) return;
+    if (stage !== "password" && (stage !== "joined" || duplicateTabBlocked)) return;
 
     const rawValue = composerValue;
     const value = rawValue.trim();
@@ -1726,6 +2215,7 @@ export default function RoomPage() {
         const result = submitRoomPollDraftAnswer(pendingCommand, value);
 
         if (result.status === "invalid") {
+          setComposerValue(rawValue);
           sound.play("error");
           setComposerStatusMessage(result.message ?? "That poll answer didn't quite fit. Try again.", "error");
           return;
@@ -1749,12 +2239,8 @@ export default function RoomPage() {
           return;
         }
 
-        setPendingCommand(null);
         if (!emitPoll(result.payload.question, result.payload.options)) return;
-        setComposerStatusMessage(
-          isWorstCaseScenario ? `poll added to local scenario: ${result.payload.question}` : `creating poll: ${result.payload.question}`,
-          isWorstCaseScenario ? "accent" : "muted",
-        );
+        setPendingCommand(null);
         return;
       }
     }
@@ -1778,14 +2264,10 @@ export default function RoomPage() {
         handlePollCommand();
         return;
       case "poll-inline":
-        if (!emitPoll(command.question, command.options)) return;
-        setComposerStatusMessage(
-          isWorstCaseScenario ? `poll added to local scenario: ${command.question}` : `creating poll: ${command.question}`,
-          isWorstCaseScenario ? "accent" : "muted",
-        );
+        if (!emitPoll(command.question, command.options)) { setComposerValue(rawValue); return; }
         return;
       case "message":
-        sendChatMessage(command.text);
+        if (!sendChatMessage(command.text)) { setComposerValue(rawValue); return; }
         setComposerStatus(null);
         setPendingCommand(null);
         return;
@@ -1793,6 +2275,7 @@ export default function RoomPage() {
         handleStyleCommand(command.argument);
         return;
       case "invalid":
+        setComposerValue(rawValue);
         sound.play("error");
         setComposerStatusMessage(command.message, "error");
         return;
@@ -1822,6 +2305,7 @@ export default function RoomPage() {
         closeRoomWithConfirm();
         return;
       case "unknown":
+        setComposerValue(rawValue);
         sound.play("error");
         setComposerStatusMessage(`That command's new to me: ${command.command}.`, "error");
         return;
@@ -1829,21 +2313,29 @@ export default function RoomPage() {
   };
 
   const votePoll = (pollId: string, optionIndex: number) => {
+    if (duplicateTabBlocked || stage !== "joined") return;
+    const poll = polls.find(item => item.pollId === pollId);
+    if (!poll || optionIndex < 0 || optionIndex >= poll.options.length) return;
     sound.play("pollVoted");
-    if (isWorstCaseScenario) {
-      setPolls(current => current.map(poll => poll.pollId === pollId
-        ? {
-            ...poll,
-            votesByMember: [
-              ...poll.votesByMember.filter(vote => vote.alias !== alias),
-              { alias, optionIndex },
-            ],
-          }
-        : poll));
-      return;
+    setPolls(current => current.map(item => item.pollId === pollId ? {
+      ...item, votesByMember: [...item.votesByMember.filter(vote => vote.alias !== alias), { alias, optionIndex }],
+    } : item));
+    if (isScenarioPreview) return;
+    const action: RoomAction = {
+      clientActionId: makeId(), kind: "vote", createdAt: new Date().toISOString(),
+      payload: { pollId, optionIndex }, state: "unresolved",
+    };
+    updateActions(current => [...current, action]);
+    const pending = voteRef.current.get(pollId);
+    if (pending) {
+      if (pending.queued) updateActions(current => current.filter(item => item.clientActionId !== pending.queued?.clientActionId));
+      pending.queued = { clientActionId: action.clientActionId, optionIndex };
+    } else {
+      voteRef.current.set(pollId, { active: { clientActionId: action.clientActionId, optionIndex }, confirmed: poll.votesByMember });
+      if (joinedSocketRef.current && poll.pollId !== poll.clientActionId) {
+        socketRef.current?.emit("vote_poll", { pollId, optionIndex, clientActionId: action.clientActionId });
+      }
     }
-
-    socketRef.current?.emit("vote_poll", { pollId, optionIndex });
   };
 
   const totalVotes = (poll: Poll) => poll.votesByMember.length;
@@ -2022,7 +2514,7 @@ export default function RoomPage() {
     },
     onKeyDown: handleComposerKeyDown,
     spellCheck: false,
-    disabled: stage !== "joined" && stage !== "password",
+    disabled: duplicateTabBlocked || (stage !== "joined" && stage !== "password"),
     placeholder: isRoomBooting ? "opening chat" : isPasswordGate ? "write password" : pollInlinePrompt?.placeholder,
     role: isPasswordGate ? undefined : "combobox",
     value: composerValue,
@@ -2059,15 +2551,37 @@ export default function RoomPage() {
     };
   }, [showSlashSuggestions, slashSuggestionIndex]);
 
+  const returnToJoin = (reason: string) => {
+    try { sessionStorage.setItem(`inkog:join-feedback:${roomId}`, reason); } catch { /* The route still restores the room ID. */ }
+    router.push(`/?joinDraft=${encodeURIComponent(roomId)}`);
+  };
+
   if (stage === "expired") {
     return (
       <TerminalState
         action="back"
-        copy="This room has wrapped up, so its messages aren't available anymore."
-        onAction={() => router.push("/")}
+        copy={errorMsg || "This room has wrapped up, so its messages aren't available anymore."}
+        onAction={() => hasEnteredRoom
+          ? router.push("/")
+          : returnToJoin(errorMsg || "This room has wrapped up. Start a fresh one to keep chatting.")}
         showPixelBubble
-        title="This room has wrapped up"
-      />
+        title={errorMsg.includes("find that room") ? "Room not found" : "This room has wrapped up"}
+      >
+        {copyRecoveryError ? <p role="alert">{copyRecoveryError}</p> : null}
+        {actions.filter(action => action.kind === "message" || action.kind === "poll").map(action => (
+          <div key={action.clientActionId} style={{ ...styles.mutedLine, maxWidth: "100%", overflowWrap: "anywhere" }}>
+            <p>Unconfirmed {action.kind}: {action.kind === "message" ? action.payload.message : action.payload.question}</p>
+            <button className="btn-ghost" type="button" onClick={() => {
+              const content = action.kind === "message"
+                ? action.payload.message ?? ""
+                : [action.payload.question, ...(action.payload.options ?? [])].join(" | ");
+              void copyTextToClipboard(content).catch(() => {
+                setCopyRecoveryError("Could not copy that text. Select it above to keep it.");
+              });
+            }}>Copy</button>
+          </div>
+        ))}
+      </TerminalState>
     );
   }
 
@@ -2076,7 +2590,7 @@ export default function RoomPage() {
       <TerminalState
         action="back"
         copy={errorMsg}
-        onAction={() => router.push("/")}
+        onAction={() => returnToJoin(errorMsg)}
         title="A little room hiccup"
       />
     );
@@ -2130,7 +2644,7 @@ export default function RoomPage() {
 
       <section
         aria-label="Room terminal transcript"
-        className={`room-chat-transcript${routeHandoffState.phase === "transitioning" ? " room-route-transcript-enter" : ""}`}
+        className="room-chat-transcript"
         onScroll={event => {
           const viewport = event.currentTarget;
           shouldFollowTranscriptRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 96;
@@ -2159,7 +2673,7 @@ export default function RoomPage() {
               if (item.type === "poll") {
                 return (
                   <TerminalPoll
-                    key={item.poll.pollId}
+                    key={item.poll.clientActionId ?? item.poll.pollId}
                     myVote={myVote(item.poll)}
                     onVote={votePoll}
                     poll={item.poll}
@@ -2185,7 +2699,7 @@ export default function RoomPage() {
               return (
                 <TerminalMessage
                   alias={alias}
-                  key={item.message.id}
+                  key={item.message.clientActionId ?? item.message.id}
                   message={item.message}
                   messageMarginBottom={messageMarginBottom}
                   peerColorMap={peerColorMap}
@@ -2207,6 +2721,40 @@ export default function RoomPage() {
         }}
         style={{ ...styles.composer, ...composerStyle, ...getRoomPartStyle(roomId, "composer") }}
       >
+        {actions.filter(action => action.state === "failed").slice(0, 1).map(action => (
+          <div className="room-recovery-strip" key={action.clientActionId} role="status" aria-live="polite">
+            <span>{action.kind === "message" ? "Message didn't send" : action.kind === "poll" ? "Poll wasn't created" : action.kind === "vote" ? "Vote didn't save" : "Room didn't close"}</span>
+            {actions.filter(item => item.state === "failed").length > 1 ? <span>· {actions.filter(item => item.state === "failed").length} actions</span> : null}
+            {action.reason ? <span className="room-recovery-reason" title={action.reason}>· {action.reason}</span> : null}
+            {action.retryable !== false ? <button type="button" onClick={() => retryAction(action)}>Retry</button> : null}
+            {(action.kind === "message" || action.kind === "poll") ? (
+              <button type="button" onClick={() => {
+                setEditingActionId(action.clientActionId);
+                setRecoveryEditError("");
+                setRecoveryEditValue(action.kind === "message" ? action.payload.message ?? "" : [action.payload.question, ...(action.payload.options ?? [])].join(" | "));
+              }}>Edit</button>
+            ) : null}
+            {(action.kind === "message" || action.kind === "poll") ? (
+              <button type="button" onClick={() => {
+                const content = action.kind === "message"
+                  ? action.payload.message ?? ""
+                  : [action.payload.question, ...(action.payload.options ?? [])].join(" | ");
+                void copyTextToClipboard(content).catch(() => setCopyRecoveryError("Could not copy. Select the text in Edit to keep it."));
+              }}>Copy</button>
+            ) : null}
+            {copyRecoveryError ? <p className="room-recovery-edit-error" role="alert">{copyRecoveryError}</p> : null}
+            {editingActionId === action.clientActionId ? (
+              <div className="room-recovery-editor">
+                <textarea aria-label={`Edit failed ${action.kind}`} value={recoveryEditValue} onChange={event => setRecoveryEditValue(event.target.value)} onKeyDown={event => event.stopPropagation()} />
+                <button type="button" disabled={duplicateTabBlocked} onClick={() => saveRecoveryEdit(action)}>Send edit</button>
+                {recoveryEditError ? <p className="room-recovery-edit-error" role="alert">{recoveryEditError}</p> : null}
+              </div>
+            ) : null}
+            {action.retryable === false && action.kind !== "message" && action.kind !== "poll" ? (
+              <button type="button" onClick={() => updateActions(current => current.filter(item => item.clientActionId !== action.clientActionId))}>Dismiss</button>
+            ) : null}
+          </div>
+        ))}
         <div
           data-route-composer="room"
           data-tab-focused={isComposerTabFocused ? "true" : undefined}
@@ -2350,7 +2898,7 @@ export default function RoomPage() {
             <button
               aria-label="Send"
               className="room-composer-send"
-              disabled={stage !== "joined" && stage !== "password"}
+              disabled={duplicateTabBlocked || (stage !== "joined" && stage !== "password")}
               onMouseEnter={() => sound.play("hover")}
               type="submit"
             >
@@ -2457,12 +3005,14 @@ function RoomGateTranscript({ lines, passwordError }: { lines: string[]; passwor
 
 function TerminalState({
   action,
+  children,
   copy,
   onAction,
   showPixelBubble = false,
   title,
 }: {
   action?: string;
+  children?: ReactNode;
   copy: string;
   onAction?: () => void;
   showPixelBubble?: boolean;
@@ -2476,6 +3026,7 @@ function TerminalState({
         {showPixelBubble ? <ExpiredRoomPixelBubble /> : null}
         <h1 style={styles.stateTitle}>{title}</h1>
         <p style={styles.mutedLine}>{copy}</p>
+        {children}
         {action && (
           <button
             className="btn-ghost"
@@ -2559,6 +3110,7 @@ function TerminalMessage({
       ) : null}
       <span
         className="room-chat-message-content"
+        data-room-send-action-id={presentation.kind === "outgoing" ? message.clientActionId : undefined}
         style={{
           marginTop: 0,
           marginRight: 0,
@@ -2687,6 +3239,11 @@ function RoomExitActions({
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<null | "leave" | "end">(null);
+  const menuPresence = useMotionPresence(isMenuOpen, 170);
+  const dialogPresence = useMotionPresence(confirmAction !== null, 170);
+  const lastConfirmActionRef = useRef<"leave" | "end">("leave");
+  if (confirmAction) lastConfirmActionRef.current = confirmAction;
+  const visibleConfirmAction = confirmAction ?? lastConfirmActionRef.current;
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const leaveRef = useRef<HTMLButtonElement | null>(null);
@@ -2731,7 +3288,7 @@ function RoomExitActions({
   }, [isMenuOpen]);
 
   useEffect(() => {
-    if (!confirmAction) return;
+    if (!confirmAction || !dialogPresence.present) return;
     stayRef.current?.focus();
     const handleDialogKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -2749,7 +3306,7 @@ function RoomExitActions({
     };
     document.addEventListener("keydown", handleDialogKeyDown);
     return () => document.removeEventListener("keydown", handleDialogKeyDown);
-  }, [confirmAction]);
+  }, [confirmAction, dialogPresence.present]);
 
   return (
     <>
@@ -2783,8 +3340,8 @@ function RoomExitActions({
             <RoomHeaderPixelIcon kind="kebab" />
           </span>
         </button>
-        {isMenuOpen ? (
-          <div aria-label="Room options" className="room-header-exit-menu" id="room-exit-menu" role="menu">
+        {menuPresence.present ? (
+          <div aria-hidden={!menuPresence.visible} aria-label="Room options" className="room-header-exit-menu" data-visible={menuPresence.visible} id="room-exit-menu" inert={!menuPresence.visible} role="menu">
             <button
               className="room-header-end-action room-header-menu-invite"
               onClick={() => {
@@ -2817,9 +3374,12 @@ function RoomExitActions({
           </div>
         ) : null}
       </div>
-      {confirmAction ? createPortal(
+      {dialogPresence.present ? createPortal(
         <div
+          aria-hidden={!dialogPresence.visible}
           className="room-leave-backdrop"
+          data-visible={dialogPresence.visible}
+          inert={!dialogPresence.visible}
           onPointerDown={event => {
             if (event.target === event.currentTarget) closeLeaveConfirm();
           }}
@@ -2833,9 +3393,9 @@ function RoomExitActions({
           >
             <span aria-hidden="true" className="room-leave-sheet-handle" />
             <p className="room-leave-eyebrow">Room action</p>
-            <h2 id="room-leave-title">{confirmAction === "end" ? "Close this room?" : "Leave this room?"}</h2>
+            <h2 id="room-leave-title">{visibleConfirmAction === "end" ? "Close this room?" : "Leave this room?"}</h2>
             <p id="room-leave-description">
-              {confirmAction === "end"
+              {visibleConfirmAction === "end"
                 ? "This closes the room for everyone and cannot be undone."
                 : "You’ll return to the home screen. This room will stay open."}
             </p>
@@ -2852,7 +3412,7 @@ function RoomExitActions({
                 ref={confirmRef}
                 type="button"
               >
-                {confirmAction === "end" ? "Close room" : "Leave room"}
+                {visibleConfirmAction === "end" ? "Close room" : "Leave room"}
               </button>
             </div>
           </div>
@@ -3011,17 +3571,50 @@ function TerminalPoll({
 }) {
   const sound = useSystemSound();
   const [hoveredOption, setHoveredOption] = useState<number | null>(null);
+  const pollRootRef = useRef<HTMLDivElement | null>(null);
+  const previousResultsRef = useRef<{ total: number; counts: number[] } | null>(null);
+  const resultAnimationsRef = useRef(new Map<HTMLElement, Animation>());
   const meterSlots = 16;
   const creator = poll.createdByAlias?.trim();
   const questionId = `room-poll-question-${poll.pollId}`;
+  const counts = poll.options.map((_, index) => votesFor(poll, index));
+
+  useLayoutEffect(() => {
+    const previous = previousResultsRef.current;
+    previousResultsRef.current = { total, counts };
+    if (!previous || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    counts.forEach((count, index) => {
+      if (count === previous.counts[index] && total === previous.total) return;
+      pollRootRef.current?.querySelectorAll<HTMLElement>(`[data-poll-result-index="${index}"]`).forEach(node => {
+        if (typeof node.animate !== "function") return;
+        const previousAnimation = resultAnimationsRef.current.get(node);
+        const currentTransform = previousAnimation ? getComputedStyle(node).transform : "translateY(3px)";
+        previousAnimation?.cancel();
+        const animation = node.animate(
+          [{ transform: currentTransform }, { transform: "translateY(0)" }],
+          { duration: 140, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+        );
+        resultAnimationsRef.current.set(node, animation);
+        animation.onfinish = () => {
+          if (resultAnimationsRef.current.get(node) === animation) resultAnimationsRef.current.delete(node);
+        };
+      });
+    });
+  });
+
+  useEffect(() => () => {
+    for (const animation of resultAnimationsRef.current.values()) animation.cancel();
+    resultAnimationsRef.current.clear();
+  }, []);
 
   return (
-    <div aria-labelledby={questionId} role="group" style={styles.pollBlock}>
+    <div aria-labelledby={questionId} className={poll.clientActionId ? "room-poll-created" : undefined} ref={pollRootRef} role="group" style={styles.pollBlock}>
       <span style={styles.pollTitle}>poll --active{creator ? ` by ${creator}` : ""}</span>
       <p id={questionId} style={styles.pollQuestion}>{poll.question}</p>
       <div style={styles.pollOptions}>
         {poll.options.map((option, index) => {
-          const count = votesFor(poll, index);
+          const count = counts[index];
           const percent = total > 0 ? count / total : 0;
           const filledSlots = total > 0 ? Math.round(percent * meterSlots) : 0;
           const meter = `${"█".repeat(filledSlots)}${"░".repeat(meterSlots - filledSlots)}`;
@@ -3032,6 +3625,7 @@ function TerminalPoll({
             <button
               aria-label={`${option}, ${count} vote${count === 1 ? "" : "s"}`}
               aria-pressed={selected}
+              className="room-poll-option"
               key={option}
               onBlur={() => setHoveredOption(null)}
               onFocus={() => setHoveredOption(index)}
@@ -3068,6 +3662,7 @@ function TerminalPoll({
               <span style={styles.pollOptionLabel}>{option}</span>
               <span
                 aria-hidden="true"
+                data-poll-result-index={index}
                 style={{
                   ...styles.pollOptionMeter,
                   color: selected ? "var(--accent)" : hovered ? "var(--text-muted)" : "var(--text-dim)",
@@ -3077,6 +3672,7 @@ function TerminalPoll({
                 {meter}
               </span>
               <span
+                data-poll-result-index={index}
                 style={{
                   ...styles.pollStat,
                   color: hovered ? "var(--text)" : "var(--text-muted)",
@@ -3426,7 +4022,7 @@ const styles: Record<string, CSSProperties> = {
   pollOptionIndex: {
     color: "var(--text-dim)",
     flexShrink: 0,
-    textAlign: "var(--room-poll-option-index-align, right)",
+    textAlign: "var(--room-poll-option-index-align, right)" as CSSProperties["textAlign"],
   },
   pollOptionMeter: {
     fontSize: "12px",
@@ -3474,7 +4070,7 @@ const styles: Record<string, CSSProperties> = {
   },
   composerInlineStatus: {
     overflow: "hidden",
-    transition: "max-height 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 140ms ease",
+    transition: "max-height var(--motion-collapse-duration) var(--motion-ease-out), margin-bottom var(--motion-collapse-duration) var(--motion-ease-out), opacity var(--motion-feedback-duration) ease-out",
   },
   slashCommandMenu: {
     display: "flex",
@@ -3543,6 +4139,7 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "12px",
     lineHeight: "18px",
     margin: 0,
+    transition: "color var(--motion-feedback-duration) ease-out",
     width: "100%",
   },
   composerPrompt: {

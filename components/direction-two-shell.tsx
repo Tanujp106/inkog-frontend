@@ -968,42 +968,8 @@ export function DirectionTwoShell() {
     setRouteActivity("join");
     setKeyboardStatus(`Joining room ${id}.`);
     appendLines(line("input", command));
-
-    try {
-      const roomRes = await fetch(`${API}/rooms/${id}`);
-      const roomData = await roomRes.json().catch(() => ({}));
-      if (!roomRes.ok) {
-        rejectInputToTerminal(roomData.message || "That room didn't open. Check the link and try again.");
-        setRouteActivity(null);
-        return;
-      }
-
-      if (roomData.hasPassword && !getStoredToken(id)) {
-        appendLines(
-          line("output", `room found: ${typeof roomData.topic === "string" ? roomData.topic : id}`),
-          line("output", "password required to join"),
-        );
-        setInputValue("");
-        setInputFeedbackMessage(null);
-        setRouteActivity(null);
-        setFlow({
-          type: "join",
-          step: "password",
-          roomId: id,
-          topic: typeof roomData.topic === "string" ? roomData.topic : "",
-        });
-        setKeyboardStatus("This room has a password. Enter it to continue.");
-        focusInput();
-        return;
-      }
-
-      sound.play("success");
-      beginRoomHandoff(id);
-      router.push(`/room/${id}`);
-    } catch {
-      setRouteActivity(null);
-      rejectInputToTerminal("The room server is taking a breather. Try again in a moment.");
-    }
+    beginRoomHandoff(id);
+    router.push(`/room/${id}`);
   };
 
   const submitJoinPassword = async (joinFlow: Extract<SessionFlow, { type: "join"; step: "password" }>, rawPassword: string) => {
@@ -1048,6 +1014,24 @@ export function DirectionTwoShell() {
       rejectInputToTerminal("The room server is taking a breather. Try again in a moment.");
     }
   };
+
+  useEffect(() => {
+    if (!hasViewportSync) return;
+    const draftId = new URLSearchParams(window.location.search).get("joinDraft");
+    if (!draftId) return;
+    const id = parseRoomId(draftId);
+    if (!id) return;
+    setFlow({ type: "join", step: "room" });
+    setInputValue(id);
+    try {
+      const feedback = sessionStorage.getItem(`inkog:join-feedback:${id}`);
+      if (feedback) setInputFeedbackMessage(feedback);
+      sessionStorage.removeItem(`inkog:join-feedback:${id}`);
+    } catch { /* The room ID is still restored. */ }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("joinDraft");
+    router.replace(`${url.pathname}${url.search}${url.hash}`);
+  }, [hasViewportSync, router]);
 
   useEffect(() => {
     if (!hasViewportSync || joinLinkHandledRef.current) return;
@@ -1098,6 +1082,24 @@ export function DirectionTwoShell() {
       };
 
       if (draft.password.trim()) body.password = draft.password.trim();
+      const attemptKey = JSON.stringify(body);
+      const storageKey = "inkog:create-attempt";
+      let attempt: { key: string; clientActionId: string; creatorToken: string } | null = null;
+      try {
+        const stored = sessionStorage.getItem(storageKey);
+        if (stored) attempt = JSON.parse(stored);
+      } catch { /* A new attempt is safe when session storage is unavailable. */ }
+      if (!attempt || attempt.key !== attemptKey) {
+        const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
+        attempt = {
+          key: attemptKey,
+          clientActionId: crypto.randomUUID(),
+          creatorToken: Array.from(tokenBytes, byte => byte.toString(16).padStart(2, "0")).join(""),
+        };
+        try { sessionStorage.setItem(storageKey, JSON.stringify(attempt)); } catch { /* Keep this attempt for the current request. */ }
+      }
+      body.clientActionId = attempt.clientActionId;
+      body.creatorToken = attempt.creatorToken;
 
       const res = await fetch(`${API}/rooms`, {
         method: "POST",
@@ -1108,22 +1110,25 @@ export function DirectionTwoShell() {
 
       if (!res.ok) {
         setRouteActivity(null);
+        setFlow({ type: "create", step: "confirm", draft });
         rejectInputToTerminal(data.message || "That room didn't come together. Try again in a moment.");
         return;
       }
 
+      try { sessionStorage.removeItem("inkog:create-attempt"); } catch { /* Storage is optional. */ }
       setStoredToken(data.id, data.creatorToken);
       setStoredRoomPassword(data.id, draft.password);
       appendLines(line("output", `room created: ${data.id}`));
       sound.play("success");
       beginRoomHandoff(data.id);
       router.push(`/room/${data.id}`);
+      setFlow(null);
     } catch {
       setRouteActivity(null);
+      setFlow({ type: "create", step: "confirm", draft });
       rejectInputToTerminal("The room server is taking a breather. Try again in a moment.");
     } finally {
       setCreating(false);
-      setFlow(null);
     }
   };
 
@@ -2976,7 +2981,7 @@ function TerminalLine({ kind, text, pending }: TerminalLine) {
           : "text-[var(--muted-foreground)]";
 
   return (
-    <p className={`break-words text-[14px] leading-[24px] ${tone} ${pending ? "direction-two-route-status" : ""}`}>
+    <p className={`direction-two-terminal-line break-words text-[14px] leading-[24px] ${tone} ${pending ? "direction-two-route-status" : ""}`}>
       <span aria-hidden="true">{prefix} </span>
       {pending ? <span data-status-text={text}>{text}</span> : text}
     </p>

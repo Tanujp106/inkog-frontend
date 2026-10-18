@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 
-type Origin = { left: number; top: number };
+type Origin = { left: number; top: number; viewportWidth: number; viewportHeight: number };
 type PendingHandoff = { actionId: string; origin: Origin | null };
 type ActiveHandoff = { animation: Animation; ghost: HTMLElement; target: HTMLElement };
 
@@ -28,7 +28,12 @@ export function useRoomSendHandoff(
     const bounds = source?.getBoundingClientRect();
     pendingRef.current.push({
       actionId,
-      origin: bounds ? { left: bounds.left + 4, top: bounds.top + 2 } : null,
+      origin: bounds ? {
+        left: bounds.left + 4,
+        top: bounds.top + 2,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      } : null,
     });
     suppressSmoothScrollRef.current = true;
   }, []);
@@ -59,7 +64,13 @@ export function useRoomSendHandoff(
       const visible = destination.bottom > viewportBounds.top && destination.top < viewportBounds.bottom;
       if (!visible || reducedMotion || typeof target.animate !== "function") continue;
 
-      if (!origin) {
+      const lineHeight = Number.parseFloat(getComputedStyle(target).lineHeight) || 24;
+      const wrapped = destination.height > lineHeight * 2.5;
+      const viewportMoved = origin && (
+        Math.abs(origin.viewportWidth - window.innerWidth) > 16 ||
+        Math.abs(origin.viewportHeight - window.innerHeight) > 16
+      );
+      if (!origin || wrapped || viewportMoved) {
         target.animate(
           [{ opacity: 0.75, transform: "translateY(8px)" }, { opacity: 1, transform: "translateY(0)" }],
           { duration, easing: HANDOFF_EASING },
@@ -74,7 +85,10 @@ export function useRoomSendHandoff(
       Object.assign(ghost.style, {
         color: computed.color,
         display: "block",
-        font: computed.font,
+        fontFamily: computed.fontFamily,
+        fontSize: computed.fontSize,
+        fontStyle: computed.fontStyle,
+        fontWeight: computed.fontWeight,
         letterSpacing: computed.letterSpacing,
         lineHeight: computed.lineHeight,
         overflowWrap: computed.overflowWrap,
