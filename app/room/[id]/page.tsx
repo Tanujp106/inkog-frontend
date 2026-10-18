@@ -808,6 +808,67 @@ function createWorstCaseRoomScenario() {
   };
 }
 
+function createMusicTasteRoomScenario() {
+  const now = Date.now();
+  const createdAt = (secondsAgo: number) => new Date(now - secondsAgo * 1_000).toISOString();
+  const aliases = { initiator: "Nia", voter: "Owen", pollCreator: "Milo" };
+  const makeMessage = (id: string, alias: string, content: string, secondsAgo: number): Message => ({
+    id,
+    alias,
+    content,
+    createdAt: createdAt(secondsAgo),
+  });
+  const openingMessages: Array<[string, string]> = [
+    [aliases.initiator, "serious question"],
+    [aliases.voter, "go on"],
+    [aliases.pollCreator, "who has the worst music taste in this group"],
+    [aliases.initiator, "we all know the answer"],
+    [aliases.voter, "say it then"],
+    [aliases.pollCreator, "nah let's make a poll"],
+    [aliases.initiator, "fair enough"],
+  ];
+  const closingMessages: Array<[string, string]> = [
+    [aliases.voter, "there's literally 3 of us"],
+    [aliases.pollCreator, "unanimous decision"],
+    [aliases.voter, "wait"],
+    [aliases.voter, "I VOTED FOR MYSELF TOO"],
+    [aliases.initiator, "bro wanted to be included"],
+    [aliases.pollCreator, "at least you have self awareness"],
+    [aliases.voter, "i thought i could change my vote"],
+    [aliases.initiator, "democracy bro"],
+    [aliases.voter, "fine, i'll make a playlist to change your minds"],
+    [aliases.pollCreator, "that sounds like evidence"],
+    [aliases.voter, "first track is queued"],
+    [aliases.initiator, "we voted before it played"],
+    [aliases.pollCreator, "unanimous skip"],
+    [aliases.voter, "democracy is flawed"],
+    [aliases.initiator, "only when it hears your playlist"],
+  ];
+
+  return {
+    topic: "Music taste poll",
+    alias: aliases.voter,
+    roomUsers: [aliases.initiator, aliases.voter, aliases.pollCreator],
+    secondsLeft: 3_599,
+    totalSeconds: 3_600,
+    messages: [
+      ...openingMessages.map(([alias, content], index) =>
+        makeMessage(`music-message-${String(index + 1).padStart(2, "0")}`, alias, content, 270 - index * 10)),
+      ...closingMessages.map(([alias, content], index) =>
+        makeMessage(`music-message-${String(index + openingMessages.length + 1).padStart(2, "0")}`, alias, content, 190 - index * 10)),
+    ],
+    polls: [{
+      pollId: "music-taste-poll",
+      question: "Who has the worst music taste?",
+      options: [aliases.initiator, aliases.voter, aliases.pollCreator],
+      votesByMember: [aliases.initiator, aliases.voter, aliases.pollCreator].map(alias => ({ alias, optionIndex: 1 })),
+      createdAt: createdAt(200),
+      createdByAlias: aliases.pollCreator,
+    }],
+    events: [] satisfies TerminalEvent[],
+  };
+}
+
 function getStoredToken(roomId: string) {
   if (typeof window === "undefined" || typeof window.localStorage?.getItem !== "function") return undefined;
   return window.localStorage.getItem(`token_${roomId}`) || undefined;
@@ -889,7 +950,7 @@ export default function RoomPage() {
   const [recoveryEditError, setRecoveryEditError] = useState("");
   const [duplicateTabBlocked, setDuplicateTabBlocked] = useState(false);
   const [terminalEvents, setTerminalEvents] = useState<TerminalEvent[]>([]);
-  const [isWorstCaseScenario, setIsWorstCaseScenario] = useState(false);
+  const [isScenarioPreview, setIsScenarioPreview] = useState(false);
   const [composerValue, setComposerValue] = useState("");
   const [cursorVisible, setCursorVisible] = useState(true);
   const [composerStatus, setComposerStatus] = useState<ComposerStatus | null>(null);
@@ -1663,14 +1724,16 @@ export default function RoomPage() {
 
     const run = async () => {
       const requestedScenario = new URLSearchParams(window.location.search).get("uiScenario");
-      if (requestedScenario === "worst-case") {
+      if (requestedScenario === "worst-case" || requestedScenario === "music-poll") {
         if (process.env.NODE_ENV === "production") {
           setStage("expired");
           return;
         }
 
-        const scenario = createWorstCaseRoomScenario();
-        setIsWorstCaseScenario(true);
+        const scenario = requestedScenario === "music-poll"
+          ? createMusicTasteRoomScenario()
+          : createWorstCaseRoomScenario();
+        setIsScenarioPreview(true);
         setTopic(scenario.topic);
         setAlias(scenario.alias);
         setRoomUsers(scenario.roomUsers);
@@ -1826,7 +1889,7 @@ export default function RoomPage() {
       setComposerStatusMessage("Rejoin this room before creating a poll.", "error");
       return false;
     }
-    if (isWorstCaseScenario) {
+    if (isScenarioPreview) {
       setPolls(current => [...current, {
         pollId: makeId(), question, options, votesByMember: [],
         createdAt: new Date().toISOString(), createdByAlias: alias,
@@ -1847,7 +1910,7 @@ export default function RoomPage() {
 
   const sendChatMessage = (message: string) => {
     if (!message.trim() || duplicateTabBlocked || stage !== "joined") return false;
-    if (isWorstCaseScenario) {
+    if (isScenarioPreview) {
       setMessages(current => [...current, {
         id: makeId(), alias, content: message, createdAt: new Date().toISOString(),
       }]);
@@ -1869,7 +1932,7 @@ export default function RoomPage() {
   const closeRoom = () => {
     if (!isCreator || duplicateTabBlocked || stage !== "joined") return;
     sound.play("close");
-    if (!isWorstCaseScenario) {
+    if (!isScenarioPreview) {
       const action: RoomAction = { clientActionId: makeId(), kind: "close", createdAt: new Date().toISOString(), payload: {}, state: "unresolved" };
       updateActions(current => [...current, action]);
       sendAction(action);
@@ -2257,7 +2320,7 @@ export default function RoomPage() {
     setPolls(current => current.map(item => item.pollId === pollId ? {
       ...item, votesByMember: [...item.votesByMember.filter(vote => vote.alias !== alias), { alias, optionIndex }],
     } : item));
-    if (isWorstCaseScenario) return;
+    if (isScenarioPreview) return;
     const action: RoomAction = {
       clientActionId: makeId(), kind: "vote", createdAt: new Date().toISOString(),
       payload: { pollId, optionIndex }, state: "unresolved",
